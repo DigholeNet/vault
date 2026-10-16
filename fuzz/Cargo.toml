@@ -1,0 +1,41 @@
+[package]
+name = "vault-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.vault-core]
+path = "../core"
+features = ["client"]
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_handshake"
+path = "fuzz_targets/fuzz_handshake.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_decrypt"
+path = "fuzz_targets/fuzz_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_tun_parse"
+path = "fuzz_targets/fuzz_tun_parse.rs"
+test = false
+doc = false
+bench = false

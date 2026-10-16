@@ -1,0 +1,60 @@
+supernode(1)
+============
+
+== Name
+supernode - Vault VPN server
+
+== Synopsis
+*supernode* --config <FILE> [OPTIONS]
+
+*supernode* -s quit
+
+== Description
+supernode is the Vault VPN server. It accepts encrypted tunnels from
+edge clients over UDP (SPAKE2 password-authenticated handshake, X25519 ECDH
+key exchange, AEAD encryption), assigns each client an address from the configured pools,
+relays traffic between clients and the public internet (NAT), and answers
+heartbeat pings.
+
+== Options
+*--config* <FILE>::
+    Read configuration options from the specified TOML file.
+
+*--log-dir* <DIR>::
+    Print logs also to files in this directory.
+
+*--daemon*::
+    Run the process in the background.
+
+*--pid-file* <FILE>::
+    Store the process id in this file when daemonizing.
+
+*--user* <USER>::
+    Run as other user.
+
+*--group* <GROUP>::
+    Run as other group.
+
+*-s* <S>::
+    Send a control signal to a running instance. Only *quit* is supported.
+
+*-v, --verbose*::
+    Print debug information.
+
+*-q, --quiet*::
+    Only print errors and warnings.
+
+*--version*::
+    Print the version and exit.
+
+*-h, --help*::
+    Print help information.
+
+== Files
+*/etc/vault/supernode.toml*::
+    Configuration file. See *supernode.toml.example* for the available
+    options (password, port, iface, ipv4/ipv6 pools).
+
+*/run/supernode.socket*::
+    Unix datagram socket used to deliver the quit signal to a running
+    instance.

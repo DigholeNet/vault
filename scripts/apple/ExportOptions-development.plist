@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Development-signed export: installs only on devices registered in
+         the provisioning profile. For distribution, use the adhoc /
+         developer-id variants. teamID is injected by the packaging script
+         when TEAM_ID is set. -->
+	<key>method</key>
+	<string>debugging</string>
+</dict>
+</plist>

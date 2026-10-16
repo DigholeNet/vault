@@ -1,0 +1,46 @@
+[package]
+name = "vault-bridge"
+description = "UniFFI bridge to vault-core's ClientSession, shared by the Android and Apple clients"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+# staticlib: linked into the Apple XCFramework slices; cdylib: host library
+# for UniFFI bindgen and Android jniLibs; rlib: for Rust-side tests.
+crate-type = ["staticlib", "cdylib", "rlib"]
+name = "vault_bridge"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+default = []
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+vault-core = { path = "../../core", features = ["client"] }
+uniffi = "0.28"
+thiserror = "1"
+log.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+libc = "0.2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.14"
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+oslog = "0.2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "sync"] }
+vault-core = { path = "../../core", features = ["test"] }
+
+[build-dependencies]
+uniffi = { version = "0.28", features = ["build"] }

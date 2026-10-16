@@ -1,0 +1,68 @@
+name: Apple release
+
+# PR/push checks for the Apple clients: SwiftLint, VaultCore unit tests and
+# an unsigned iOS Simulator build. Signed release packaging (iOS IPA +
+# notarized macOS zip) runs in release.yml — see docs/releasing.md for the
+# required signing secrets.
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['clients/apple/**', 'clients/bridge/**', 'core/**']
+  pull_request:
+    paths: ['clients/apple/**', 'clients/bridge/**', 'core/**']
+  workflow_dispatch:
+
+jobs:
+  swiftlint:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: clients/apple
+    steps:
+      - uses: actions/checkout@v6
+
+      # Not preinstalled on recent macOS runner images; install via Homebrew.
+      # Fails on errors; warnings (e.g. file/type length) are reported but allowed.
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run SwiftLint
+        run: swiftlint lint
+
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: clients/apple
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios, x86_64-apple-darwin
+
+      - name: Cache cargo registry and target dir
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            clients/bridge/target
+          key: ${{ runner.os }}-cargo-apple-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-apple-
+
+      - name: Install protoc (needed by vault-core's prost build script)
+        run: brew install protobuf
+
+      - name: Build XCFramework and Swift bindings
+        run: VaultCore/Scripts/build-xcframework.sh
+
+      - name: Run VaultCore unit tests
+        run: cd VaultCore && swift test
+
+      - name: Build app for iOS Simulator (unsigned)
+        run: |
+          xcodebuild -scheme Vault \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            build CODE_SIGNING_ALLOWED=NO

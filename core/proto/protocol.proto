@@ -1,0 +1,74 @@
+syntax = "proto3";
+package protocol;
+
+enum AlgorithmType {
+    AES_128_GCM = 0;
+    AES_256_GCM = 1;
+    CHACHA20_POLY1305 = 2;
+}
+
+message Algorithm{
+    AlgorithmType algorithm_type = 1;
+    float speed = 2;
+}
+
+message HandshakeRequest {
+    bytes id = 1;
+    // SPAKE2 message A: password-authenticated key exchange. A passive
+    // observer cannot use it to verify password guesses offline; an active
+    // attacker gets exactly one guess per handshake.
+    bytes pake_message = 2;
+    bytes public_key_data = 3;
+    repeated Algorithm algorithms = 4;
+    // Unix seconds when the request was built; checked against the
+    // receiver's clock (and per-id monotonicity) so captured handshakes
+    // cannot be replayed.
+    int64 timestamp = 5;
+    uint32 version = 6;
+    // Client-reported device name; empty on old clients.
+    string device_name = 7;
+    // Client platform: android/ios/macos/linux; empty on old clients.
+    string platform = 8;
+}
+
+message HandshakeResponse {
+    bytes id = 1;
+    // SPAKE2 message B.
+    bytes pake_message = 2;
+    bytes public_key_data = 3;
+    Algorithm algorithm = 4;
+    string ipv4 = 5;
+    string ipv4_mask = 6;
+    string ipv6 = 7;
+    int32 ipv6_prefixlen = 8;
+    // Unix seconds when the response was built (replay-checked).
+    int64 timestamp = 9;
+    // Echo of the request's ephemeral ECDH public key, binding this response
+    // to one specific handshake attempt.
+    bytes request_public_key = 10;
+    // HMAC-SHA256 over this response (with this field empty), keyed by the
+    // PAKE-derived confirmation key: proves the server holds the password
+    // before the client sends any traffic.
+    bytes confirm_mac = 11;
+}
+
+message HandshakeMessage {
+    oneof data {
+        HandshakeRequest request = 1;
+        HandshakeResponse response = 2;
+    };
+}
+
+message Ping {
+    bytes id = 1;
+    int64 ts = 2;
+}
+
+message Pong {
+    bytes id = 1;
+    int64 ts = 2;
+}
+
+message Close {
+    bytes id = 1;
+}

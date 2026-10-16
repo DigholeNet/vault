@@ -1,0 +1,81 @@
+name: Rust checks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+# rustsec/audit-check creates check runs with the GITHUB_TOKEN.
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc (needed by vault-core's prost build script)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Cache cargo registry and target dir
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      # vaultcore's oslog dep is Apple-only; check the Linux crates explicitly.
+      - name: Check
+        run: cargo check --locked -p vault-core -p edge -p supernode --all-targets
+
+      - name: Clippy
+        run: cargo clippy --locked -p vault-core -p edge -p supernode --all-targets -- -D warnings
+
+      - name: Test
+        run: |
+          cargo test --locked -p vault-core --features test
+          cargo test --locked -p edge
+          cargo test --locked -p supernode
+
+      - name: Security audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc (needed by vault-core's prost build script)
+        run: brew install protobuf
+
+      - name: Cache cargo registry and target dir
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # Default members = crates that build on macOS (core + the shared UniFFI bridge crate).
+      - name: Check
+        run: cargo check --locked --all-targets
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked

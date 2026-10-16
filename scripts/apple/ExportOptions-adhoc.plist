@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Ad Hoc export: signed with the Apple Distribution certificate.
+         Installs only on devices registered in the Ad Hoc provisioning
+         profile, but without get-task-allow (a real distribution signature).
+         teamID is injected by scripts/package-apple.sh when TEAM_ID is set;
+         otherwise xcodebuild infers the team from the archive. -->
+	<key>method</key>
+	<string>release-testing</string>
+</dict>
+</plist>

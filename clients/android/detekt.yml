@@ -1,0 +1,277 @@
+config:
+  validation: true
+  warningsAsErrors: false
+
+complexity:
+  active: true
+  ComplexCondition:
+    active: true
+    allowedConditions: 5
+  ComplexInterface:
+    active: false
+  CyclomaticComplexMethod:
+    active: true
+    allowedComplexity: 25
+  LargeClass:
+    active: true
+    allowedLines: 900
+  LongMethod:
+    active: true
+    allowedLines: 100
+  LongParameterList:
+    active: true
+    allowedFunctionParameters: 8
+    allowedConstructorParameters: 10
+  NestedBlockDepth:
+    active: true
+    allowedDepth: 5
+  TooManyFunctions:
+    active: true
+    allowedFunctionsPerFile: 40
+    allowedFunctionsPerClass: 40
+    allowedFunctionsPerInterface: 20
+    allowedFunctionsPerObject: 20
+
+coroutines:
+  active: true
+  GlobalCoroutineUsage:
+    active: true
+  InjectDispatcher:
+    active: true
+  RedundantSuspendModifier:
+    active: true
+  SleepInsteadOfDelay:
+    active: true
+  SuspendFunWithCoroutineScopeReceiver:
+    active: true
+  SuspendFunWithFlowReturnType:
+    active: true
+
+empty-blocks:
+  active: true
+
+exceptions:
+  active: true
+  InstanceOfCheckForException:
+    active: true
+  NotImplementedDeclaration:
+    active: true
+  ObjectExtendsThrowable:
+    active: true
+  PrintStackTrace:
+    active: true
+  RethrowCaughtException:
+    active: true
+  ReturnFromFinally:
+    active: true
+  SwallowedException:
+    active: true
+  ThrowingExceptionFromFinally:
+    active: true
+  ThrowingExceptionInMain:
+    active: true
+  ThrowingExceptionsWithoutMessageOrCause:
+    active: true
+  TooGenericExceptionCaught:
+    active: true
+    exceptionNames:
+      - ArrayIndexOutOfBoundsException
+      - Error
+      - Exception
+      - IllegalMonitorStateException
+      - NullPointerException
+      - IndexOutOfBoundsException
+      - RuntimeException
+      - Throwable
+    allowedExceptionNameRegex: "^(_.*|(ignore|expected).*)$"
+  TooGenericExceptionThrown:
+    active: true
+    exceptionNames:
+      - Error
+      - Exception
+      - Throwable
+      - RuntimeException
+
+naming:
+  active: true
+  BooleanPropertyNaming:
+    active: true
+    allowedPattern: "^(is|has|are)"
+  FunctionNameMaxLength:
+    active: true
+    maximumFunctionNameLength: 50
+  FunctionNameMinLength:
+    active: true
+    minimumFunctionNameLength: 2
+  NonBooleanPropertyPrefixedWithIs:
+    active: true
+  PackageNaming:
+    active: true
+    packagePattern: "^[a-z]+(\\.[a-z][A-Za-z0-9]*)*$"
+
+performance:
+  active: true
+  CouldBeSequence:
+    active: true
+  ForEachOnRange:
+    active: true
+  UnnecessaryPartOfBinaryExpression:
+    active: true
+  UnnecessaryTemporaryInstantiation:
+    active: true
+
+potential-bugs:
+  active: true
+  AvoidReferentialEquality:
+    active: true
+  Deprecation:
+    active: true
+  DontDowncastCollectionTypes:
+    active: true
+  DoubleMutabilityForCollection:
+    active: true
+  ElseCaseInsteadOfExhaustiveWhen:
+    active: true
+  EqualsAlwaysReturnsTrueOrFalse:
+    active: true
+  EqualsWithHashCodeExist:
+    active: true
+  ExplicitGarbageCollectionCall:
+    active: true
+  HasPlatformType:
+    active: true
+  IgnoredReturnValue:
+    active: true
+  ImplicitDefaultLocale:
+    active: true
+  ImplicitUnitReturnType:
+    active: true
+  InvalidRange:
+    active: true
+  IteratorHasNextCallsNextMethod:
+    active: true
+  IteratorNotThrowingNoSuchElementException:
+    active: true
+  LateinitUsage:
+    active: false
+  MissingPackageDeclaration:
+    active: true
+  NullCheckOnMutableProperty:
+    active: true
+  NullableToStringCall:
+    active: true
+  UnconditionalJumpStatementInLoop:
+    active: true
+  UnnecessaryNotNullOperator:
+    active: true
+  UnnecessarySafeCall:
+    active: true
+  UnsafeCallOnNullableType:
+    active: true
+  UnsafeCast:
+    active: true
+  UselessPostfixExpression:
+    active: true
+  WrongEqualsTypeParameter:
+    active: true
+
+style:
+  active: true
+  BracesOnIfStatements:
+    active: false
+  BracesOnWhenStatements:
+    active: false
+  CanBeNonNullable:
+    active: true
+  DataClassShouldBeImmutable:
+    active: true
+  DestructuringDeclarationWithTooManyEntries:
+    active: true
+    maxDestructuringEntries: 4
+  EqualsNullCall:
+    active: true
+  ForbiddenComment:
+    active: true
+    comments:
+      - reason: "Forbidden FIXME todo marker in comment, please fix the problem."
+        value: "FIXME:"
+      - reason: "Forbidden STOPSHIP todo marker in comment, please address the problem before shipping the code."
+        value: "STOPSHIP:"
+      - reason: "Forbidden TODO todo marker in comment, please do the changes."
+        value: "TODO:"
+  ForbiddenVoid:
+    active: true
+  MagicNumber:
+    active: false
+  MandatoryBracesLoops:
+    active: false
+  MaxLineLength:
+    active: true
+    maxLineLength: 140
+  NoTabs:
+    active: true
+  NullableBooleanCheck:
+    active: true
+  RedundantExplicitType:
+    active: true
+  RedundantHigherOrderMapUsage:
+    active: true
+  RedundantVisibilityModifier:
+    active: true
+  ReturnCount:
+    active: true
+    max: 4
+  SpacingAfterPackageAndImports:
+    active: true
+  ThrowsCount:
+    active: true
+    max: 4
+  TrimMultilineRawString:
+    active: true
+  UnderscoresInNumericLiterals:
+    active: false
+  UnnecessaryApply:
+    active: true
+  UnnecessaryFilter:
+    active: true
+  UnnecessaryInnerClass:
+    active: true
+  UnnecessaryLet:
+    active: true
+  UnusedImport:
+    active: true
+  UnusedParameter:
+    active: false
+  UnusedPrivateClass:
+    active: true
+  UnusedPrivateFunction:
+    active: false
+  UnusedPrivateProperty:
+    active: false
+  UseAnyOrNoneInsteadOfFind:
+    active: true
+  UseArrayLiteralsInAnnotations:
+    active: true
+  UseCheckNotNull:
+    active: true
+  UseCheckOrError:
+    active: true
+  UseEmptyCounterpart:
+    active: true
+  UseIfEmptyOrIfBlank:
+    active: true
+  UseIsNullOrEmpty:
+    active: true
+  UseOrEmpty:
+    active: true
+  UseRequire:
+    active: true
+  UseRequireNotNull:
+    active: true
+  VarCouldBeVal:
+    active: true
+  WildcardImport:
+    active: true
+    excludeImports:
+      - "java.util.*"
+      - "kotlinx.coroutines.*"

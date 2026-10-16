@@ -1,0 +1,7 @@
+[bindings.kotlin]
+package_name = "net.dighole.vaultcore.uniffi"
+
+[bindings.swift]
+# Name of the C FFI module consumed by the generated Swift bindings; must
+# match the binaryTarget name in clients/apple/VaultCore/Package.swift.
+ffi_module_name = "VaultCoreFFI"

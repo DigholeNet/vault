@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">Vault</string>
+
+    <!-- Navigation -->
+    <string name="nav_status">Status</string>
+    <string name="nav_configure">Configure</string>
+    <string name="nav_about">About</string>
+
+    <!-- Status Fragment -->
+    <string name="status_off">Off</string>
+    <string name="status_on">On</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_tap_to_connect">Tap to connect</string>
+    <string name="status_tap_to_disconnect">Tap to disconnect</string>
+    <string name="status_please_wait">Please wait…</string>
+    <string name="status_configure_first">Please configure server first</string>
+    <string name="status_error_prefix">Error: %1$s</string>
+    <string name="status_error_starting">Error starting VPN: %1$s</string>
+    <string name="toggle_vpn_description">Toggle VPN</string>
+    <string name="ip_format">IPv4: %1$s</string>
+    <string name="ipv6_format">IPv6: %1$s</string>
+    <string name="traffic_sent">↑ Sent: %1$s (%2$s/s)</string>
+    <string name="traffic_received">↓ Received: %1$s (%2$s/s)</string>
+
+    <!-- Configure Fragment -->
+    <string name="configure_title">Configuration</string>
+    <string name="cancel_description">Cancel</string>
+    <string name="save_description">Save</string>
+    <string name="server_host">Server Host</string>
+    <string name="server_host_hint">e.g., 192.168.1.1</string>
+    <string name="port">Port</string>
+    <string name="port_default">9527</string>
+    <string name="password">Password</string>
+    <string name="password_hint">Enter password</string>
+    <string name="dns_servers">DNS Servers (comma separated)</string>
+    <string name="dns_default">1.1.1.1,8.8.8.8</string>
+    <string name="error_host_required">Host is required</string>
+    <string name="error_port_required">Port is required</string>
+    <string name="error_port_invalid">Invalid port number</string>
+    <string name="error_password_required">Password is required</string>
+    <string name="config_saved">Configuration saved</string>
+    <string name="changes_cancelled">Changes cancelled</string>
+
+    <!-- About Fragment -->
+    <string name="app_icon_description">App Icon</string>
+    <string name="version_format">Version %1$s (%2$s)</string>
+    <string name="version_unknown">Version unknown</string>
+    <string name="website">https://github.com/DigholeNet/vault</string>
+    <string name="about_description">A secure VPN client for cross-regional connectivity.</string>
+    <string name="copyright">© 2026 Dighole Team</string>
+    <string name="no_browser">No browser app found</string>
+
+    <!-- VPN Service -->
+    <string name="vpn_service_name">Vault VPN</string>
+    <string name="notification_channel_name">Vault VPN</string>
+    <string name="notification_channel_description">VPN connection status</string>
+    <string name="notification_connecting">Connecting…</string>
+    <string name="notification_connected">Connected - %1$s</string>
+    <string name="notification_disconnected">Disconnected</string>
+
+    <!-- Language -->
+    <string name="language">Language</string>
+    <string name="language_system">System Default</string>
+    <string name="language_english">English</string>
+    <string name="language_chinese">中文 (简体)</string>
+    <string name="language_chinese_tw">中文 (繁體)</string>
+    <string name="language_japanese">日本語</string>
+    <string name="language_spanish">Español</string>
+    <string name="language_changed">Language changed to %1$s</string>
+</resources>

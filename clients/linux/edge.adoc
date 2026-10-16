@@ -1,0 +1,60 @@
+edge(1)
+=======
+
+== Name
+edge - Vault VPN linux client
+
+== Synopsis
+*edge* --config <FILE> [OPTIONS]
+
+*edge* -s quit
+
+== Description
+edge is a Linux VPN client compatible with the Vault VPN protocol.
+It connects to a super node server over an encrypted UDP tunnel (X25519 ECDH
+key exchange, AEAD encryption), takes over the system default route via a TUN
+device and keeps the connection alive with periodic heartbeats and automatic
+reconnect with exponential backoff.
+
+== Options
+*--config* <FILE>::
+    Read configuration options from the specified TOML file.
+
+*--log-dir* <DIR>::
+    Print logs also to files in this directory.
+
+*--daemon*::
+    Run the process in the background.
+
+*--pid-file* <FILE>::
+    Store the process id in this file when daemonizing.
+
+*--user* <USER>::
+    Run as other user.
+
+*--group* <GROUP>::
+    Run as other group.
+
+*-s* <S>::
+    Send a control signal to a running instance. Only *quit* is supported.
+
+*-v, --verbose*::
+    Print debug information.
+
+*-q, --quiet*::
+    Only print errors and warnings.
+
+*--version*::
+    Print the version and exit.
+
+*-h, --help*::
+    Print help information.
+
+== Files
+*/etc/vault/edge.toml*::
+    Configuration file. See *edge.toml.example* for the available options
+    (password, host, port, iface, dns, storage).
+
+*/run/edge.socket*::
+    Unix datagram socket used to deliver the quit signal to a running
+    instance.

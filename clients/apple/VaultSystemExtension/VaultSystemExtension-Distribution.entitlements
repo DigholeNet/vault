@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- For Release (Developer ID distribution): the Developer ID profile
+	     only grants the -systemextension variant. Pairs with the Release
+	     configuration's CODE_SIGN_IDENTITY = "Developer ID Application". -->
+	<key>com.apple.developer.networking.networkextension</key>
+	<array>
+		<string>packet-tunnel-provider-systemextension</string>
+	</array>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Sandboxed sysex: required for DNS resolution via mDNSResponder
+	     and for the tunnel's outbound/inbound UDP sockets. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)$(APP_GROUP_ID)</string>
+	</array>
+</dict>
+</plist>

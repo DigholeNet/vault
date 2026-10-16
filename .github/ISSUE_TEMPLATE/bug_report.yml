@@ -1,0 +1,41 @@
+name: Bug Report
+description: Report a bug in Vault
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Android
+        - iOS
+        - macOS
+        - Linux client (edge)
+        - Supernode
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: App version or deb package version
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact passwords, server addresses and public IPs before posting.
+      render: text
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce

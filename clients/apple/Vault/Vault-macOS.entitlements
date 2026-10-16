@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Debug (development signing) entitlements for the macOS app: the
+	     development profile grants the Network Extension entitlement in its
+	     non-suffixed form. Developer ID distribution uses
+	     Vault-macOS-Distribution.entitlements.
+	     The app group must use the team-prefixed form (matching
+	     VaultSystemExtension so both share the same container);
+	     system-extension.install lets the app install the system
+	     extension. -->
+	<key>com.apple.developer.networking.networkextension</key>
+	<array>
+		<string>packet-tunnel-provider</string>
+	</array>
+	<key>com.apple.developer.networking.vpn.api</key>
+	<array>
+		<string>allow-vpn</string>
+	</array>
+	<key>com.apple.developer.system-extension.install</key>
+	<true/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)$(APP_GROUP_ID)</string>
+	</array>
+</dict>
+</plist>

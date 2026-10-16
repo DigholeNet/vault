@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">Vault</string>
+
+    <!-- Navigation -->
+    <string name="nav_status">状态</string>
+    <string name="nav_configure">配置</string>
+    <string name="nav_about">关于</string>
+
+    <!-- Status Fragment -->
+    <string name="status_off">关闭</string>
+    <string name="status_on">开启</string>
+    <string name="status_connecting">连接中…</string>
+    <string name="status_tap_to_connect">点击连接</string>
+    <string name="status_tap_to_disconnect">点击断开</string>
+    <string name="status_please_wait">请稍候…</string>
+    <string name="status_configure_first">请先配置服务器</string>
+    <string name="status_error_prefix">错误：%1$s</string>
+    <string name="status_error_starting">启动 VPN 出错：%1$s</string>
+    <string name="toggle_vpn_description">切换 VPN</string>
+    <string name="ip_format">IPv4：%1$s</string>
+    <string name="ipv6_format">IPv6：%1$s</string>
+    <string name="traffic_sent">↑ 发送：%1$s (%2$s/s)</string>
+    <string name="traffic_received">↓ 接收：%1$s (%2$s/s)</string>
+
+    <!-- Configure Fragment -->
+    <string name="configure_title">配置</string>
+    <string name="cancel_description">取消</string>
+    <string name="save_description">保存</string>
+    <string name="server_host">服务器地址</string>
+    <string name="server_host_hint">例如：192.168.1.1</string>
+    <string name="port">端口</string>
+    <string name="port_default">9527</string>
+    <string name="password">密码</string>
+    <string name="password_hint">输入密码</string>
+    <string name="dns_servers">DNS 服务器（逗号分隔）</string>
+    <string name="dns_default">1.1.1.1,8.8.8.8</string>
+    <string name="error_host_required">服务器地址不能为空</string>
+    <string name="error_port_required">端口不能为空</string>
+    <string name="error_port_invalid">端口号无效</string>
+    <string name="error_password_required">密码不能为空</string>
+    <string name="config_saved">配置已保存</string>
+    <string name="changes_cancelled">已取消更改</string>
+
+    <!-- About Fragment -->
+    <string name="app_icon_description">应用图标</string>
+    <string name="version_format">版本 %1$s (%2$s)</string>
+    <string name="version_unknown">版本未知</string>
+    <string name="website">https://github.com/DigholeNet/vault</string>
+    <string name="about_description">一款用于跨区域连接的安全 VPN 客户端。</string>
+    <string name="copyright">© 2026 Dighole Team</string>
+    <string name="no_browser">未找到浏览器应用</string>
+
+    <!-- VPN Service -->
+    <string name="vpn_service_name">Vault VPN</string>
+    <string name="notification_channel_name">Vault VPN</string>
+    <string name="notification_channel_description">VPN 连接状态</string>
+    <string name="notification_connecting">连接中…</string>
+    <string name="notification_connected">已连接 - %1$s</string>
+    <string name="notification_disconnected">已断开</string>
+
+    <!-- Language -->
+    <string name="language">语言</string>
+    <string name="language_system">跟随系统</string>
+    <string name="language_english">English</string>
+    <string name="language_chinese">中文 (简体)</string>
+    <string name="language_chinese_tw">中文 (繁體)</string>
+    <string name="language_japanese">日本語</string>
+    <string name="language_spanish">Español</string>
+    <string name="language_changed">语言已切换为 %1$s</string>
+</resources>
