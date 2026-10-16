@@ -153,8 +153,12 @@ fn add_vpn_default_route(
     ipv6: Option<&Ipv6>,
 ) -> anyhow::Result<()> {
     // Idempotent: on_ip_assigned fires on every reconnect.
-    if ipv4.is_some() {
-        info!("Adding VPN ipv4 default route via {}", interface_name);
+    if let Some(ipv4) = ipv4 {
+        let source = ipv4.ip.to_string();
+        info!(
+            "Adding VPN ipv4 default route via {} with source {}",
+            interface_name, source
+        );
         if util::run_command(
             "ip",
             &[
@@ -165,13 +169,19 @@ fn add_vpn_default_route(
                 interface_name,
                 "metric",
                 "1",
+                "src",
+                &source,
             ],
         ) {
             info!("VPN ipv4 default route added successfully with metric 1");
         }
     }
-    if ipv6.is_some() {
-        info!("Adding VPN ipv6 default route via {}", interface_name);
+    if let Some(ipv6) = ipv6 {
+        let source = ipv6.ip.to_string();
+        info!(
+            "Adding VPN ipv6 default route via {} with source {}",
+            interface_name, source
+        );
         if util::run_command(
             "ip",
             &[
@@ -183,6 +193,8 @@ fn add_vpn_default_route(
                 interface_name,
                 "metric",
                 "1",
+                "src",
+                &source,
             ],
         ) {
             info!("VPN ipv6 default route added successfully with metric 1");
