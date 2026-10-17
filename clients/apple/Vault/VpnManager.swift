@@ -262,6 +262,7 @@ class VpnManager {
             var conf = [String: AnyObject]()
             conf["host"] = self.config.host as AnyObject
             conf["port"] = UInt16(self.config.port) as AnyObject
+            conf["dns"] = self.config.dns as AnyObject
 
             conf["id"] = id as AnyObject
             // The password travels in providerConfiguration: on macOS the
