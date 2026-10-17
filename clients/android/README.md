@@ -47,7 +47,7 @@ Rust session.
 
 Requirements:
 
-- Android SDK (API 36+) with **NDK 27.3.13750724** (SDK Manager → SDK Tools → NDK, "Show Package Details"); point Gradle at the SDK via `ANDROID_HOME` or `sdk.dir` in `local.properties` (Android Studio writes it automatically). The NDK version is a pinned default, not a hard requirement — override with `-PvaultNdkVersion=<version>` or a `vaultNdkVersion` entry in `~/.gradle/gradle.properties` to use an NDK you already have
+- Android SDK (API 36+) and an NDK. Point Gradle at the SDK via `ANDROID_HOME` or `sdk.dir` in `local.properties` (Android Studio writes it automatically). Set `ANDROID_NDK_HOME` to use a specific NDK; otherwise the build selects the highest installed version from the SDK's `ndk/` directory or legacy `ndk-bundle`. If no NDK is installed, AGP downloads **NDK 27.3.13750724**
 - Any JDK 17+ to run Gradle — the compile JDK (24) is auto-provisioned via the foojay resolver
 - Rust toolchain + `cargo-ndk` (`cargo install cargo-ndk`) for the shared `vault-core` / `vault-bridge` native library
 
