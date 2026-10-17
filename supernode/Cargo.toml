@@ -13,7 +13,7 @@ dashmap = {version = "6"}
 hex.workspace = true
 pnet = {version = "0.35"}
 serde.workspace = true
-sqlite = {version = "0.37"}
+sqlite = {version = "0.37", features = ["bundled"]}
 thiserror = {version = "2"}
 toml = {workspace = true}
 tracing = {workspace = true}
