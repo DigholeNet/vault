@@ -6,7 +6,7 @@
 #   - Android SDK + NDK (local.properties: sdk.dir)
 #   - Release signing: signing.keyStoreBase64 / signing.keyStorePassword /
 #     signing.keyAlias in clients/android/local.properties (gitignored), or
-#     the SIGNING_KEY_STORE_* env vars; the base64 keystore is decoded into
+#     the ANDROID_SIGNING_KEY_STORE_* env vars; the base64 keystore is decoded into
 #     app/build/ at build time, and no keystore file is tracked in git
 #   - Rust Android targets + cargo-ndk
 #

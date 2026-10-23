@@ -31,11 +31,11 @@ android {
             }
 
             val keystoreBase64 = localProps?.getProperty("signing.keyStoreBase64")
-                ?: System.getenv("SIGNING_KEY_STORE_BASE64")
+                ?: System.getenv("ANDROID_SIGNING_KEY_STORE_BASE64")
             val storePasswordValue = localProps?.getProperty("signing.keyStorePassword")
-                ?: System.getenv("SIGNING_KEY_STORE_PASSWORD")
+                ?: System.getenv("ANDROID_SIGNING_KEY_STORE_PASSWORD")
             val keyAliasValue = localProps?.getProperty("signing.keyAlias")
-                ?: System.getenv("SIGNING_KEY_ALIAS")
+                ?: System.getenv("ANDROID_SIGNING_KEY_ALIAS")
 
             // The keystore travels as base64 text (same variable as CI), so
             // no real keystore file ever needs to live in the repository
@@ -65,19 +65,19 @@ android {
                     if (keystoreBase64.isNullOrEmpty()) {
                         throw GradleException(
                             "Release signing keystore not configured. " +
-                                "Set signing.keyStoreBase64 in local.properties or SIGNING_KEY_STORE_BASE64 env var."
+                                "Set signing.keyStoreBase64 in local.properties or ANDROID_SIGNING_KEY_STORE_BASE64 env var."
                         )
                     }
                     if (storePasswordValue.isNullOrEmpty()) {
                         throw GradleException(
                             "Release signing store password not configured. " +
-                                "Set signing.keyStorePassword in local.properties or SIGNING_KEY_STORE_PASSWORD env var."
+                                "Set signing.keyStorePassword in local.properties or ANDROID_SIGNING_KEY_STORE_PASSWORD env var."
                         )
                     }
                     if (keyAliasValue.isNullOrEmpty()) {
                         throw GradleException(
                             "Release signing key alias not configured. " +
-                                "Set signing.keyAlias in local.properties or SIGNING_KEY_ALIAS env var."
+                                "Set signing.keyAlias in local.properties or ANDROID_SIGNING_KEY_ALIAS env var."
                         )
                     }
                 }

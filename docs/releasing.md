@@ -161,9 +161,9 @@ and add:
 
 | Secret name | Content |
 |---|---|
-| `SIGNING_KEY_STORE_BASE64` | Base64-encoded keystore |
-| `SIGNING_KEY_STORE_PASSWORD` | Keystore password (also used as the key password) |
-| `SIGNING_KEY_ALIAS` | Key alias (e.g., `vault`) |
+| `ANDROID_SIGNING_KEY_STORE_BASE64` | Base64-encoded keystore |
+| `ANDROID_SIGNING_KEY_STORE_PASSWORD` | Keystore password (also used as the key password) |
+| `ANDROID_SIGNING_KEY_ALIAS` | Key alias (e.g., `vault`) |
 
 Local release config example (the same base64 value as the GitHub secret,
 on a single line — `local.properties` is a Java properties file):

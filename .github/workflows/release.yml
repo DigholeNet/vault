@@ -147,9 +147,9 @@ jobs:
 
       - name: Build signed release APK
         env:
-          SIGNING_KEY_STORE_BASE64: ${{ secrets.SIGNING_KEY_STORE_BASE64 }}
-          SIGNING_KEY_STORE_PASSWORD: ${{ secrets.SIGNING_KEY_STORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          ANDROID_SIGNING_KEY_STORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEY_STORE_BASE64 }}
+          ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_STORE_PASSWORD }}
+          ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
         # versionName/versionCode must come from the workspace version or
         # released APKs would all carry the build.gradle.kts defaults
         # (versionCode 1), making upgrade installs impossible.
