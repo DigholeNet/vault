@@ -101,6 +101,16 @@ class AppData: ObservableObject {
         statsTimer = nil
         statsBase = (0, 0, 0, 0)
         previousStats = .zero
+        // Clear the displayed counters too: the session ended, so showing
+        // its final totals as if they were current would mislead.
+        packetsSent = 0
+        packetsReceived = 0
+        bytesSent = 0
+        bytesReceived = 0
+        packetsSentPerSecond = 0
+        packetsReceivedPerSecond = 0
+        bytesSentPerSecond = 0
+        bytesReceivedPerSecond = 0
     }
 
     private func updateStats() {
@@ -178,6 +188,11 @@ class VaultConfig: ObservableObject {
     @AppStorage("host", store: sharedDefaults) var host = ""
     @AppStorage("port", store: sharedDefaults) var port = 9527
     @AppStorage("dns", store: sharedDefaults) var dns = ""
+    /// Comma-separated domains for the on-demand diagnostics probes; empty
+    /// means the provider's defaults.
+    @AppStorage("probeDomains", store: sharedDefaults) var probeDomains = ""
+    /// Optional tunnel MTU cap; empty = automatic (built-in upper bound).
+    @AppStorage("mtu", store: sharedDefaults) var mtu = ""
 
     /// The app stores this secret in Keychain rather than App Group defaults.
     /// Connecting also copies it into providerConfiguration, which the OS

@@ -15,6 +15,22 @@ import VaultCore
         @EnvironmentObject var config: VaultConfig
         @EnvironmentObject var languageManager: LanguageManager
 
+        @State private var isDiagnosing = false
+        @State private var diagnosticsSummary: String?
+
+        private func runDiagnostics() {
+            isDiagnosing = true
+            diagnosticsSummary = nil
+            vpnManager.requestDiagnostics { result in
+                DispatchQueue.main.async {
+                    isDiagnosing = false
+                    diagnosticsSummary =
+                        result?.summary
+                        ?? languageManager.tr("Diagnostics failed: no response from the tunnel.")
+                }
+            }
+        }
+
         func onError() {
             appData.vpnOn = false
         }
@@ -66,7 +82,7 @@ import VaultCore
                         Spacer().frame(height: 30)
 
                         // Connection Info & Statistics (combined, no background)
-                        if appData.vpnStatus == .on || appData.vpnStatus == .disconnecting {
+                        if appData.vpnStatus == .on {
                             let ips = parsedIPs
 
                             VStack(spacing: 16) {
@@ -178,6 +194,26 @@ import VaultCore
                             }
                             .padding(.horizontal, 20)
                             .padding(.vertical, 16)
+
+                            Button(action: runDiagnostics) {
+                                HStack(spacing: 8) {
+                                    if isDiagnosing {
+                                        ProgressView()
+                                    }
+                                    Text(languageManager.tr(isDiagnosing ? "Running Diagnostics..." : "Run Diagnostics"))
+                                }
+                            }
+                            .disabled(isDiagnosing)
+
+                            if let summary = diagnosticsSummary {
+                                Text(summary)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(summary.hasPrefix("OK") ? .green : .red)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                                    .padding(.horizontal, 20)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity)

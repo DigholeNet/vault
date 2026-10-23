@@ -10,9 +10,55 @@ import VaultCore
 
 #if os(macOS)
     struct MacosStatusView: View {
+        var vpnManager: VpnManager
         @EnvironmentObject var appData: AppData
         @EnvironmentObject var config: VaultConfig
         @EnvironmentObject var languageManager: LanguageManager
+
+        @State private var isDiagnosing = false
+        @State private var diagnosticsSummary: String?
+
+        private func runDiagnostics() {
+            isDiagnosing = true
+            diagnosticsSummary = nil
+            vpnManager.requestDiagnostics { result in
+                DispatchQueue.main.async {
+                    isDiagnosing = false
+                    diagnosticsSummary =
+                        result?.summary
+                        ?? languageManager.tr("Diagnostics failed: no response from the tunnel.")
+                }
+            }
+        }
+
+        @ViewBuilder
+        private var diagnosticsSection: some View {
+            VStack(spacing: 10) {
+                Button(action: runDiagnostics) {
+                    HStack(spacing: 8) {
+                        if isDiagnosing {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(languageManager.tr(isDiagnosing ? "Running Diagnostics..." : "Run Diagnostics"))
+                    }
+                }
+                .disabled(isDiagnosing)
+
+                if let summary = diagnosticsSummary {
+                    // The summary is the verdict: keep it fully visible
+                    // (wrap, don't truncate), selectable for bug reports,
+                    // and colored by outcome.
+                    Text(summary)
+                        .font(.system(size: 12))
+                        .foregroundColor(summary.hasPrefix("OK") ? .green : .red)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 20)
+                }
+            }
+        }
 
         var parsedIPs: (ipv4: String?, ipv6: String?) {
             config.ip.parsedIPv4AndIPv6()
@@ -22,10 +68,13 @@ import VaultCore
             VStack(spacing: 24) {
                 Spacer()
 
-                // Connection Info & Statistics
-                let ips = parsedIPs
+                // Connection Info & Statistics — only meaningful while the
+                // tunnel is up; when off these would be leftovers from the
+                // previous session.
+                if appData.vpnStatus == .on {
+                    let ips = parsedIPs
 
-                VStack(spacing: 20) {
+                    VStack(spacing: 20) {
                     // IP Addresses Section
                     if ips.ipv4 != nil || ips.ipv6 != nil {
                         VStack(alignment: .leading, spacing: 8) {
@@ -133,8 +182,17 @@ import VaultCore
                         .frame(maxWidth: .infinity)
                     }
                     .padding(.horizontal, 20)
+                    }
+                    .padding(.vertical, 20)
+
+                    diagnosticsSection
+                } else {
+                    // Mirror the iOS status page: show the current state
+                    // instead of a blank window when the tunnel is down.
+                    Text(VpnStatusUtil.getStatus(appData.vpnStatus))
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(.gray)
                 }
-                .padding(.vertical, 20)
 
                 Spacer()
             }
@@ -146,7 +204,7 @@ import VaultCore
     #Preview {
         let appData = AppData()
         let config = VaultConfig()
-        MacosStatusView()
+        MacosStatusView(vpnManager: VpnManager(config: config, appData: appData))
             .environmentObject(appData)
             .environmentObject(config)
             .environmentObject(LanguageManager.shared)

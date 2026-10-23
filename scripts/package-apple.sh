@@ -62,6 +62,17 @@ if [[ -z "$TEAM_ID" ]] && ! grep -q '^TEAM_ID = [A-Z0-9]\{10\}$' \
     exit 1
 fi
 
+# Fail fast when the Apple timestamp server is unreachable: Release signing
+# uses the hardened runtime, which requires a secure timestamp from
+# timestamp.apple.com; otherwise the build only fails at the codesign step
+# (a common failure when a VPN/proxy is active while packaging).
+if ! curl -sS -o /dev/null --connect-timeout 5 --max-time 10 \
+    http://timestamp.apple.com/ts01; then
+    echo "error: cannot reach timestamp.apple.com; Release codesign needs it for the secure timestamp." >&2
+    echo "Disconnect any VPN/proxy that may block it, then re-run." >&2
+    exit 1
+fi
+
 # Single version source: the workspace package version in the root
 # Cargo.toml; injected as MARKETING_VERSION into both archives.
 VERSION="$(grep -m1 '^version = ' "$ROOT/Cargo.toml" | cut -d'"' -f2)"

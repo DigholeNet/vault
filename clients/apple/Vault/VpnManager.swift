@@ -123,6 +123,10 @@ class VpnManager {
                 self.appData.startStatsMonitoring()
             } else if self.vpnStatus == .off {
                 self.appData.stopStatsMonitoring()
+                // The assigned address belongs to the session that just
+                // ended; leaving it persisted would show a stale IP on the
+                // status page and on the next app launch.
+                self.config.ip = ""
             }
         }
 
@@ -272,6 +276,8 @@ class VpnManager {
             }
             conf["port"] = UInt16(port) as AnyObject
             conf["dns"] = self.config.dns as AnyObject
+            conf["probeDomains"] = self.config.probeDomains as AnyObject
+            conf["mtu"] = self.config.mtu as AnyObject
 
             conf["id"] = id as AnyObject
             // The password is persisted in the OS VPN providerConfiguration: on macOS the
@@ -414,5 +420,133 @@ extension VpnManager {
             self.activeVPN = nil
         }
     }
+
+    /// Send a provider-message command and return the raw reply. The reply
+    /// arrives on an unspecified queue; nil means the message channel itself
+    /// failed (no manager, not a provider session, no response).
+    private func sendProviderCommand(_ command: String, completion: @escaping (Data?) -> Void) {
+        struct Command: Codable { var command: String }
+        let send: (NETunnelProviderManager) -> Void = { manager in
+            guard let session = manager.connection as? NETunnelProviderSession else {
+                Logger.network.errorAndFile("Provider command '\(command)' failed: connection is not NETunnelProviderSession")
+                completion(nil)
+                return
+            }
+            guard let message = try? JSONEncoder().encode(Command(command: command)) else {
+                completion(nil)
+                return
+            }
+            do {
+                try session.sendProviderMessage(message) { data in
+                    completion(data)
+                }
+            } catch {
+                Logger.network.errorAndFile("Provider command '\(command)' failed: \(error.localizedDescription)")
+                completion(nil)
+            }
+        }
+        if let manager = self.activeVPN {
+            send(manager)
+        } else {
+            loadProviderManager { manager in
+                guard let manager = manager else {
+                    Logger.network.errorAndFile("Provider command '\(command)' failed: no VPN manager")
+                    completion(nil)
+                    return
+                }
+                self.activeVPN = manager
+                send(manager)
+            }
+        }
+    }
+
+    /// Ask the running provider to execute the connectivity probe suite.
+    /// The reply arrives when the suite finishes (up to ~60s); nil means the
+    /// message channel itself failed.
+    func requestDiagnostics(completion: @escaping (DiagnosticsResult?) -> Void) {
+        // The extension's own sockets bypass the tunnel, so only the app can
+        // observe where the default route really sends user traffic. A
+        // "Connected" tunnel whose routes never materialized is invisible to
+        // every bound probe — check it here.
+        let routeSuspects = checkDefaultRoutes()
+        sendProviderCommand("diagnose") { data in
+            guard let data = data,
+                var result = try? JSONDecoder().decode(DiagnosticsResult.self, from: data)
+            else {
+                Logger.network.errorAndFile("Diagnostics request failed: provider returned no usable data")
+                completion(nil)
+                return
+            }
+            if !routeSuspects.isEmpty {
+                if result.summary.hasPrefix("OK") {
+                    result.summary = "PROBLEMS FOUND (route check)"
+                }
+                result.summary += "; "
+                    + routeSuspects.map { "suspect: \($0)" }.joined(separator: "; ")
+                result.lines.append(contentsOf: routeSuspects.map { "[probe] suspect: \($0)" })
+            }
+            completion(result)
+        }
+    }
+
+    /// Compares the default route's chosen local addresses with the
+    /// tunnel-assigned addresses. Any mismatch means user traffic of that
+    /// family bypasses the tunnel even though the VPN shows Connected.
+    private func checkDefaultRoutes() -> [String] {
+        let routes = RouteCheck.defaultRouteLocalAddresses()
+        let assigned = config.ip.parsedIPv4AndIPv6()
+        Logger.network.noticeAndFile(
+            "[probe] route check: default-route local addresses ipv4=\(routes.ipv4 ?? "none") ipv6=\(routes.ipv6 ?? "none"), tunnel assigned=\(config.ip.isEmpty ? "none" : config.ip)"
+        )
+        var suspects: [String] = []
+        if let tunnelV4 = assigned.ipv4, routes.ipv4 != tunnelV4 {
+            suspects.append(
+                "IPv4 default route does not enter the tunnel (traffic would exit via \(routes.ipv4 ?? "nothing")); IPv4 bypasses the VPN"
+            )
+        }
+        if let tunnelV6 = assigned.ipv6, routes.ipv6 != tunnelV6 {
+            suspects.append(
+                "IPv6 default route does not enter the tunnel (traffic would exit via \(routes.ipv6 ?? "nothing")); IPv6 bypasses the VPN"
+            )
+        }
+        return suspects
+    }
+
+    #if os(macOS)
+    /// The extension's log is trapped inside a sandboxed root daemon's
+    /// container; the app can only obtain it over the provider-message
+    /// channel while the tunnel is up. Every successful fetch is cached next
+    /// to the app's own log so View Logs can still show the most recent
+    /// extension log after the tunnel went down.
+    private var extensionLogCacheURL: URL? {
+        FileLogger.shared.currentLogPath.map {
+            URL(fileURLWithPath: $0).deletingLastPathComponent()
+                .appendingPathComponent("vault.ne.log")
+        }
+    }
+
+    /// App log merged chronologically with the extension log (or its most
+    /// recent cached copy when the provider is unreachable).
+    func collectLogs() async -> String {
+        async let appLog = FileLogger.shared.readLogAsync()
+        let extensionLog: String? = await withCheckedContinuation { continuation in
+            sendProviderCommand("logs") { data in
+                continuation.resume(returning: data.flatMap { String(data: $0, encoding: .utf8) })
+            }
+        }
+        var parts = [await appLog ?? ""]
+        if let extensionLog, !extensionLog.isEmpty {
+            if let cache = extensionLogCacheURL {
+                try? extensionLog.write(to: cache, atomically: true, encoding: .utf8)
+            }
+            parts.append(extensionLog)
+        } else if let cache = extensionLogCacheURL,
+            let cached = try? String(contentsOf: cache, encoding: .utf8), !cached.isEmpty
+        {
+            parts.append(cached)
+        }
+        return FileLogger.mergeChronologically(parts.filter { !$0.isEmpty })
+    }
+    #endif
 
 }

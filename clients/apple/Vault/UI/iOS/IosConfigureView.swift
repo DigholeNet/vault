@@ -103,6 +103,15 @@ import SwiftUI
                                 .accentColor(.gray)
                             }
                         }
+                        HStack {
+                            Image(systemName: "arrow.up.arrow.down.circle")
+                            TextField(
+                                languageManager.tr("MTU"), text: $config.mtu,
+                                prompt: Text("1280-1427")
+                            )
+                            .keyboardType(.numberPad)
+                            .autocorrectionDisabled()
+                        }
 
                     }
 
@@ -119,6 +128,20 @@ import SwiftUI
                         }
                     } footer: {
                         Text(languageManager.tr("DNS server address separated by comma."))
+                    }
+
+                    Section {
+                        HStack {
+                            Image(systemName: "stethoscope")
+                            TextField(
+                                languageManager.tr("Probe Domains"), text: $config.probeDomains,
+                                prompt: Text(languageManager.tr("Domains to probe"))
+                            )
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                        }
+                    } footer: {
+                        Text(languageManager.tr("Domains probed by Run Diagnostics, separated by comma. Empty uses defaults."))
                     }
 
                     Section {

@@ -3,8 +3,12 @@
 //  VaultCore
 //
 //
-//  Rotating file logger that writes into the shared App Group container so
-//  both the main app and the network extension can read the same log.
+//  Rotating file logger that writes into the shared App Group container.
+//  On iOS the app and the network extension share that container; on macOS
+//  the system extension is a sandboxed root daemon whose container is
+//  unreadable to the app (and the user's container is denied by the
+//  extension's sandbox), so the app fetches the extension's log over the
+//  provider-message channel instead (see handleAppMessage "logs").
 //
 import Foundation
 import os.log
@@ -34,6 +38,11 @@ public final class FileLogger: @unchecked Sendable {
         ) else {
             logFileURL = nil
             prevLogFileURL = nil
+            // Also os_log the failure: when file logging itself lands
+            // nowhere, the file cannot explain why.
+            Logger.network.error(
+                "FileLogger: App Group container unavailable (group '\(kAppGroupIdentifier, privacy: .public)', euid \(geteuid()))"
+            )
             return
         }
         let logsDir = containerURL.appendingPathComponent("Logs", isDirectory: true)
@@ -44,6 +53,9 @@ public final class FileLogger: @unchecked Sendable {
         )
         logFileURL = logsDir.appendingPathComponent("vault.log")
         prevLogFileURL = logsDir.appendingPathComponent("vault.prev.log")
+        Logger.network.notice(
+            "FileLogger path: \(self.logFileURL?.path ?? "nil", privacy: .public) (euid \(geteuid()))"
+        )
         let elapsed = Date().timeIntervalSince(start)
         self.log(
             "FileLogger initialized in \(String(format: "%.3f", elapsed))s, path: \(logFileURL?.path ?? "<none>")",
@@ -137,6 +149,17 @@ public final class FileLogger: @unchecked Sendable {
             guard let base = buffer.baseAddress, !buffer.isEmpty else { return }
             _ = Darwin.write(fd, base, buffer.count)
         }
+    }
+
+    /// Merge log parts written by different processes into one chronological
+    /// text. Every line starts with "[yyyy-MM-dd HH:mm:ss.SSS]", which sorts
+    /// lexicographically; the sort is stable, so same-millisecond lines keep
+    /// their per-process order.
+    public static func mergeChronologically(_ parts: [String]) -> String {
+        parts
+            .flatMap { $0.split(separator: "\n", omittingEmptySubsequences: true) }
+            .sorted()
+            .joined(separator: "\n")
     }
 }
 

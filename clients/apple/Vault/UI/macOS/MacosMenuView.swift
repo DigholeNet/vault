@@ -117,9 +117,9 @@ import VaultCore
                 title: LanguageManager.shared.tr("Status"),
                 id: "status",
                 width: 400,
-                height: 300,
+                height: 360,
                 contentView: NSHostingView(
-                    rootView: MacosStatusView()
+                    rootView: MacosStatusView(vpnManager: vpnManager)
                         .environmentObject(appData)
                         .environmentObject(config)
                         .environmentObject(LanguageManager.shared)
@@ -146,7 +146,7 @@ import VaultCore
                 width: 400,
                 height: 300,
                 contentView: NSHostingView(
-                    rootView: MacosAboutView()
+                    rootView: MacosAboutView(vpnManager: vpnManager)
                         .environmentObject(LanguageManager.shared)
                 )
             )

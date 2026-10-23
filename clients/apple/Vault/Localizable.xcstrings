@@ -430,6 +430,86 @@
           }
         }
       }
+    },
+    "Probe Domains" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "探测域名"
+          }
+        }
+      }
+    },
+    "Domains to probe" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待探测的域名"
+          }
+        }
+      }
+    },
+    "Domains probed by Run Diagnostics, separated by comma. Empty uses defaults." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「运行诊断」探测的域名，用逗号分隔。留空则使用默认值。"
+          }
+        }
+      }
+    },
+    "Run Diagnostics" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行诊断"
+          }
+        }
+      }
+    },
+    "Running Diagnostics..." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在诊断…"
+          }
+        }
+      }
+    },
+    "Diagnostics failed: no response from the tunnel." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "诊断失败：隧道无响应。"
+          }
+        }
+      }
+    },
+    "MTU" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MTU"
+          }
+        }
+      }
+    },
+    "Tunnel MTU cap. Empty uses automatic. Try 1280 when pages stall on a lossy link." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隧道 MTU 上限，留空则自动。链路丢大包导致网页卡顿时可尝试 1280。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

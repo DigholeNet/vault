@@ -8,14 +8,20 @@ import SwiftUI
 import VaultCore
 
 #if os(iOS)
+    import UIKit
+
     struct IosAboutView: View {
 
         @Binding var selectedTab: Int
         @State private var showLogSheet = false
+        /// The complete log; LogTextView (UITextView) renders it lazily, so
+        /// no display-side truncation is needed.
         @State private var logText = ""
         @State private var isLoadingLogs = false
         @State private var errorMessage: String?
         @State private var showError = false
+        /// Live-refresh task for the open log sheet; cancelled on dismiss.
+        @State private var logRefreshTask: Task<Void, Never>?
         @EnvironmentObject var languageManager: LanguageManager
 
         var body: some View {
@@ -60,12 +66,11 @@ import VaultCore
                         if isLoadingLogs {
                             ProgressView(languageManager.tr("Loading logs..."))
                         } else {
-                            ScrollView {
-                                Text(logText)
-                                    .font(.system(.footnote, design: .monospaced))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding()
-                            }
+                            // Native text view: SwiftUI Text re-layouts the
+                            // whole log on every refresh and stalls with
+                            // 10k+ lines; UITextView is built for this and
+                            // gives free selection/scrolling.
+                            LogTextView(text: logText)
                         }
                     }
                     .navigationTitle(languageManager.tr("Logs"))
@@ -84,6 +89,10 @@ import VaultCore
                         }
                     }
                 }
+                .onDisappear {
+                    logRefreshTask?.cancel()
+                    logRefreshTask = nil
+                }
             }
             .alert(languageManager.tr("No Logs"), isPresented: $showError, presenting: errorMessage) { _ in
                 Button(languageManager.tr("OK")) {}
@@ -96,20 +105,58 @@ import VaultCore
             showLogSheet = true
             isLoadingLogs = true
             logText = ""
+            logRefreshTask?.cancel()
 
-            Task {
-                let text = await FileLogger.shared.readLogAsync() ?? ""
-                await MainActor.run {
-                    isLoadingLogs = false
-                    if text.isEmpty {
-                        errorMessage = LanguageManager.shared.tr("No log content found.")
-                        showError = true
-                        showLogSheet = false
-                    } else {
-                        logText = text
+            // Live refresh while the sheet is open (the extension shares the
+            // file on iOS, so re-reading picks up new [ne]/[probe] lines).
+            logRefreshTask = Task {
+                var firstLoad = true
+                while !Task.isCancelled {
+                    let text = await FileLogger.shared.readLogAsync() ?? ""
+                    let wasFirstLoad = firstLoad
+                    firstLoad = false
+                    await MainActor.run {
+                        if wasFirstLoad {
+                            isLoadingLogs = false
+                            if text.isEmpty {
+                                errorMessage = LanguageManager.shared.tr("No log content found.")
+                                showError = true
+                                showLogSheet = false
+                                return
+                            }
+                        }
+                        if !text.isEmpty, text != logText {
+                            logText = text
+                        }
                     }
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
                 }
             }
+        }
+    }
+
+    /// Read-only, selectable, monospaced log view backed by UITextView.
+    /// SwiftUI Text re-layouts the entire string on every 2s live refresh —
+    /// with 10k+ lines that blocked the main thread long enough to freeze
+    /// the sheet. UITextView lays out lazily.
+    struct LogTextView: UIViewRepresentable {
+        let text: String
+
+        func makeUIView(context: Context) -> UITextView {
+            let textView = UITextView()
+            textView.isEditable = false
+            textView.isSelectable = true
+            textView.font = UIFont.monospacedSystemFont(
+                ofSize: UIFont.smallSystemFontSize, weight: .regular
+            )
+            return textView
+        }
+
+        func updateUIView(_ textView: UITextView, context: Context) {
+            guard textView.text != text else { return }
+            textView.text = text
+            // Tail-follow the live refresh.
+            textView.scrollRangeToVisible(NSRange(location: text.count, length: 0))
         }
     }
 

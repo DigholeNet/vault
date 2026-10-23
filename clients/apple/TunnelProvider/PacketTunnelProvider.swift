@@ -47,6 +47,11 @@ enum TunnelConstants {
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private var dns: [String] = ["1.1.1.1", "8.8.8.8"]
+    /// Domains the on-demand diagnostics suite probes; overridable from the
+    /// app's configure page via the "probeDomains" provider configuration.
+    private var probeDomains: [String] = TunnelDiagnostics.defaultProbeDomains
+    /// Guards against overlapping manual diagnostics runs.
+    private var diagnosticsRunning = false
     private var edge: Edge!
     private var pendingStart: PendingStart?
     private var startTimeoutWorkItem: DispatchWorkItem?
@@ -64,11 +69,23 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Diagnostic: counts startTunnel invocations per extension process.
     private static var startTunnelCallCount = 0
     private var superNodeIp: String = ""
+    /// Saved alongside superNodeIp so diagnostics can use the supernode as
+    /// the physical-path control endpoint.
+    private var superNodePort: UInt16 = 0
+    /// Tunnel MTU ceiling from the "mtu" provider configuration
+    /// (Configure page); default is the built-in upper bound.
+    private var mtuCap: Int = TunnelConstants.mtuUpperBound
     private var excludedV4Addresses: [String] = []
     private var excludedV6Addresses: [String] = []
     /// Addresses assigned by the supernode ("ipv4" or "ipv4/ipv6"), served
     /// to the app via handleAppMessage.
     private var assignedIp: String = ""
+    /// Netmask of the assigned IPv4; diagnostics derives the tunnel gateway
+    /// address from it.
+    private var assignedIPv4Mask: String?
+    /// The tunnel MTU currently applied to the interface; diagnostics sweeps
+    /// packet sizes up to it.
+    private var appliedMtu: Int?
     private var pathMonitor: NWPathMonitor?
     private var lastNetworkPath: String?
     private var networkAvailable = true
@@ -134,6 +151,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             completionHandler(ConfigurationError.invalidConfiguration("port"))
             return
         }
+        self.superNodePort = port
 
         // The password is persisted in the OS VPN providerConfiguration: on macOS the
         // provider is a system extension running outside the user's session,
@@ -157,6 +175,26 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             self.dns = dnsServers.components(separatedBy: ",")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }
+        }
+
+        // Probe domains for on-demand diagnostics are optional too.
+        if let domains = conf["probeDomains"] as? String, !domains.isEmpty {
+            let parsed = domains.components(separatedBy: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            if !parsed.isEmpty {
+                self.probeDomains = parsed
+            }
+        }
+
+        // Optional tunnel MTU cap (Configure page; empty = built-in bound).
+        // clamp to [mtuLowerBound, mtuUpperBound] regardless of input.
+        if let rawMtu = conf["mtu"] as? String, !rawMtu.isEmpty,
+            let parsed = Int(rawMtu.trimmingCharacters(in: .whitespaces))
+        {
+            self.mtuCap = min(
+                max(parsed, TunnelConstants.mtuLowerBound), TunnelConstants.mtuUpperBound
+            )
         }
 
         // Resolve the supernode address on a background queue so a slow
@@ -695,19 +733,22 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// clamped to [mtuLowerBound, mtuUpperBound] so PPPoE-class links
     /// shrink the tunnel while jumbo frames never inflate it. Falls back
     /// to the upper bound when the link MTU cannot be probed.
+    /// mtuCap (Configure page, empty = mtuUpperBound) lowers the ceiling:
+    /// on links that drop large outer packets, a smaller tunnel MTU keeps
+    /// the UDP datagrams under the loss threshold.
     private func tunnelMtu() -> Int {
         guard let linkMtu = probeUnderlyingLinkMtu() else {
             Logger.network.warningAndFile(
-                "[session:\(self.sessionID)] Underlying link MTU probe failed; using fallback \(TunnelConstants.mtuUpperBound)"
+                "[session:\(self.sessionID)] Underlying link MTU probe failed; using fallback \(self.mtuCap)"
             )
-            return TunnelConstants.mtuUpperBound
+            return self.mtuCap
         }
         let mtu = min(
             max(linkMtu - TunnelConstants.tunnelOverhead, TunnelConstants.mtuLowerBound),
-            TunnelConstants.mtuUpperBound
+            self.mtuCap
         )
         Logger.network.noticeAndFile(
-            "[session:\(self.sessionID)] Link MTU \(linkMtu) → tunnel MTU \(mtu)"
+            "[session:\(self.sessionID)] Link MTU \(linkMtu) → tunnel MTU \(mtu) (cap \(self.mtuCap))"
         )
         return mtu
     }
@@ -808,7 +849,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let dnsSettings = NEDNSSettings(servers: dns)
 
         networkSettings.dnsSettings = dnsSettings
-        networkSettings.mtu = NSNumber(value: tunnelMtu())
+        let mtu = tunnelMtu()
+        networkSettings.mtu = NSNumber(value: mtu)
+        self.appliedMtu = mtu
 
         return networkSettings
     }
@@ -849,6 +892,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             assigned += "/" + ipv6
         }
         self.assignedIp = assigned
+        self.assignedIPv4Mask = ipv4Mask.isEmpty ? nil : ipv4Mask
         Logger.network.noticeAndFile(
             "[session:\(self.sessionID)] onIpAssigned: \(assigned) mask \(ipv4Mask) v6prefix \(ipv6PrefixLen) startPending=\(self.pendingStart?.isPending == true)"
         )
@@ -914,15 +958,85 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Serves the app's status queries (assigned IP + traffic counters).
     /// Required on macOS where the system extension runs outside the user's
     /// session and App Group UserDefaults are not shared with the app.
+    /// A {"command":"diagnose"} message instead runs the connectivity probe
+    /// suite and replies with its DiagnosticsResult once finished.
     override func handleAppMessage(
         _ messageData: Data,
         completionHandler: ((Data?) -> Void)? = nil
     ) {
+        struct Command: Codable { var command: String }
+        if let command = try? JSONDecoder().decode(Command.self, from: messageData) {
+            switch command.command {
+            case "diagnose":
+                runDiagnostics(completionHandler: completionHandler)
+            case "logs":
+                // The macOS system extension is a sandboxed root daemon: its
+                // container is unreadable to the app, and writing into the
+                // app's container is sandbox-denied. Serving the log over
+                // this channel is the only way View Logs can show it. Keep
+                // the reply bounded — the tail is what matters.
+                let log = FileLogger.shared.readLog() ?? ""
+                completionHandler?(String(log.suffix(512 * 1024)).data(using: .utf8))
+            default:
+                completionHandler?(nil)
+            }
+            return
+        }
         let status = ProviderStatus(
             ip: assignedIp,
             stats: PacketStats.shared.currentStats
         )
         completionHandler?(try? JSONEncoder().encode(status))
+    }
+
+    /// Manual diagnostics entry point (Status page button). Probing must be
+    /// user-triggered only: an automatic run after every connect would bury
+    /// the log in noise for the overwhelmingly common healthy case.
+    private func runDiagnostics(completionHandler: ((Data?) -> Void)?) {
+        // handleAppMessage's delivery queue is not documented; hop to main
+        // where startFinished/stopRequested/assignedIp are owned.
+        DispatchQueue.main.async {
+            guard self.startFinished, !self.stopRequested else {
+                completionHandler?(try? JSONEncoder().encode(
+                    DiagnosticsResult(summary: "tunnel is not up", lines: [])
+                ))
+                return
+            }
+            guard !self.diagnosticsRunning else {
+                completionHandler?(try? JSONEncoder().encode(
+                    DiagnosticsResult(summary: "diagnostics already running", lines: [])
+                ))
+                return
+            }
+            // The tunnel address the probes bind to; without it there is no
+            // utun interface to find.
+            let tunnelIPv4 = self.assignedIp.split(separator: "/").first.map(String.init) ?? ""
+            guard !tunnelIPv4.isEmpty else {
+                completionHandler?(try? JSONEncoder().encode(
+                    DiagnosticsResult(summary: "no assigned IPv4 address", lines: [])
+                ))
+                return
+            }
+            self.diagnosticsRunning = true
+            let dnsServers = self.dns
+            let domains = self.probeDomains
+            let ipv4Mask = self.assignedIPv4Mask
+            let mtu = self.appliedMtu
+            let control: (host: String, port: UInt16)? =
+                self.superNodeIp.isEmpty || self.superNodePort == 0
+                ? nil : (self.superNodeIp, self.superNodePort)
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let result = TunnelDiagnostics.run(
+                    dnsServers: dnsServers, tunnelIPv4: tunnelIPv4, tunnelIPv4Mask: ipv4Mask,
+                    domains: domains,
+                    controlEndpoint: control, tunnelMtu: mtu
+                )
+                DispatchQueue.main.async {
+                    self?.diagnosticsRunning = false
+                    completionHandler?(try? JSONEncoder().encode(result))
+                }
+            }
+        }
     }
 
     /// Log an "alive" marker (with the memory footprint) every 30s so the

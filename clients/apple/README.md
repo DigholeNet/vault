@@ -20,6 +20,42 @@ Re-resolving the original hostname during a running tunnel is follow-up work.
 Paths whose interface/gateway signature does not change fall back to the
 core heartbeat timeout.
 
+## Connectivity diagnostics
+
+The status page has a **Run Diagnostics** button, visible only while the
+tunnel is up. It asks the provider (over the provider-message channel) to run
+a probe suite from inside the extension and shows the summary; every step is
+also written to the extension's file log with a `[probe]` prefix. On iOS that
+file is the shared App Group log shown by About → View Logs. On macOS the
+system extension is a sandboxed root daemon: its container is unreadable to
+the app and writing into the app's container is sandbox-denied, so View Logs
+fetches the extension log over the provider-message channel (command "logs"),
+merges it chronologically with the app log, and caches the last fetch as
+`Logs/vault.ne.log` for viewing while the tunnel is down.
+
+Because the extension's own sockets bypass the tunnel, each probe pins itself
+to an interface explicitly (`IP_BOUND_IF` / `NWParameters.requiredInterface`)
+— the utun interface for the tunnel path, the physical interface for a
+direct-path control:
+
+- **ICMP/MTU sweep** to the first tunnel DNS server at packet sizes 64 / 1400
+  / 1427 with DF set — small packets passing while large ones are lost
+  reports `suspect: MTU black hole on tunnel path`.
+- **DNS** — each probe domain is resolved through the tunnel and through the
+  physical interface; identical answers on both paths report a possible leak
+  or poisoned upstream, timeouts report `suspect: tunnel DNS unreachable`.
+- **TCP** — connect to port 443 of the tunnel-resolved addresses, plus one
+  physical-path control connect.
+- **HTTPS** — full TLS handshake + HTTP/1.1 request through the tunnel,
+  logging the status line, handshake time and the peer certificate subject
+  (exposes interception).
+
+The probed domains come from **Configure → Probe Domains** (comma-separated;
+empty uses `www.google.com, github.com, t.co`). The suite is strictly manual —
+it never runs automatically — so healthy sessions do not accumulate probe
+noise in the log.
+
+
 ## Technology Stack
 
 ### Core Technologies
