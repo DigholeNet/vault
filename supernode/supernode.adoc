@@ -20,22 +20,21 @@ heartbeat pings.
 The server sets its own TUN redirect switches to zero. Administrators may
 optionally set *net.ipv4.conf.all.send_redirects=0*: both switches must be zero
 to disable IPv4 redirect sending. If the global switch is on or cannot be read,
-the server warns and continues startup. Global settings are never changed by
-the server.
+the server warns and continues startup. The server leaves the global redirect switch unchanged.
 
 Exit interfaces come from usable default, connected and static routes, including
 virtual uplinks. LAN-only deployments do not need a default route. Routes must be
 present at startup; restart after changing exit interfaces.
 
-Global forwarding must be configured by the administrator before startup:
-*net.ipv4.ip_forward=1* for an IPv4 pool and
-*net.ipv6.conf.all.forwarding=1* for an IPv6 pool. The server only checks
-these values and never changes or restores them.
+The server automatically enables *net.ipv4.ip_forward=1* for an IPv4 pool and
+*net.ipv6.conf.all.forwarding=1* for an IPv6 pool when needed at startup.
+Before enabling IPv6 forwarding, it changes exit interfaces with *accept_ra=1*
+to *accept_ra=2* to preserve RA reception. Disabled RA remains disabled.
+Forwarding and uplink RA changes are never rolled back, including after failed
+startup, because other services may depend on them.
 
-For RA-dependent IPv6 uplinks, configure the uplink's *accept_ra=2* before
-enabling IPv6 forwarding. Changing IPv4 *ip_forward* resets other IPv4
-tunables; provision forwarding before applying custom host network settings.
-See the supernode README for persistent sysctl configuration.
+Changing IPv4 *ip_forward* resets other IPv4 tunables. Hosts with custom settings
+can provision forwarding before applying those tunables; see the supernode README.
 
 == Options
 *--config* <FILE>::

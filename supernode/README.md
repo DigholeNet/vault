@@ -73,8 +73,8 @@ in [docs/protocol.md](../docs/protocol.md) and implemented in `vault-core`.
 
 ### Network configuration
 
-Host-wide forwarding is an administrator-managed prerequisite (below). The
-supernode only reads these global switches and never changes or restores them.
+The supernode automatically enables host-wide forwarding for each configured
+address family when needed (below). It never disables forwarding on shutdown.
 On startup it sets redirect switches to zero on its own new TUN interface.
 If global IPv4 redirect sending remains enabled, it warns and continues startup. For both IPv4 and IPv6 it installs:
 
@@ -94,40 +94,37 @@ Routes must be present when the server starts; restart after changing exit inter
 command aborts startup.
 Partial startup failures and normal shutdown remove only rules added by this
 instance and restore its TUN-local tunables if they still have the applied values.
-Global forwarding, upstream RA settings, and unrelated host tunables are untouched
-on success, failure, and shutdown. After SIGKILL/OOM, inspect firewall rules manually.
+Enabled forwarding and adjusted upstream RA settings remain in place on
+success, failure, and shutdown. After SIGKILL/OOM, inspect firewall rules manually.
 
-### Host forwarding prerequisite
+### Automatic host forwarding
 
-Configure forwarding once as part of provisioning, before starting the service:
+At startup, the server enables `net.ipv4.ip_forward=1` for an IPv4 pool and
+`net.ipv6.conf.all.forwarding=1` for an IPv6 pool if needed. No manual sysctl
+configuration is required, including after reboot. Startup fails if a required
+sysctl cannot be read or written.
+
+Before enabling IPv6 forwarding, the server changes `accept_ra=1` to
+`accept_ra=2` on detected exit interfaces to preserve Router Advertisement
+reception in router mode. Explicitly disabled RA (`0`) stays disabled.
+Forwarding and uplink RA changes are not rolled back, even if startup later
+fails, because other services may depend on them.
+
+Changing IPv4 `ip_forward` resets other IPv4 settings to host/router defaults.
+Hosts with custom IPv4 tunables can still provision forwarding before applying
+those tunables using `/etc/sysctl.d/90-vault-forwarding.conf`:
 
 ```ini
-# /etc/sysctl.d/90-vault-forwarding.conf
 net.ipv4.ip_forward = 1
-# Optional host hardening; not required for startup:
-# net.ipv4.conf.all.send_redirects = 0
-# Only when an IPv6 pool is configured:
-# net.ipv6.conf.eth0.accept_ra = 2
-# net.ipv6.conf.all.forwarding = 1
+# For an RA-dependent IPv6 uplink, replace eth0 with the actual interface:
+net.ipv6.conf.eth0.accept_ra = 2
+net.ipv6.conf.all.forwarding = 1
 ```
 
-For an IPv6 uplink that learns its route through Router Advertisements, replace
-`eth0` with the actual uplink name and set `accept_ra = 2` **before** enabling
-IPv6 forwarding. Static IPv6 uplinks do not need the RA override. Add the override
-for each RA-dependent uplink. Keep these settings in the host network manager if
-it owns the interface instead of maintaining conflicting configurations.
-
-IPv4 `send_redirects` is enabled when either the global or interface switch is
-on. Administrators may optionally set the global switch to `0` to ensure the
-TUN does not send redirects. The daemon only warns if this global switch is on
-or cannot be read; it never changes it or blocks startup because of it. Other
-interfaces retain their own redirect settings.
-
-Apply the file with `sudo sysctl -p /etc/sysctl.d/90-vault-forwarding.conf`.
-Changing IPv4 `ip_forward` resets other IPv4 settings to host/router defaults;
-provision it before applying custom IPv4 tunables, or review and reapply those
-settings afterward. The daemon deliberately does not automate this host-wide
-transition or attempt to reverse it when one VPN process exits.
+Apply optional persistent configuration with
+`sudo sysctl -p /etc/sysctl.d/90-vault-forwarding.conf`.
+If a network manager owns these settings, configure it consistently so it does
+not disable forwarding while the server is running.
 
 ### Verification
 

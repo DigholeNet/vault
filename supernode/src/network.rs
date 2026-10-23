@@ -114,18 +114,25 @@ impl<B: Backend> NetworkSetup<B> {
             !exits.is_empty(),
             "no routed egress interface found for the configured address families (check the routing table)"
         );
-        // Forwarding is a host-wide deployment prerequisite, not an
-        // instance-owned resource. Never toggle it: that can reset IPv4
-        // tunables, suppress IPv6 RA, or break another running service.
+        // Forwarding is shared host state. Enable it without registering it
+        // for rollback: other services may depend on it after we exit.
         for (cidr, key) in [
             (ipv4, "net.ipv4.ip_forward"),
             (ipv6, "net.ipv6.conf.all.forwarding"),
         ] {
-            if cidr.is_some() {
-                anyhow::ensure!(
-                    self.backend.read_sysctl(key)? == "1",
-                    "{key} must already be 1; configure host forwarding before starting supernode (see supernode/README.md)"
-                );
+            if cidr.is_some() && self.backend.read_sysctl(key)? != "1" {
+                if key == "net.ipv6.conf.all.forwarding" {
+                    // Preserve RA reception before switching to router mode.
+                    // An administrator's explicit accept_ra=0 stays disabled.
+                    for exit in exits {
+                        let ra = format!("net/ipv6/conf/{exit}/accept_ra");
+                        if self.backend.read_sysctl(&ra)? == "1" {
+                            self.backend.write_sysctl(&ra, "2")?;
+                        }
+                    }
+                }
+                tracing::info!("Enabling host forwarding: {key}=1");
+                self.backend.write_sysctl(key, "1")?;
             }
         }
         if ipv4.is_some() {
@@ -328,6 +335,7 @@ mod tests {
     struct State {
         rules: Vec<Rule>,
         sysctls: HashMap<String, String>,
+        writes: Vec<(String, String)>,
         calls: usize,
         fail_at: Option<usize>,
     }
@@ -368,11 +376,19 @@ mod tests {
         }
         fn write_sysctl(&mut self, key: &str, value: &str) -> anyhow::Result<()> {
             assert!(
-                key.starts_with("net/ipv") && key.contains("/conf/vpn"),
-                "attempted host-wide mutation: {key}"
+                (key.starts_with("net/ipv") && key.contains("/conf/vpn"))
+                    || matches!(
+                        key,
+                        "net.ipv4.ip_forward"
+                            | "net.ipv6.conf.all.forwarding"
+                            | "net/ipv6/conf/eth0/accept_ra"
+                    ),
+                "unexpected host mutation: {key}"
             );
             self.step()?;
-            self.0.borrow_mut().sysctls.insert(key.into(), value.into());
+            let mut state = self.0.borrow_mut();
+            state.writes.push((key.into(), value.into()));
+            state.sysctls.insert(key.into(), value.into());
             Ok(())
         }
     }
@@ -543,26 +559,103 @@ lan0 0000000A 00000000 0001 0 0 0 00FFFFFF
     }
 
     #[test]
-    fn missing_forwarding_fails_before_any_mutation() {
+    fn forwarding_is_enabled_and_survives_cleanup() {
+        let fake = fixture();
         for key in ["net.ipv4.ip_forward", "net.ipv6.conf.all.forwarding"] {
-            let fake = fixture();
             fake.0.borrow_mut().sysctls.insert(key.into(), "0".into());
-            let original = fake.0.borrow().sysctls.clone();
-            {
-                let mut setup = NetworkSetup::new(fake.clone());
-                let error = setup
-                    .configure(
-                        "vpn",
-                        Some("10.0.0.0/24"),
-                        Some("fd00::/96"),
-                        &["eth0".into()],
-                    )
-                    .unwrap_err();
-                assert!(error.to_string().contains(key));
-            }
-            assert!(fake.0.borrow().rules.is_empty());
-            assert_eq!(fake.0.borrow().sysctls, original);
         }
+        fake.0
+            .borrow_mut()
+            .sysctls
+            .insert("net/ipv6/conf/eth0/accept_ra".into(), "1".into());
+        {
+            let mut setup = NetworkSetup::new(fake.clone());
+            setup
+                .configure(
+                    "vpn",
+                    Some("10.0.0.0/24"),
+                    Some("fd00::/96"),
+                    &["eth0".into()],
+                )
+                .unwrap();
+        }
+        let state = fake.0.borrow();
+        assert!(state.rules.is_empty());
+        assert_eq!(state.sysctls["net.ipv4.ip_forward"], "1");
+        assert_eq!(state.sysctls["net.ipv6.conf.all.forwarding"], "1");
+        assert_eq!(state.sysctls["net/ipv6/conf/eth0/accept_ra"], "2");
+        assert_eq!(
+            state.writes[..3],
+            [
+                ("net.ipv4.ip_forward".into(), "1".into()),
+                ("net/ipv6/conf/eth0/accept_ra".into(), "2".into()),
+                ("net.ipv6.conf.all.forwarding".into(), "1".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn later_startup_failure_keeps_enabled_forwarding() {
+        let fake = fixture();
+        fake.0
+            .borrow_mut()
+            .sysctls
+            .insert("net.ipv4.ip_forward".into(), "0".into());
+        // Fail the TUN-local write after forwarding was enabled.
+        fake.0.borrow_mut().fail_at = Some(5);
+        let mut setup = NetworkSetup::new(fake.clone());
+        assert!(
+            setup
+                .configure("vpn", Some("10.0.0.0/24"), None, &["eth0".into()])
+                .is_err()
+        );
+        drop(setup);
+        assert_eq!(fake.0.borrow().sysctls["net.ipv4.ip_forward"], "1");
+        assert_eq!(
+            fake.0.borrow().sysctls["net/ipv4/conf/vpn/send_redirects"],
+            "1"
+        );
+        assert!(fake.0.borrow().rules.is_empty());
+    }
+
+    #[test]
+    fn forwarding_write_failure_aborts_startup() {
+        let fake = fixture();
+        fake.0
+            .borrow_mut()
+            .sysctls
+            .insert("net.ipv4.ip_forward".into(), "0".into());
+        fake.0.borrow_mut().fail_at = Some(2);
+        let mut setup = NetworkSetup::new(fake.clone());
+        assert!(
+            setup
+                .configure("vpn", Some("10.0.0.0/24"), None, &["eth0".into()])
+                .is_err()
+        );
+        drop(setup);
+        assert!(fake.0.borrow().rules.is_empty());
+        assert_eq!(fake.0.borrow().sysctls["net.ipv6.conf.all.forwarding"], "1");
+    }
+
+    #[test]
+    fn ipv6_only_preserves_disabled_ra_and_ipv4_forwarding() {
+        let fake = fixture();
+        for key in [
+            "net.ipv4.ip_forward",
+            "net.ipv6.conf.all.forwarding",
+            "net/ipv6/conf/eth0/accept_ra",
+        ] {
+            fake.0.borrow_mut().sysctls.insert(key.into(), "0".into());
+        }
+        let mut setup = NetworkSetup::new(fake.clone());
+        setup
+            .configure("vpn", None, Some("fd00::/96"), &["eth0".into()])
+            .unwrap();
+        drop(setup);
+        let state = fake.0.borrow();
+        assert_eq!(state.sysctls["net.ipv4.ip_forward"], "0");
+        assert_eq!(state.sysctls["net.ipv6.conf.all.forwarding"], "1");
+        assert_eq!(state.sysctls["net/ipv6/conf/eth0/accept_ra"], "0");
     }
 
     /// Executed by scripts/test-network-namespace.sh in a fresh netns only.
@@ -614,11 +707,11 @@ lan0 0000000A 00000000 0001 0 0 0 00FFFFFF
             assert!(
                 setup
                     .configure("vpn0", Some("10.0.0.0/24"), None, &["exit0".into()])
-                    .is_err()
+                    .is_ok()
             );
         }
-        assert_eq!(backend.read_sysctl("net.ipv4.ip_forward").unwrap(), "0");
-        // Simulate the documented one-time administrator setup, never the daemon.
+        assert_eq!(backend.read_sysctl("net.ipv4.ip_forward").unwrap(), "1");
+        // Apply custom settings after the initial IPv4 router transition.
         backend
             .write_sysctl("net/ipv6/conf/exit0/accept_ra", "2")
             .unwrap();
