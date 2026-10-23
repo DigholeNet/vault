@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Release (Developer ID distribution) entitlements for the macOS app.
+	     The Developer ID profile only grants the -systemextension variant
+	     of networkextension, matching the sysex provider. The container app
+	     must hold this entitlement too, otherwise nehelper refuses to save
+	     NETunnelProviderManager configurations ("not allowed to save
+	     provider-based configurations", NEVPNErrorDomain code 5). -->
+	<key>com.apple.developer.networking.networkextension</key>
+	<array>
+		<string>packet-tunnel-provider-systemextension</string>
+	</array>
+	<key>com.apple.developer.networking.vpn.api</key>
+	<array>
+		<string>allow-vpn</string>
+	</array>
+	<key>com.apple.developer.system-extension.install</key>
+	<true/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)$(APP_GROUP_ID)</string>
+	</array>
+</dict>
+</plist>

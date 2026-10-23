@@ -1,0 +1,6 @@
+password="change-me-to-a-strong-password"
+port=9527
+iface="vpn"
+ipv4="192.168.10.0/24"
+# Optional IPv6 pool; the server takes the first address for its TUN device.
+#ipv6="fd00::/96"

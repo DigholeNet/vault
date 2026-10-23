@@ -1,0 +1,45 @@
+[workspace]
+members = [
+  "core",
+  "supernode",
+  "clients/linux",
+  "clients/bridge",
+]
+# The cargo-fuzz crate has its own workspace (and needs nightly + cargo-fuzz
+# to build); keep it out of the main one.
+exclude = ["fuzz"]
+resolver = "2"
+# supernode and clients/linux only do anything useful on Linux, but
+# they compile everywhere (stub main elsewhere); keep them out of the
+# default set anyway so `cargo build`/`cargo test` stay focused on the
+# crates that run on the dev machine.
+default-members = [
+  "core",
+  "clients/bridge",
+]
+
+[workspace.package]
+authors = ["Dighole Team"]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+repository = "https://github.com/DigholeNet/vault"
+
+[workspace.dependencies]
+anyhow = "1"
+hex = "0.4"
+serde = {version = "1", features = ["derive"]}
+time = {version = "0.3", features = ["formatting", "macros", "local-offset", "serde"]}
+toml = "0.9"
+tracing = {version = "0.1"}
+tracing-appender = {version = "0.2"}
+tracing-log = {version = "0.2"}
+tracing-subscriber = {version = "0.3", features = ["env-filter", "fmt", "time"]}
+zeroize = { version = "1" }
+
+[profile.release]
+lto = true
+# Keep symbols so on-device profilers (e.g. Perfetto) can symbolize the
+# mobile native libraries when diagnosing performance issues.
+strip = false

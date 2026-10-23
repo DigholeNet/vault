@@ -1,0 +1,66 @@
+Vault
+Copyright (c) 2026 Dighole Team
+
+This project is licensed under the MIT License (see LICENSE).
+
+This distribution includes or builds upon third-party software components
+with the following licenses:
+
+================================================================================
+
+UniFFI — Mozilla Public License 2.0
+https://github.com/mozilla/uniffi-rs
+
+Used by clients/bridge to generate the Kotlin and Swift bindings for the
+Rust core; statically linked into the iOS/macOS/Android client libraries.
+MPL-2.0 is a file-level copyleft license: no UniFFI source files are
+modified by this project. Source code for UniFFI is available at the URL
+above.
+
+================================================================================
+
+ring — Apache-2.0 AND ISC (with portions derived from BoringSSL/OpenSSL)
+https://github.com/briansmith/ring
+
+Provides the cryptographic primitives (X25519, Ed25519, AES-GCM,
+ChaCha20-Poly1305, PBKDF2) used by core/.
+
+================================================================================
+
+spake2 — MIT OR Apache-2.0
+https://github.com/RustCrypto/PAKEs
+
+Provides the SPAKE2 password-authenticated key exchange (over the Ed25519
+group, via curve25519-dalek) used for handshake authentication in core/.
+
+================================================================================
+
+SQLite — public domain
+https://www.sqlite.org
+
+Bundled via the sqlite3-src crate for the supernode's IP lease storage.
+
+================================================================================
+
+JNA (Java Native Access) — Apache-2.0 OR LGPL-2.1-or-later
+https://github.com/java-native-access/jna
+
+Used by the Android client under the Apache-2.0 license option.
+
+================================================================================
+
+Protocol Buffers / prost — BSD-3-Clause / Apache-2.0
+https://github.com/protocolbuffers/protobuf
+https://github.com/tokio-rs/prost
+
+Used for the wire-protocol message encoding in core/.
+
+================================================================================
+
+The application icons and other artwork (Android mipmap assets, Apple asset
+catalogs) are original works of the Dighole Team, distributed under the MIT
+License together with this project.
+
+The complete list of Rust dependencies and their licenses can be generated
+from Cargo.lock with `cargo deny` or `cargo about`; Android dependencies are
+declared in clients/android/gradle/libs.versions.toml.

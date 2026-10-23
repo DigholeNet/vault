@@ -1,0 +1,25 @@
+// Shared identifiers for the Vault app and its extensions.
+//
+// This file is the single source for the app group and the bundle ID
+// prefix: entitlements, Info.plists, and the Swift code all derive from
+// these values.
+//
+// Forks: change both values to identifiers registered under your own
+// Apple Developer team (the app group must be registered in your account),
+// and set your DEVELOPMENT_TEAM (in Xcode, or via TEAM_ID with
+// scripts/package-apple.sh). See "Building your own fork" in
+// clients/apple/README.md.
+APP_GROUP_ID = group.net.dighole.vault
+APP_BUNDLE_ID_PREFIX = net.dighole.Vault
+
+// Apple Developer team ID for signing. Leave empty in the committed file;
+// set it for local development in Config/Local.xcconfig (git-ignored):
+//
+//     TEAM_ID = ABCDE12345
+//
+// Release packaging overrides this via `TEAM_ID=... scripts/package-apple.sh`
+// (an xcodebuild argument, which beats any xcconfig value).
+TEAM_ID = 
+
+// Optional per-developer overrides; not committed.
+#include? "Local.xcconfig"

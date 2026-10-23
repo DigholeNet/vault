@@ -1,0 +1,60 @@
+[package]
+authors.workspace = true
+description = "Vault VPN protocol core: wire protocol, crypto, client session, and server primitives"
+edition.workspace = true
+license.workspace = true
+name = "vault-core"
+publish = false
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[features]
+default = []
+# Platform-independent VPN client session (handshake, heartbeat, reconnect,
+# data pump). Used by the Android/iOS/macOS edge bindings and the Linux
+# edge client; not needed by the supernode.
+client = []
+# Shared mock server for the integration tests of vault-core and
+# vault-bridge; never enable in production builds.
+test = ["client"]
+
+[dependencies]
+anyhow.workspace = true
+libc = {version = "0.2"}
+prost = {version = "0.13"}
+ring = {version = "0.17"}
+serde.workspace = true
+spake2 = {version = "0.4"}
+tokio = {version = "1", features = ["full"]}
+toml.workspace = true
+tracing.workspace = true
+# tracing-subscriber is needed on all platforms: logger/shared.rs routes
+# tracing records into the mobile clients' shared log file.
+tracing-subscriber.workspace = true
+uuid = {version = "1", features = ["v4"]}
+zeroize.workspace = true
+
+# Linux capabilities for the deferred privilege drop (app.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+caps = {version = "0.5"}
+
+# Dependencies used on Linux/Android (TUN device, daemonize, CLI parsing);
+# excluded on iOS where only the client feature is used.
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+clap = {version = "4", features = ["derive"]}
+daemonize = {version = "0.5"}
+dashmap = {version = "6"}
+once_cell = {version = "1"}
+pnet = {version = "0.35"}
+privdrop = {version = "0.5"}
+time.workspace = true
+tracing-appender.workspace = true
+
+[build-dependencies]
+prost-build = {version = "0.13"}
+
+[[test]]
+name = "client"
+path = "tests/client.rs"
+required-features = ["test"]

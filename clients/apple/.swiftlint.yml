@@ -1,0 +1,48 @@
+# SwiftLint configuration for the Apple client.
+# Run from clients/apple:  swiftlint lint
+
+# Generated UniFFI bindings and build outputs are not linted.
+excluded:
+  - VaultCore/Sources/VaultCore/Generated
+  - VaultCore/build
+  - VaultCore/.build
+
+# Only lint our own sources.
+included:
+  - Vault
+  - VaultNetworkExtension
+  - VaultCore/Sources
+
+# The UniFFI-generated API surface dictates some shapes we cannot change
+# (long argument lists, force-try bridges at the FFI boundary, etc.).
+disabled_rules:
+  - todo
+
+opt_in_rules:
+  - empty_count
+  - first_where
+  - last_where
+  - force_unwrapping
+
+analyzer_rules:
+  - unused_import
+
+# Reasonable limits for UI + VPN glue code.
+line_length:
+  warning: 140
+  error: 200
+
+file_length:
+  warning: 800
+  error: 1200
+
+function_body_length:
+  warning: 80
+  error: 150
+
+type_body_length:
+  warning: 400
+  error: 600
+
+force_unwrapping:
+  severity: warning

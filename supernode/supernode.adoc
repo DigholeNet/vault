@@ -1,0 +1,86 @@
+supernode(1)
+============
+
+== Name
+supernode - Vault VPN server
+
+== Synopsis
+*supernode* --config <FILE> [OPTIONS]
+
+*supernode* -s quit
+
+== Description
+supernode is the Vault VPN server. It accepts encrypted tunnels from
+edge clients over UDP (SPAKE2 password-authenticated handshake, X25519 ECDH
+key exchange, AEAD encryption), assigns each client an address from the configured pools,
+relays traffic between clients and the public internet (NAT), and answers
+heartbeat pings.
+
+== Host network setup
+The server sets its own TUN redirect switches to zero. Administrators may
+optionally set *net.ipv4.conf.all.send_redirects=0*: both switches must be zero
+to disable IPv4 redirect sending. If the global switch is on or cannot be read,
+the server warns and continues startup. Global settings are never changed by
+the server.
+
+Exit interfaces come from usable default, connected and static routes, including
+virtual uplinks. LAN-only deployments do not need a default route. Routes must be
+present at startup; restart after changing exit interfaces.
+
+Global forwarding must be configured by the administrator before startup:
+*net.ipv4.ip_forward=1* for an IPv4 pool and
+*net.ipv6.conf.all.forwarding=1* for an IPv6 pool. The server only checks
+these values and never changes or restores them.
+
+For RA-dependent IPv6 uplinks, configure the uplink's *accept_ra=2* before
+enabling IPv6 forwarding. Changing IPv4 *ip_forward* resets other IPv4
+tunables; provision forwarding before applying custom host network settings.
+See the supernode README for persistent sysctl configuration.
+
+== Options
+*--config* <FILE>::
+    Read configuration options from the specified TOML file.
+
+*--log-dir* <DIR>::
+    Print logs also to files in this directory.
+
+*--daemon*::
+    Run the process in the background.
+
+*--pid-file* <FILE>::
+    Store the process id in this file when daemonizing.
+
+*--user* <USER>::
+    Run as other user.
+
+*--group* <GROUP>::
+    Run as other group.
+
+*-s* <S>::
+    Send a control signal to a running instance. Only *quit* is supported.
+
+*-v, --verbose*::
+    Print debug information.
+
+*-q, --quiet*::
+    Only print errors and warnings.
+
+*--version*::
+    Print the version and exit.
+
+*-h, --help*::
+    Print help information.
+
+== Files
+*/etc/vault/supernode.toml*::
+    Configuration file. See *supernode.toml.example* for the available
+    options (password, port, iface, ipv4/ipv6 pools).
+
+*/run/supernode.socket*::
+    Unix datagram socket used to deliver the quit signal to a running
+    instance.
+
+*/run/supernode.socket.lock*::
+    Persistent file used for the process-lifetime instance lock. Duplicate
+    starts cannot replace an active control socket. Do not delete the lock
+    file while the service is running.

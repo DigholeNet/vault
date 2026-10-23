@@ -1,0 +1,2 @@
+[Unit]
+Description=Vault target allowing to start/stop all edge instances

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Developer ID export (macOS): re-signs the app from the archive with
+         the Developer ID Application certificate (must be in the keychain),
+         replacing the development signature. The exported app still needs
+         notarization (NOTARY_PROFILE in scripts/package-apple.sh) before it
+         can run on other Macs. teamID is injected by the packaging script
+         when TEAM_ID is set.
+         The provisioningProfiles mapping is required: with manual signing
+         (CODE_SIGN_STYLE=Manual in the Release macOS config) exportArchive
+         will not auto-discover installed profiles. Profile names must match
+         PROVISIONING_PROFILE_SPECIFIER in the project and the profiles
+         installed under ~/Library/MobileDevice/Provisioning Profiles. -->
+	<key>method</key>
+	<string>developer-id</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>net.dighole.Vault</key>
+		<string>Vault macOS Developer ID</string>
+		<key>net.dighole.Vault.VaultSystemExtension</key>
+		<string>VaultSystemExtension macOS Developer ID</string>
+	</dict>
+</dict>
+</plist>

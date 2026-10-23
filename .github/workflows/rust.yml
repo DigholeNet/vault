@@ -1,0 +1,84 @@
+name: Rust checks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+# rustsec/audit-check creates check runs with the GITHUB_TOKEN.
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install build and isolated network-test tools
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler iproute2 iptables procps util-linux
+
+      - name: Cache cargo registry and target dir
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Check
+        run: cargo check --locked --workspace --all-targets --features vault-core/test
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets --features vault-core/test -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --workspace --features vault-core/test
+
+      - name: Verify server network setup in an isolated Linux namespace
+        run: scripts/test-network-namespace.sh
+
+      - name: Security audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install protoc (needed by vault-core's prost build script)
+        run: brew install protobuf
+
+      - name: Cache cargo registry and target dir
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # Include portable server/client state tests as well as core and bridge.
+      - name: Check
+        run: cargo check --locked --workspace --all-targets --features vault-core/test
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets --features vault-core/test -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --workspace --features vault-core/test

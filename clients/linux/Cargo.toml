@@ -1,0 +1,38 @@
+[package]
+authors.workspace = true
+description = "Vault VPN Linux client"
+edition.workspace = true
+license.workspace = true
+name = "edge"
+publish = false
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+dashmap = {version = "6"}
+hex.workspace = true
+pnet = {version = "0.35"}
+serde.workspace = true
+serde_json = {version = "1"}
+toml = {workspace = true}
+tracing = {workspace = true}
+vault-core = {path = "../../core", features = ["client"]}
+
+[package.metadata.deb]
+assets = [
+  ["target/release/edge", "/usr/bin/edge", "755"],
+  ["assets/edge.toml.example", "/etc/vault/edge.toml.example", "600"],
+  ["assets/edge.service", "/lib/systemd/system/edge.service", "644"],
+  ["assets/edge.target", "/lib/systemd/system/edge.target", "644"],
+  ["target/edge.1.gz", "/usr/share/man/man1/edge.1.gz", "644"],
+]
+depends = "libc6 (>= 2.23), libgcc1 (>= 1:6.0.1), iproute2, procps"
+# resolvectl is optional: use it for systemd-resolved-managed resolv.conf.
+recommends = "systemd-resolved"
+extended-description = """\
+ Vault VPN linux client."""
+license-file = ["../../LICENSE", "1"]
+maintainer-scripts = "assets/deb-scripts"
+section = "net"

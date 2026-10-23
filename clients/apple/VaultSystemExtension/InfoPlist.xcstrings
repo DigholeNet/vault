@@ -1,0 +1,22 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "NSSystemExtensionUsageDescription" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault needs to install a system extension to provide the VPN tunnel."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault 需要安装系统扩展以提供 VPN 隧道。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

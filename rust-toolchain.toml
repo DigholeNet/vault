@@ -1,0 +1,6 @@
+# Cross-compilation targets are installed explicitly by the
+# packaging scripts and CI (rustup target add ...) so contributors don't
+# download nine targets they never use.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

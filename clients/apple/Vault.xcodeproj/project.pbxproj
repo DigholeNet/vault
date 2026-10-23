@@ -1,0 +1,1044 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		F48710332E73C39D0038D7CC /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F48710322E73C39D0038D7CC /* NetworkExtension.framework */; };
+		F487103B2E73C39D0038D7CC /* VaultNetworkExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F48710302E73C39D0038D7CC /* VaultNetworkExtension.appex */; platformFilters = (ios, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F48710412E73C39D0038D7CC /* VaultSystemExtension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = F48710422E73C39D0038D7CC /* VaultSystemExtension.systemextension */; platformFilters = (macos, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F48710512E73C39D0038D7CC /* VaultCore in Frameworks */ = {isa = PBXBuildFile; productRef = F48710502E73C39D0038D7CC /* VaultCore */; };
+		F48710522E73C39D0038D7CC /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F48710322E73C39D0038D7CC /* NetworkExtension.framework */; };
+		F48710C12E73D24B0038D7CC /* VaultCore in Frameworks */ = {isa = PBXBuildFile; productRef = F48710C02E73D24B0038D7CC /* VaultCore */; };
+		F48710C32E73D2520038D7CC /* VaultCore in Frameworks */ = {isa = PBXBuildFile; productRef = F48710C22E73D2520038D7CC /* VaultCore */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F4870FC32E73C2AD0038D7CC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F4870FAC2E73C2AC0038D7CC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F4870FB32E73C2AC0038D7CC;
+			remoteInfo = Vault;
+		};
+		F4870FCD2E73C2AD0038D7CC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F4870FAC2E73C2AC0038D7CC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F4870FB32E73C2AC0038D7CC;
+			remoteInfo = Vault;
+		};
+		F48710392E73C39D0038D7CC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F4870FAC2E73C2AC0038D7CC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F487102F2E73C39D0038D7CC;
+			remoteInfo = VaultNetworkExtension;
+		};
+		F48710462E73C39D0038D7CC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F4870FAC2E73C2AC0038D7CC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F48710492E73C39D0038D7CC;
+			remoteInfo = VaultSystemExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		F48710402E73C39D0038D7CC /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				F487103B2E73C39D0038D7CC /* VaultNetworkExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F48710482E73C39D0038D7CC /* Embed System Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(SYSTEM_EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				F48710412E73C39D0038D7CC /* VaultSystemExtension.systemextension in Embed System Extensions */,
+			);
+			name = "Embed System Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		F4870FB42E73C2AC0038D7CC /* Vault.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Vault.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F4870FC22E73C2AD0038D7CC /* VaultTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VaultTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F4870FCC2E73C2AD0038D7CC /* VaultUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VaultUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F48710302E73C39D0038D7CC /* VaultNetworkExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = VaultNetworkExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F48710422E73C39D0038D7CC /* VaultSystemExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; name = VaultSystemExtension.systemextension; path = "$(APP_BUNDLE_ID_PREFIX).VaultSystemExtension.systemextension"; sourceTree = BUILT_PRODUCTS_DIR; };
+		F48710322E73C39D0038D7CC /* NetworkExtension.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NetworkExtension.framework; path = System/Library/Frameworks/NetworkExtension.framework; sourceTree = SDKROOT; };
+		F48710612E82A0B00038D7CC /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F48710632E82A0B00038D7CC /* Exceptions for "Vault" folder in "Vault" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F4870FB32E73C2AC0038D7CC /* Vault */;
+		};
+		F487103C2E73C39D0038D7CC /* Exceptions for "VaultNetworkExtension" folder in "VaultNetworkExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F487102F2E73C39D0038D7CC /* VaultNetworkExtension */;
+		};
+		F48710442E73C39D0038D7CC /* Exceptions for "VaultSystemExtension" folder in "VaultSystemExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F48710492E73C39D0038D7CC /* VaultSystemExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		F4870FB62E73C2AC0038D7CC /* Vault */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F48710632E82A0B00038D7CC /* Exceptions for "Vault" folder in "Vault" target */,
+			);
+			path = Vault;
+			sourceTree = "<group>";
+		};
+		F4870FC52E73C2AD0038D7CC /* VaultTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = VaultTests;
+			sourceTree = "<group>";
+		};
+		F4870FCF2E73C2AD0038D7CC /* VaultUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = VaultUITests;
+			sourceTree = "<group>";
+		};
+		F48710342E73C39D0038D7CC /* VaultNetworkExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F487103C2E73C39D0038D7CC /* Exceptions for "VaultNetworkExtension" folder in "VaultNetworkExtension" target */,
+			);
+			path = VaultNetworkExtension;
+			sourceTree = "<group>";
+		};
+		F48710432E73C39D0038D7CC /* VaultSystemExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F48710442E73C39D0038D7CC /* Exceptions for "VaultSystemExtension" folder in "VaultSystemExtension" target */,
+			);
+			path = VaultSystemExtension;
+			sourceTree = "<group>";
+		};
+		F48710452E73C39D0038D7CC /* TunnelProvider */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TunnelProvider;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		F4870FB12E73C2AC0038D7CC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F48710C32E73D2520038D7CC /* VaultCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F4870FBF2E73C2AD0038D7CC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F4870FC92E73C2AD0038D7CC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F487102D2E73C39D0038D7CC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F48710C12E73D24B0038D7CC /* VaultCore in Frameworks */,
+				F48710332E73C39D0038D7CC /* NetworkExtension.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F487104E2E73C39D0038D7CC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F48710512E73C39D0038D7CC /* VaultCore in Frameworks */,
+				F48710522E73C39D0038D7CC /* NetworkExtension.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		F4870FAB2E73C2AC0038D7CC = {
+			isa = PBXGroup;
+			children = (
+				F48710622E82A0B00038D7CC /* Config */,
+				F4870FB62E73C2AC0038D7CC /* Vault */,
+				F4870FC52E73C2AD0038D7CC /* VaultTests */,
+				F4870FCF2E73C2AD0038D7CC /* VaultUITests */,
+				F48710342E73C39D0038D7CC /* VaultNetworkExtension */,
+				F48710432E73C39D0038D7CC /* VaultSystemExtension */,
+				F48710452E73C39D0038D7CC /* TunnelProvider */,
+				F48710312E73C39D0038D7CC /* Frameworks */,
+				F4870FB52E73C2AC0038D7CC /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		F48710622E82A0B00038D7CC /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				F48710612E82A0B00038D7CC /* Shared.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		F4870FB52E73C2AC0038D7CC /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F4870FB42E73C2AC0038D7CC /* Vault.app */,
+				F4870FC22E73C2AD0038D7CC /* VaultTests.xctest */,
+				F4870FCC2E73C2AD0038D7CC /* VaultUITests.xctest */,
+				F48710302E73C39D0038D7CC /* VaultNetworkExtension.appex */,
+				F48710422E73C39D0038D7CC /* VaultSystemExtension.systemextension */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F48710312E73C39D0038D7CC /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				F48710322E73C39D0038D7CC /* NetworkExtension.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F4870FB32E73C2AC0038D7CC /* Vault */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F4870FD62E73C2AD0038D7CC /* Build configuration list for PBXNativeTarget "Vault" */;
+			buildPhases = (
+				F4870FB02E73C2AC0038D7CC /* Sources */,
+				F4870FB12E73C2AC0038D7CC /* Frameworks */,
+				F4870FB22E73C2AC0038D7CC /* Resources */,
+				F48710402E73C39D0038D7CC /* Embed Foundation Extensions */,
+				F48710482E73C39D0038D7CC /* Embed System Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F487103A2E73C39D0038D7CC /* PBXTargetDependency */,
+				F48710472E73C39D0038D7CC /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F4870FB62E73C2AC0038D7CC /* Vault */,
+			);
+			name = Vault;
+			packageProductDependencies = (
+				F48710C22E73D2520038D7CC /* VaultCore */,
+			);
+			productName = Vault;
+			productReference = F4870FB42E73C2AC0038D7CC /* Vault.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F4870FC12E73C2AD0038D7CC /* VaultTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F4870FD92E73C2AD0038D7CC /* Build configuration list for PBXNativeTarget "VaultTests" */;
+			buildPhases = (
+				F4870FBE2E73C2AD0038D7CC /* Sources */,
+				F4870FBF2E73C2AD0038D7CC /* Frameworks */,
+				F4870FC02E73C2AD0038D7CC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F4870FC42E73C2AD0038D7CC /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F4870FC52E73C2AD0038D7CC /* VaultTests */,
+			);
+			name = VaultTests;
+			packageProductDependencies = (
+			);
+			productName = VaultTests;
+			productReference = F4870FC22E73C2AD0038D7CC /* VaultTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		F4870FCB2E73C2AD0038D7CC /* VaultUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F4870FDC2E73C2AD0038D7CC /* Build configuration list for PBXNativeTarget "VaultUITests" */;
+			buildPhases = (
+				F4870FC82E73C2AD0038D7CC /* Sources */,
+				F4870FC92E73C2AD0038D7CC /* Frameworks */,
+				F4870FCA2E73C2AD0038D7CC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F4870FCE2E73C2AD0038D7CC /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F4870FCF2E73C2AD0038D7CC /* VaultUITests */,
+			);
+			name = VaultUITests;
+			packageProductDependencies = (
+			);
+			productName = VaultUITests;
+			productReference = F4870FCC2E73C2AD0038D7CC /* VaultUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		F487102F2E73C39D0038D7CC /* VaultNetworkExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F487103D2E73C39D0038D7CC /* Build configuration list for PBXNativeTarget "VaultNetworkExtension" */;
+			buildPhases = (
+				F487102C2E73C39D0038D7CC /* Sources */,
+				F487102D2E73C39D0038D7CC /* Frameworks */,
+				F487102E2E73C39D0038D7CC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F48710452E73C39D0038D7CC /* TunnelProvider */,
+				F48710342E73C39D0038D7CC /* VaultNetworkExtension */,
+			);
+			name = VaultNetworkExtension;
+			packageProductDependencies = (
+				F48710C02E73D24B0038D7CC /* VaultCore */,
+			);
+			productName = VaultNetworkExtension;
+			productReference = F48710302E73C39D0038D7CC /* VaultNetworkExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		F48710492E73C39D0038D7CC /* VaultSystemExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F487104C2E73C39D0038D7CC /* Build configuration list for PBXNativeTarget "VaultSystemExtension" */;
+			buildPhases = (
+				F487104D2E73C39D0038D7CC /* Sources */,
+				F487104E2E73C39D0038D7CC /* Frameworks */,
+				F487104F2E73C39D0038D7CC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F48710452E73C39D0038D7CC /* TunnelProvider */,
+				F48710432E73C39D0038D7CC /* VaultSystemExtension */,
+			);
+			name = VaultSystemExtension;
+			packageProductDependencies = (
+				F48710502E73C39D0038D7CC /* VaultCore */,
+			);
+			productName = VaultSystemExtension;
+			productReference = F48710422E73C39D0038D7CC /* VaultSystemExtension.systemextension */;
+			productType = "com.apple.product-type.system-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F4870FAC2E73C2AC0038D7CC /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1640;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					F4870FB32E73C2AC0038D7CC = {
+						CreatedOnToolsVersion = 16.4;
+					};
+					F4870FC12E73C2AD0038D7CC = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = F4870FB32E73C2AC0038D7CC;
+					};
+					F4870FCB2E73C2AD0038D7CC = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = F4870FB32E73C2AC0038D7CC;
+					};
+					F487102F2E73C39D0038D7CC = {
+						CreatedOnToolsVersion = 16.4;
+					};
+					F48710492E73C39D0038D7CC = {
+						CreatedOnToolsVersion = 16.4;
+					};
+				};
+			};
+			buildConfigurationList = F4870FAF2E73C2AC0038D7CC /* Build configuration list for PBXProject "Vault" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				"zh-Hans",
+			);
+			mainGroup = F4870FAB2E73C2AC0038D7CC;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F48710BF2E73D1F30038D7CC /* XCLocalSwiftPackageReference "VaultCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = F4870FB52E73C2AC0038D7CC /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F4870FB32E73C2AC0038D7CC /* Vault */,
+				F4870FC12E73C2AD0038D7CC /* VaultTests */,
+				F4870FCB2E73C2AD0038D7CC /* VaultUITests */,
+				F487102F2E73C39D0038D7CC /* VaultNetworkExtension */,
+				F48710492E73C39D0038D7CC /* VaultSystemExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F4870FB22E73C2AC0038D7CC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F4870FC02E73C2AD0038D7CC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F4870FCA2E73C2AD0038D7CC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F487102E2E73C39D0038D7CC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F487104F2E73C39D0038D7CC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		F4870FB02E73C2AC0038D7CC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F4870FBE2E73C2AD0038D7CC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F4870FC82E73C2AD0038D7CC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F487102C2E73C39D0038D7CC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F487104D2E73C39D0038D7CC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F4870FC42E73C2AD0038D7CC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F4870FB32E73C2AC0038D7CC /* Vault */;
+			targetProxy = F4870FC32E73C2AD0038D7CC /* PBXContainerItemProxy */;
+		};
+		F4870FCE2E73C2AD0038D7CC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F4870FB32E73C2AC0038D7CC /* Vault */;
+			targetProxy = F4870FCD2E73C2AD0038D7CC /* PBXContainerItemProxy */;
+		};
+		F487103A2E73C39D0038D7CC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F487102F2E73C39D0038D7CC /* VaultNetworkExtension */;
+			targetProxy = F48710392E73C39D0038D7CC /* PBXContainerItemProxy */;
+		};
+		F48710472E73C39D0038D7CC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F48710492E73C39D0038D7CC /* VaultSystemExtension */;
+			targetProxy = F48710462E73C39D0038D7CC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		F4870FD42E73C2AD0038D7CC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = F48710612E82A0B00038D7CC /* Shared.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "$(TEAM_ID)";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		F4870FD52E73C2AD0038D7CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = F48710612E82A0B00038D7CC /* Shared.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "$(TEAM_ID)";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		F4870FD72E73C2AD0038D7CC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Vault/Vault.entitlements;
+			"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Vault/Vault-macOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "$(TEAM_ID)";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_FILE = Vault/Info.plist;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID_PREFIX)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				XROS_DEPLOYMENT_TARGET = 2.5;
+			};
+			name = Debug;
+		};
+		F4870FD82E73C2AD0038D7CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Vault/Vault.entitlements;
+			"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Vault/Vault-macOS-Distribution.entitlements";
+			"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Developer ID Application";
+			"CODE_SIGN_STYLE[sdk=macosx*]" = Manual;
+			"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "Vault macOS Developer ID";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "$(TEAM_ID)";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_FILE = Vault/Info.plist;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID_PREFIX)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				XROS_DEPLOYMENT_TARGET = 2.5;
+			};
+			name = Release;
+		};
+		F4870FDA2E73C2AD0038D7CC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "$(TEAM_ID)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID_PREFIX)Tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Vault.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Vault";
+				XROS_DEPLOYMENT_TARGET = 2.5;
+			};
+			name = Debug;
+		};
+		F4870FDB2E73C2AD0038D7CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "$(TEAM_ID)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID_PREFIX)Tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Vault.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Vault";
+				XROS_DEPLOYMENT_TARGET = 2.5;
+			};
+			name = Release;
+		};
+		F4870FDD2E73C2AD0038D7CC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "$(TEAM_ID)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID_PREFIX)UITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_TARGET_NAME = Vault;
+				XROS_DEPLOYMENT_TARGET = 2.5;
+			};
+			name = Debug;
+		};
+		F4870FDE2E73C2AD0038D7CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "$(TEAM_ID)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID_PREFIX)UITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_TARGET_NAME = Vault;
+				XROS_DEPLOYMENT_TARGET = 2.5;
+			};
+			name = Release;
+		};
+		F487103E2E73C39D0038D7CC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = VaultNetworkExtension/VaultNetworkExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "$(TEAM_ID)";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = VaultNetworkExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = VaultNetworkExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID_PREFIX).VaultNetworkExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F487103F2E73C39D0038D7CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = VaultNetworkExtension/VaultNetworkExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "$(TEAM_ID)";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = VaultNetworkExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = VaultNetworkExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID_PREFIX).VaultNetworkExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		F487104A2E73C39D0038D7CC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = VaultSystemExtension/VaultSystemExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = VaultSystemExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = VaultSystemExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID_PREFIX).VaultSystemExtension";
+				PRODUCT_MODULE_NAME = VaultSystemExtension;
+				PRODUCT_NAME = "$(PRODUCT_BUNDLE_IDENTIFIER)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		F487104B2E73C39D0038D7CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = VaultSystemExtension/VaultSystemExtension-Distribution.entitlements;
+				CODE_SIGN_IDENTITY = "Developer ID Application";
+				CODE_SIGN_STYLE = Manual;
+				PROVISIONING_PROFILE_SPECIFIER = "VaultSystemExtension macOS Developer ID";
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = VaultSystemExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = VaultSystemExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID_PREFIX).VaultSystemExtension";
+				PRODUCT_MODULE_NAME = VaultSystemExtension;
+				PRODUCT_NAME = "$(PRODUCT_BUNDLE_IDENTIFIER)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F4870FAF2E73C2AC0038D7CC /* Build configuration list for PBXProject "Vault" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F4870FD42E73C2AD0038D7CC /* Debug */,
+				F4870FD52E73C2AD0038D7CC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F4870FD62E73C2AD0038D7CC /* Build configuration list for PBXNativeTarget "Vault" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F4870FD72E73C2AD0038D7CC /* Debug */,
+				F4870FD82E73C2AD0038D7CC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F4870FD92E73C2AD0038D7CC /* Build configuration list for PBXNativeTarget "VaultTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F4870FDA2E73C2AD0038D7CC /* Debug */,
+				F4870FDB2E73C2AD0038D7CC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F4870FDC2E73C2AD0038D7CC /* Build configuration list for PBXNativeTarget "VaultUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F4870FDD2E73C2AD0038D7CC /* Debug */,
+				F4870FDE2E73C2AD0038D7CC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F487103D2E73C39D0038D7CC /* Build configuration list for PBXNativeTarget "VaultNetworkExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F487103E2E73C39D0038D7CC /* Debug */,
+				F487103F2E73C39D0038D7CC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F487104C2E73C39D0038D7CC /* Build configuration list for PBXNativeTarget "VaultSystemExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F487104A2E73C39D0038D7CC /* Debug */,
+				F487104B2E73C39D0038D7CC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		F48710BF2E73D1F30038D7CC /* XCLocalSwiftPackageReference "VaultCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = VaultCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F48710C02E73D24B0038D7CC /* VaultCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F48710BF2E73D1F30038D7CC /* XCLocalSwiftPackageReference "VaultCore" */;
+			productName = VaultCore;
+		};
+		F48710C22E73D2520038D7CC /* VaultCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F48710BF2E73D1F30038D7CC /* XCLocalSwiftPackageReference "VaultCore" */;
+			productName = VaultCore;
+		};
+		F48710502E73C39D0038D7CC /* VaultCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F48710BF2E73D1F30038D7CC /* XCLocalSwiftPackageReference "VaultCore" */;
+			productName = VaultCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = F4870FAC2E73C2AC0038D7CC /* Project object */;
+}
