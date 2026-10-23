@@ -1,191 +1,273 @@
-//
-//  MacosMenuView.swift
-//  Vault
-//
-//
-
-import Network
+#if os(macOS)
+import AppKit
 import SwiftUI
 import VaultCore
 
-#if os(macOS)
-    struct MacosMenuView: View {
-        @State private var hasInitialized = false
-        var vpnManager: VpnManager
+/// The label is observed separately so the menu bar updates while the popover is closed.
+struct MacosMenuLabel: View {
+    @ObservedObject var appData: AppData
+    @EnvironmentObject var languageManager: LanguageManager
 
-        @EnvironmentObject var appData: AppData
-        @EnvironmentObject var config: VaultConfig
-        @EnvironmentObject var languageManager: LanguageManager
-
-        var windowManager = WindowManager.shared
-
-        func onError() {
-            appData.vpnOn = false
+    var body: some View {
+        Label {
+            Text(languageManager.tr(appData.macStatusTitle))
+        } icon: {
+            Image("MenuIcon").renderingMode(.original)
         }
-        var body: some View {
+            .help("Vault · " + languageManager.tr(appData.macStatusTitle))
+            .accessibilityLabel("Vault · " + languageManager.tr(appData.macStatusTitle))
+            .onChange(of: languageManager.language) { _, _ in WindowManager.shared.refreshTitles() }
+    }
+}
 
-            VStack {
-                Button(
-                    languageManager.tr(
-                        "Vault: %@ (v %@)",
-                        VpnStatusUtil.getStatus(appData.vpnStatus),
-                        Bundle.main.appVersionShort
-                    )
-                ) {}.disabled(
-                    true
-                )
+struct MacosMenuView: View {
+    let vpnManager: VpnManager
+    @EnvironmentObject var appData: AppData
+    @EnvironmentObject var config: VaultConfig
+    @EnvironmentObject var languageManager: LanguageManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var hoveringConnection = false
+    private enum Action: CaseIterable { case connection, diagnostics, settings, quit }
+    @State private var focusedAction: Action? = .connection
 
-                Divider()
-
-                let turnLabel = languageManager.tr(
-                    (appData.vpnStatus == .on || appData.vpnStatus == .connecting)
-                        ? "Turn Off" : "Turn On"
-                )
-                Button(turnLabel) {
-                    if appData.vpnStatus == .on || appData.vpnStatus == .connecting {
-                        vpnManager.disconnect()
-                    } else {
-                        vpnManager.connect(onError: onError)
-                    }
-                }.disabled(
-                    appData.vpnStatus == VpnStatus.disconnecting
-                )
-
-                Button(languageManager.tr("Status ...")) {
-                    windowManager.showWindow(withIdentifier: "status")
+    var body: some View {
+        VStack(alignment: .leading, spacing: appData.vpnStatus == .off ? 8 : 12) {
+            HStack(spacing: 8) {
+                MacosAppIcon(size: 20)
+                Text("Vault").font(.body.weight(.semibold))
+                Spacer()
+                if appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Circle().fill(appData.macStatusColor).frame(width: 7, height: 7)
                 }
-                .keyboardShortcut("s")
-
-                Button(languageManager.tr("Configure ...")) {
-                    windowManager.showWindow(withIdentifier: "configure")
-                }.keyboardShortcut("c")
-
+                Text(languageManager.tr(appData.macStatusTitle)).font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            Divider()
+            connectionButton
+            if let since = appData.connectedSince,
+                appData.vpnStatus == .on || (appData.vpnStatus == .connecting && appData.isRecovering) {
+                ConnectionDurationView(since: since)
+            }
+            if appData.isRecovering {
+                Text(languageManager.tr("Network changed. Reconnecting…"))
+                    .font(.body).foregroundStyle(.primary.opacity(0.8))
+            } else if let error = appData.connectionError {
+                Text(languageManager.tr(error)).font(.body).foregroundStyle(.primary.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+            // Never show stale counters while disconnected or establishing a new session.
+            if appData.vpnStatus == .on || appData.isRecovering {
                 Divider()
-                Button(languageManager.tr("About ...")) {
-                    windowManager.showWindow(withIdentifier: "about")
+                traffic
+            }
+            Divider()
+            HStack(spacing: 0) {
+                Button { open("status") } label: {
+                    footerLabel("Diagnostics", symbol: "stethoscope")
                 }
-
-                Divider()
-                Button(languageManager.tr("Quit")) {
-                    // disconnect() is an async chain (disable on-demand ->
-                    // save -> stopVPNTunnel); terminating immediately usually
-                    // wins the race and leaves the tunnel up. Wait for the
-                    // status to settle to .off first, with a timeout so Quit
-                    // can never hang.
-                    vpnManager.disconnect()
-                    terminateWhenDisconnected()
+                .macosKeyboardAction(focus: $focusedAction, id: .diagnostics) { open("status") }
+                Divider().frame(height: 16)
+                Button { open("configure") } label: {
+                    footerLabel("Settings", symbol: "gearshape")
+                }.keyboardShortcut(",")
+                .macosKeyboardAction(focus: $focusedAction, id: .settings) { open("configure") }
+                Divider().frame(height: 16)
+                Button {
+                    dismiss()
+                    NSApp.terminate(nil)
+                } label: {
+                    footerLabel("Quit", symbol: "power")
                 }.keyboardShortcut("q")
-
-            }.onAppear {
-                if !hasInitialized {
-                    initializeOnce()
-                    hasInitialized = true
-                }
+                .macosKeyboardAction(focus: $focusedAction, id: .quit) { dismiss(); NSApp.terminate(nil) }
             }
-            .onChange(of: appData.showConfigureGuide) { show in
-                // connect() without server configuration asks us to guide
-                // the user — open the configure window.
-                if show {
-                    appData.showConfigureGuide = false
-                    windowManager.showWindow(withIdentifier: "configure")
-                }
-            }
-            .onChange(of: languageManager.language) {
-                // Window titles are plain NSWindow strings outside SwiftUI's
-                // render loop — refresh them on language change.
-                windowManager.setTitle(languageManager.tr("Status"), for: "status")
-                windowManager.setTitle(languageManager.tr("About"), for: "about")
-            }
+            .buttonStyle(.plain).font(.body).foregroundStyle(.primary)
         }
-
-        /// Poll the VPN status until the tunnel reports fully down, then
-        /// terminate. The ~3s cap guarantees the app exits even if the
-        /// tunnel never reaches .off (e.g. it was still mid-connect or the
-        /// status observer is gone).
-        private func terminateWhenDisconnected(attemptsRemaining: Int = 30) {
-            if vpnManager.vpnStatus == .off || attemptsRemaining <= 0 {
-                NSApplication.shared.terminate(nil)
-                return
+        .font(.body)
+        .padding(.horizontal, 14)
+        .padding(.vertical, appData.vpnStatus == .off ? 12 : 14)
+        .frame(width: 340)
+        .fixedSize(horizontal: false, vertical: true)
+        .macosKeyboardNavigation { [focus = $focusedAction] event in
+            if event.type == .leftMouseDown { focus.wrappedValue = nil; return false }
+            let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+            if event.keyCode == 48, modifiers.subtracting(.shift).isEmpty {
+                let order = Action.allCases.filter { $0 != .connection || appData.vpnStatus != .disconnecting }
+                if let current = focus.wrappedValue, let index = order.firstIndex(of: current) {
+                    focus.wrappedValue = order[(index + (modifiers.contains(.shift) ? order.count - 1 : 1)) % order.count]
+                } else { focus.wrappedValue = modifiers.contains(.shift) ? order.last : order.first }
+                event.window?.makeFirstResponder(nil)
+                return true
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                terminateWhenDisconnected(attemptsRemaining: attemptsRemaining - 1)
+            if event.keyCode == 53, modifiers.isEmpty { dismiss(); return true }
+            guard modifiers.isEmpty, !event.isARepeat, [36, 49, 76].contains(event.keyCode),
+                let selected = focus.wrappedValue else { return false }
+            switch selected {
+            case .connection:
+                if appData.vpnStatus != .disconnecting { toggleConnection() }
+            case .diagnostics: open("status")
+            case .settings: open("configure")
+            case .quit: dismiss(); NSApp.terminate(nil)
             }
+            return true
         }
-
-        private func initializeOnce() {
-            let statusWindowController = createWindowController(
-                title: LanguageManager.shared.tr("Status"),
-                id: "status",
-                width: 400,
-                height: 360,
-                contentView: NSHostingView(
-                    rootView: MacosStatusView(vpnManager: vpnManager)
-                        .environmentObject(appData)
-                        .environmentObject(config)
-                        .environmentObject(LanguageManager.shared)
-                )
-            )
-            windowManager.register(statusWindowController, with: "status")
-
-            let configureWindowController = createWindowController(
-                title: "Vault",
-                id: "configure",
-                width: 500,
-                height: 400,
-                contentView: NSHostingView(
-                    rootView: MacosConfigureView(config: config)
-                        .environmentObject(LanguageManager.shared)
-                )
-            )
-
-            windowManager.register(configureWindowController, with: "configure")
-
-            let aboutWindowController = createWindowController(
-                title: LanguageManager.shared.tr("About"),
-                id: "about",
-                width: 400,
-                height: 300,
-                contentView: NSHostingView(
-                    rootView: MacosAboutView(vpnManager: vpnManager)
-                        .environmentObject(LanguageManager.shared)
-                )
-            )
-
-            windowManager.register(aboutWindowController, with: "about")
-
-        }
-
-        func createWindowController(
-            title: String,
-            id: String,
-            width: Int,
-            height: Int,
-            contentView: NSView
-        ) -> NSWindowController {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-                styleMask: [.titled, .closable],
-                backing: .buffered,
-                defer: false
-            )
-            window.center()
-            window.setFrameAutosaveName(id)
-            window.isReleasedWhenClosed = false
-            window.title = title
-            window.level = .normal
-            window.contentView = contentView
-            let windowController = NSWindowController(window: window)
-            return windowController
+        .onExitCommand { dismiss() }
+        .onChange(of: appData.showConfigureGuide) { _, show in
+            if show {
+                appData.showConfigureGuide = false
+                open("configure")
+            }
         }
     }
 
-    #Preview {
-        let appData = AppData()
-        let config = VaultConfig()
-        let vpnManager = VpnManager(config: config, appData: appData)
-        MacosMenuView(vpnManager: vpnManager)
-            .environmentObject(appData).environmentObject(config)
-            .environmentObject(LanguageManager.shared)
+    private var connectionButton: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Button(action: toggleConnection) {
+                ZStack {
+                    Circle()
+                        .fill(connectionColor.opacity(hoveringConnection ? 0.1 : 0.04))
+                        .overlay(Circle().strokeBorder(connectionColor.opacity(hoveringConnection ? 0.25 : 0.1)))
+                        .shadow(color: Color.black.opacity(hoveringConnection ? 0.16 : 0), radius: 8, y: 4)
+                    Image(systemName: appData.vpnStatus == .off ? "personalhotspot.slash" : "personalhotspot")
+                        .font(.system(size: 48, weight: .regular))
+                        .foregroundStyle(connectionColor)
+                    if appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
+                        ProgressView().controlSize(.small)
+                            .padding(5).background(.regularMaterial, in: Circle()).offset(x: 30, y: 30)
+                    }
+                }
+                .frame(width: 88, height: 88)
+                .contentShape(.interaction, Circle())
+            }
+            .buttonStyle(.plain)
+            .frame(width: 88, height: 88)
+            .contentShape(.interaction, Circle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let point):
+                    let dx = point.x - 44
+                    let dy = point.y - 44
+                    hoveringConnection = dx * dx + dy * dy <= 44 * 44
+                case .ended:
+                    hoveringConnection = false
+                }
+            }
+            .animation(.easeOut(duration: 0.15), value: hoveringConnection)
+            .disabled(appData.vpnStatus == .disconnecting)
+            .help(languageManager.tr(actionTitle))
+            .accessibilityLabel(languageManager.tr(actionTitle))
+            .macosKeyboardAction(focus: $focusedAction, id: .connection,
+                enabled: appData.vpnStatus != .disconnecting, circular: true, action: toggleConnection)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+    }
+    private var connectionColor: Color {
+        if appData.isRecovering { return .orange }
+        switch appData.vpnStatus {
+        case .on: return .green
+        case .connecting: return .accentColor
+        case .disconnecting: return .secondary
+        case .off: return .red
+        }
     }
 
+    private func footerLabel(_ title: String, symbol: String) -> some View {
+        Label(languageManager.tr(title), systemImage: symbol)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+    }
+
+    private var actionTitle: String {
+        switch appData.vpnStatus {
+        case .on: return "Disconnect"
+        case .connecting: return appData.isRecovering ? "Disconnect" : "Cancel Connection"
+        case .disconnecting: return "Disconnecting…"
+        case .off: return appData.connectionError == nil ? "Connect" : "Retry"
+        }
+    }
+    private var traffic: some View {
+        // Explicit cell widths keep live values from redistributing the grid.
+        // All values use the same font; large counters wrap instead of scaling.
+        Grid(alignment: .trailing, horizontalSpacing: 8, verticalSpacing: 2) {
+            GridRow {
+                Color.clear.frame(width: 72, height: 24)
+                trafficHeading("Uplink", symbol: "arrow.up.circle.fill", color: .blue)
+                trafficHeading("Downlink", symbol: "arrow.down.circle.fill", color: .green)
+            }
+            GridRow {
+                trafficLabel("VPN Rate")
+                trafficValue(PacketStats.formatBytes(appData.bytesSentPerSecond) + "/s")
+                trafficValue(PacketStats.formatBytes(appData.bytesReceivedPerSecond) + "/s")
+            }
+            GridRow {
+                trafficLabel("VPN Traffic")
+                trafficValue(PacketStats.formatBytes(appData.bytesSent))
+                trafficValue(PacketStats.formatBytes(appData.bytesReceived))
+            }
+            GridRow {
+                trafficLabel("Packets")
+                trafficValue(String(appData.packetsSent))
+                trafficValue(String(appData.packetsReceived))
+            }
+        }
+        .font(.system(size: NSFont.systemFontSize))
+        .transaction { $0.animation = nil }
+        .frame(maxWidth: .infinity)
+    }
+    private func trafficHeading(_ title: String, symbol: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol).foregroundStyle(color)
+            Text(languageManager.tr(title)).foregroundStyle(.secondary)
+        }
+        .frame(width: 100, height: 24, alignment: .trailing)
+    }
+    private func trafficLabel(_ title: String) -> some View {
+        Text(languageManager.tr(title))
+            .foregroundStyle(.secondary)
+            .frame(width: 72, height: 34, alignment: .leading)
+    }
+    private func trafficValue(_ value: String) -> some View {
+        Text(verbatim: value)
+            .monospacedDigit()
+            .lineLimit(2)
+            .multilineTextAlignment(.trailing)
+            .frame(width: 100, height: 34, alignment: .trailing)
+    }
+    private func toggleConnection() {
+        if appData.vpnStatus == .on || appData.vpnStatus == .connecting {
+            vpnManager.disconnect()
+        } else {
+            if config.host.isEmpty || config.password.isEmpty { open("configure"); return }
+            vpnManager.connect {
+                DispatchQueue.main.async {
+                    appData.vpnOn = false
+                    appData.vpnStatus = .off
+                    if appData.connectionError == nil { appData.connectionError = "Unable to connect. Check your network and server configuration." }
+                }
+            }
+        }
+    }
+    private func open(_ id: String) { dismiss(); WindowManager.shared.showWindow(withIdentifier: id) }
+
+}
+
+extension AppData {
+    var macStatusTitle: String {
+        if isRecovering { return "Reconnecting" }
+        if connectionError != nil && vpnStatus == .off { return "Connection failed" }
+        return VpnStatusUtil.titleKey(for: vpnStatus)
+    }
+    var macStatusColor: Color {
+        if isRecovering { return .orange }
+        if vpnStatus == .on { return .green }
+        if connectionError != nil && vpnStatus == .off { return .red }
+        return .secondary
+    }
+}
 #endif

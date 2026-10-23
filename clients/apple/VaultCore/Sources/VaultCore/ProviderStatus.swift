@@ -7,9 +7,9 @@
 //  Extension provider-message channel (`sendProviderMessage` /
 //  `handleAppMessage`).
 //
-//  Needed on macOS: there the provider is a system extension running
-//  outside the user's session, so App Group UserDefaults are not shared
-//  between it and the app. The app queries this instead.
+//  Both apps query current assigned addresses for route diagnostics.
+//  macOS also polls this payload for statistics because its system
+//  extension runs outside the user's App Group session.
 //
 
 import Foundation

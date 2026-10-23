@@ -1,4 +1,4 @@
-name: Apple release
+name: Apple checks
 
 # PR/push checks for the Apple clients: SwiftLint, VaultCore unit tests and
 # an unsigned iOS Simulator build. Signed release packaging (iOS IPA +
@@ -54,7 +54,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios, x86_64-apple-darwin
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios, aarch64-apple-darwin, x86_64-apple-darwin
 
       - name: Cache cargo registry and target dir
         uses: actions/cache@v5

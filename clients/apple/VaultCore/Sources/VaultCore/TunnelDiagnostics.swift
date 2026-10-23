@@ -3,13 +3,10 @@
 //  VaultCore
 //
 //
-//  Active probing for the "VPN is on and ping works, but web pages do not
-//  load" class of failures. The provider's own sockets bypass the tunnel by
-//  default, so every probe pins itself to an interface explicitly: the utun
-//  interface (tunnel path, via IP_BOUND_IF / NWParameters.requiredInterface)
-//  and the physical interface (direct path, as a control group). Every step
-//  appends a "[probe]" line to the shared file log so a failing session can
-//  be diagnosed after the fact from View Logs.
+//  Provider DNS/TCP/HTTPS probes bind to the tunnel interface. Separate
+//  app-process HTTPS checks use the system resolver and default routing.
+//  Optional unbound ICMP samples are observations, not path/loss verdicts.
+//  All steps are recorded in the shared file log with a [probe] prefix.
 //
 //  The suite is synchronous and meant to run on a background queue; each
 //  probe has its own timeout and the whole suite gives up past a total
@@ -21,20 +18,104 @@ import Network
 import Security
 import os.log
 
+public final class DiagnosticsCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    public init() {}
+    public func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+    public var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+}
+
+public struct DiagnosticsCheck: Codable, Sendable, Identifiable {
+    public enum State: String, Codable, Sendable { case passed, failed, incomplete }
+    public var id: String
+    public var passed: Int
+    public var attempted: Int
+    public var state: State
+    /// Mean duration of the sampled requests, in milliseconds.
+    public var durationMs: Int
+    public var sampleCount: Int?
+
+    public init(id: String, passed: Int, attempted: Int, state: State, durationMs: Int, sampleCount: Int? = nil) {
+        self.id = id
+        self.passed = passed
+        self.attempted = attempted
+        self.state = state
+        self.durationMs = durationMs
+        self.sampleCount = sampleCount
+    }
+
+    public static func measured(id: String, passed: Int, attempted: Int, state: State, probes: [DiagnosticsProbe]) -> DiagnosticsCheck {
+        let samples = probes.filter { $0.stage == id }
+        let average = samples.isEmpty ? 0 : Int((samples.reduce(0.0) { $0 + Double($1.durationMs) } / Double(samples.count)).rounded())
+        return DiagnosticsCheck(id: id, passed: passed, attempted: attempted, state: state,
+            durationMs: average, sampleCount: samples.count)
+    }
+}
+
+public struct DiagnosticsProbe: Codable, Sendable, Identifiable {
+    public var id: String
+    public var stage: String
+    public var domain: String
+    public var durationMs: Int
+    public var succeeded: Bool
+    public var detail: String
+    public var tlsDurationMs: Int?
+
+    public init(stage: String, domain: String, durationMs: Int, succeeded: Bool, detail: String, tlsDurationMs: Int? = nil) {
+        self.id = UUID().uuidString
+        self.stage = stage
+        self.domain = domain
+        self.durationMs = durationMs
+        self.succeeded = succeeded
+        self.detail = detail
+        self.tlsDurationMs = tlsDurationMs
+    }
+}
+
 public struct DiagnosticsResult: Codable, Sendable {
     public var summary: String
     public var lines: [String]
+    public var domains: [String]?
+    public var checks: [DiagnosticsCheck]?
+    public var durationMs: Int?
+    public var activeCheck: String?
+    public var probes: [DiagnosticsProbe]?
 
-    public init(summary: String, lines: [String]) {
+    public init(summary: String, lines: [String], domains: [String]? = nil, checks: [DiagnosticsCheck]? = nil, durationMs: Int? = nil, activeCheck: String? = nil, probes: [DiagnosticsProbe]? = nil) {
         self.summary = summary
         self.lines = lines
+        self.domains = domains
+        self.checks = checks
+        self.durationMs = durationMs
+        self.activeCheck = activeCheck
+        self.probes = probes
     }
+    public mutating func appendApplicationResult(_ result: DiagnosticsResult) {
+        lines.append(contentsOf: result.lines)
+        checks = (checks ?? []) + (result.checks ?? [])
+        probes = (probes ?? []) + (result.probes ?? [])
+        if let elapsed = result.durationMs { durationMs = (durationMs ?? 0) + elapsed }
+        if summary.hasPrefix("OK"), !result.summary.hasPrefix("OK") {
+            summary = result.summary
+        } else {
+            summary += "; " + result.summary
+        }
+    }
+
 }
 
 public enum TunnelDiagnostics {
 
-    /// Domains probed when the user has not configured any: one neutral
-    /// control reachable everywhere, plus two typically blocked sites.
+    /// Default HTTPS targets; availability depends on the user's network.
     public static let defaultProbeDomains = ["www.google.com", "github.com", "t.co"]
 
     private static let totalBudget: TimeInterval = 60
@@ -50,182 +131,153 @@ public enum TunnelDiagnostics {
         return Array(Set([64, min(1200, mtu), mtu])).sorted()
     }
 
-    private struct Context {
-        let startedAt: Date
+    struct Context {
+        let startedAt: TimeInterval
+        let cancellation: DiagnosticsCancellation
         let tunnelName: String
         let tunnelIndex: UInt32
         let tunnelNWInterface: NWInterface?
-        let physicalName: String?
-        let physicalIndex: UInt32?
-        let physicalNWInterface: NWInterface?
-        /// The supernode's own endpoint, used as the physical-path control:
-        /// it must answer on the physical link whenever the tunnel is up,
-        /// so a failed control connect really means the link is sick.
-        /// (Using a probe domain as the control misfires for domains that
-        /// are blocked on the direct path.)
-        var controlEndpoint: (host: String, port: UInt16)?
         var mtuSizes: [Int] = mtuSweepSizes(tunnelMtu: nil)
         var lines: [String] = []
+        var checks: [DiagnosticsCheck] = []
+        var probes: [DiagnosticsProbe] = []
         var suspects: [String] = []
         var stageSummaries: [String] = []
         var failures = 0
-        var overBudget: Bool { Date().timeIntervalSince(startedAt) > totalBudget }
+        var remaining: TimeInterval {
+            max(0, totalBudget - (ProcessInfo.processInfo.systemUptime - startedAt))
+        }
+        var overBudget: Bool { remaining <= 0 || cancellation.isCancelled }
+        var incomplete = false
+        var httpsCompleted = 0
+        func timeout(_ limit: TimeInterval) -> TimeInterval { max(0.001, min(limit, remaining)) }
     }
 
     /// Runs the full probe suite. `tunnelIPv4` is the address the supernode
     /// assigned to the utun interface (used to locate the interface).
     public static func run(
         dnsServers: [String], tunnelIPv4: String, tunnelIPv4Mask: String?, domains: [String],
-        controlEndpoint: (host: String, port: UInt16)? = nil, tunnelMtu: Int? = nil
+        tunnelMtu: Int? = nil,
+        cancellation: DiagnosticsCancellation = DiagnosticsCancellation(),
+        onProgress: ((DiagnosticsResult) -> Void)? = nil
     ) -> DiagnosticsResult {
-        let start = Date()
+        let start = ProcessInfo.processInfo.systemUptime
         let header = "[probe] ==== diagnostics start ===="
         log(header)
 
-        guard var ctx = discoverInterfaces(tunnelIPv4: tunnelIPv4) else {
+        guard var ctx = discoverInterfaces(tunnelIPv4: tunnelIPv4, cancellation: cancellation, startedAt: start) else {
             let line = "[probe] abort: tunnel interface carrying \(tunnelIPv4) not found"
             log(line)
             return DiagnosticsResult(summary: "tunnel interface not found", lines: [header, line])
         }
-        ctx.controlEndpoint = controlEndpoint
         ctx.mtuSizes = mtuSweepSizes(tunnelMtu: tunnelMtu)
         ctx.lines.append(header)
         log(
             &ctx,
             "[probe] interfaces: tunnel=\(ctx.tunnelName)(idx \(ctx.tunnelIndex))"
-                + " physical=\(ctx.physicalName ?? "none")(idx \(ctx.physicalIndex ?? 0))"
         )
 
         let resolver = dnsServers.first ?? "1.1.1.1"
-        let targets = domains.isEmpty ? defaultProbeDomains : domains
+        var seen = Set<String>()
+        let targets = (domains.isEmpty ? defaultProbeDomains : domains).filter {
+            seen.insert($0).inserted
+        }
         log(&ctx, "[probe] targets: \(targets.joined(separator: ", ")); resolver \(resolver)")
 
         let gateway = tunnelIPv4Mask.flatMap { gatewayAddress(ip: tunnelIPv4, mask: $0) }
-        icmpSweep(&ctx, resolver: resolver, gateway: gateway)
-        let answers = dnsSweep(&ctx, resolver: resolver, domains: targets)
-        tcpSweep(&ctx, domains: targets, answers: answers)
-        httpsSweep(&ctx, domains: targets, answers: answers)
-
-        let summary = summarize(ctx: ctx, answers: answers)
+        // Business traffic gets the budget first. ICMP is optional evidence.
+        let answers = dnsSweep(
+            &ctx, resolvers: dnsServers.isEmpty ? [resolver] : dnsServers, domains: targets)
+        onProgress?(DiagnosticsResult(summary: "RUNNING", lines: ctx.lines, domains: targets, checks: ctx.checks, durationMs: elapsedMs(since: start), activeCheck: "tcp", probes: ctx.probes))
+        let tcpTargets = tcpSweep(&ctx, domains: targets, answers: answers)
+        onProgress?(DiagnosticsResult(summary: "RUNNING", lines: ctx.lines, domains: targets, checks: ctx.checks, durationMs: elapsedMs(since: start), activeCheck: "https", probes: ctx.probes))
+        httpsSweep(&ctx, domains: targets, targets: tcpTargets)
+        onProgress?(DiagnosticsResult(summary: "RUNNING", lines: ctx.lines, domains: targets, checks: ctx.checks, durationMs: elapsedMs(since: start), activeCheck: "icmp", probes: ctx.probes))
+        if ctx.httpsCompleted != tcpTargets.count { ctx.incomplete = true }
+        // Optional observations must not invalidate completed required checks.
+        var summary = summarize(ctx: ctx)
+        if !ctx.overBudget { icmpSweep(&ctx, gateway: gateway) }
+        if cancellation.isCancelled { summary = "INCOMPLETE - tunnel session changed" }
         log(&ctx, "[probe] summary: \(summary)")
-        let footer = "[probe] ==== diagnostics done in \(String(format: "%.1f", Date().timeIntervalSince(start)))s ===="
+        let footer =
+            "[probe] ==== diagnostics done in \(String(format: "%.1f", (ProcessInfo.processInfo.systemUptime - start)))s ===="
         log(footer)
-        return DiagnosticsResult(summary: summary, lines: ctx.lines + [footer])
+        return DiagnosticsResult(summary: summary, lines: ctx.lines + [footer], domains: targets, checks: ctx.checks, durationMs: elapsedMs(since: start), probes: ctx.probes)
+    }
+
+    private static func elapsedMs(since start: TimeInterval) -> Int {
+        max(0, Int(((ProcessInfo.processInfo.systemUptime - start) * 1000).rounded()))
+    }
+
+    /// Call from the app process on a background queue. Unbound connections
+    /// exercise the system resolver and the route actually used by apps.
+    /// This is separate from the provider's fixed-IP IPv4 checks.
+    public static func runApplicationChecks(domains: [String], cancellation: DiagnosticsCancellation = DiagnosticsCancellation()) -> DiagnosticsResult {
+        let start = ProcessInfo.processInfo.systemUptime
+        var lines: [String] = []
+        var probes: [DiagnosticsProbe] = []
+        var failures = 0
+        var attempted = 0
+        for domain in domains {
+            let remaining = 20 - (ProcessInfo.processInfo.systemUptime - start)
+            if remaining <= 0 || cancellation.isCancelled { break }
+            attempted += 1
+            let probeStart = ProcessInfo.processInfo.systemUptime
+            let result: Result<(http: String, tlsTime: TimeInterval, cert: String), ProbeError> =
+                DNSPacket.buildQuery(domain: domain, id: 0) == nil
+                ? .failure(ProbeError("invalid probe domain"))
+                : httpsGet(host: domain, timeout: min(httpsTimeout, remaining))
+            let line: String
+            switch result {
+            case .success(let response):
+                probes.append(DiagnosticsProbe(
+                    stage: "application", domain: domain, durationMs: elapsedMs(since: probeStart),
+                    succeeded: true, detail: response.http,
+                    tlsDurationMs: Int((response.tlsTime * 1000).rounded())))
+                line = "[probe] app system-DNS/default-route HTTPS \(domain): \(response.http)"
+            case .failure(let error):
+                failures += 1
+                probes.append(DiagnosticsProbe(stage: "application", domain: domain, durationMs: elapsedMs(since: probeStart), succeeded: false, detail: error.description))
+                line = "[probe] app system-DNS/default-route HTTPS \(domain): failed \(error)"
+            }
+            let timedLine = line + " duration=\(elapsedMs(since: probeStart))ms"
+            lines.append(timedLine)
+            log(timedLine)
+        }
+        let summary: String
+        if cancellation.isCancelled {
+            summary = "INCOMPLETE - tunnel session changed"
+        } else if attempted != domains.count || domains.isEmpty {
+            summary = "INCOMPLETE - app HTTPS checks \(attempted - failures)/\(attempted) passed"
+        } else if failures > 0 {
+            summary =
+                "PROBLEMS FOUND - app HTTPS checks \(attempted - failures)/\(attempted) passed; see per-domain results"
+        } else {
+            summary = "OK - app system-DNS/default-route HTTPS \(attempted)/\(attempted) passed"
+        }
+        let elapsed = elapsedMs(since: start)
+        let state: DiagnosticsCheck.State = cancellation.isCancelled || attempted != domains.count || domains.isEmpty
+            ? .incomplete : (failures > 0 ? .failed : .passed)
+        return DiagnosticsResult(summary: summary, lines: lines, checks: [
+            DiagnosticsCheck.measured(id: "application", passed: attempted - failures, attempted: attempted, state: state, probes: probes)
+        ], durationMs: elapsed, probes: probes)
     }
 
     // MARK: - Suite steps
 
-    /// ICMP echo at increasing packet sizes with DF set: small packets
-    /// getting through while large ones vanish is the classic MTU black hole
-    /// behind "ping works but TLS hangs".
-    ///
-    /// Two targets, two different meanings:
-    /// - the tunnel gateway (the supernode's own TUN address) — the reply is
-    ///   generated by the supernode kernel and travels back through the
-    ///   tunnel at full size, so this measures the tunnel path itself and
-    ///   needs no ICMP forwarding to the internet;
-    /// - the resolver — this additionally exercises the supernode's ICMP
-    ///   forwarding/NAT, which is not required for TCP/UDP and may legitimately
-    ///   be missing.
-    ///
-    /// Tunnel-side ICMP probes are deliberately NOT bound to the utun
-    /// interface: unlike TCP/UDP, an ICMP datagram socket bound with
-    /// IP_BOUND_IF never matches its replies on macOS. The extension follows
-    /// the system routing table, and the tunnel owns the default route while
-    /// it is up, so unbound echo requests take the tunnel — the same path
-    /// system ping takes. The physical control below still binds.
-    private static func icmpSweep(_ ctx: inout Context, resolver: String, gateway: String?) {
-        var tunnelOkSizes: Int?
-        if let gateway {
-            let results = pingSizes(&ctx, host: gateway, ifIndex: 0)
-            let ok = okSizeCount(results, sizes: ctx.mtuSizes)
-            log(&ctx, "[probe] icmp via tunnel to gateway \(gateway): \(detail(of: results, sizes: ctx.mtuSizes))")
-            if ok == 0 {
-                // The gateway is the supernode's own address; it should
-                // always answer. Without it the tunnel MTU cannot be
-                // measured, but TCP/UDP may still be fine.
-                ctx.suspects.append("tunnel gateway \(gateway) did not answer ICMP; tunnel MTU unmeasured")
-            } else {
-                tunnelOkSizes = ok
-                ctx.stageSummaries.append("icmp-mtu \(ok)/\(ctx.mtuSizes.count) sizes ok (gateway)")
-                if results[ctx.mtuSizes.first!]?.hasPrefix("ok") == true,
-                    let largest = ctx.mtuSizes.last, results[largest]?.hasPrefix("lost") == true
-                {
-                    ctx.failures += 1
-                    ctx.suspects.append("MTU black hole on tunnel path")
-                }
-            }
-        }
-
-        let results = pingSizes(&ctx, host: resolver, ifIndex: 0)
-        let ok = okSizeCount(results, sizes: ctx.mtuSizes)
-        log(&ctx, "[probe] icmp via tunnel to \(resolver): \(detail(of: results, sizes: ctx.mtuSizes))")
-        if tunnelOkSizes == nil {
-            ctx.stageSummaries.append("icmp-mtu \(ok)/\(ctx.mtuSizes.count) sizes ok")
-        }
-        if ok == 0, tunnelOkSizes != nil {
-            // ICMP to the tunnel's own gateway works, only forwarded ICMP is
-            // missing: informational, not a failure — TCP/UDP are unaffected.
-            log(&ctx, "[probe] note: supernode does not forward ICMP to the internet (gateway answers, \(resolver) does not)")
-        } else if ok > 0, ok < ctx.mtuSizes.count,
-            results[ctx.mtuSizes.first!]?.hasPrefix("ok") == true,
-            let largest = ctx.mtuSizes.last, results[largest]?.hasPrefix("lost") == true
-        {
-            ctx.failures += 1
-            ctx.suspects.append("MTU black hole on tunnel path")
-        } else if ok == 0, tunnelOkSizes == nil {
-            ctx.failures += 1
-            ctx.suspects.append("ICMP via tunnel fully broken")
-        }
-
-        // Physical-path control: ping the supernode itself (it answers the
-        // tunnel heartbeat over the physical link, so it must be reachable
-        // there whenever the tunnel is up). Bursts at two sizes quantify
-        // link quality: the tunnel's UDP transport has no retransmission,
-        // so physical loss becomes inner TCP loss — a link that drops large
-        // packets is exactly "ping works, HTTPS stalls".
-        if let physIndex = ctx.physicalIndex, let control = ctx.controlEndpoint {
-            var rtts: [Int] = []
-            var smallLost = 0
-            var largeLost = 0
-            for seq in 0..<10 {
-                switch icmpPing(
-                    host: control.host, ifIndex: physIndex,
-                    totalSize: 64, sequence: UInt16(100 + seq), timeout: icmpTimeout
-                ) {
-                case .success(let rtt): rtts.append(Int(rtt * 1000))
-                case .failure: smallLost += 1
-                }
-            }
-            for seq in 0..<5 {
-                if ctx.overBudget { break }
-                switch icmpPing(
-                    host: control.host, ifIndex: physIndex,
-                    totalSize: 1400, sequence: UInt16(200 + seq), timeout: icmpTimeout
-                ) {
-                case .success(let rtt): rtts.append(Int(rtt * 1000))
-                case .failure: largeLost += 1
-                }
-            }
-            let rttDesc = rtts.isEmpty ? "-" : "\(rtts.min() ?? 0)/\(rtts.reduce(0, +) / rtts.count)ms"
-            log(
-                &ctx,
-                "[probe] icmp control supernode(\(control.host)) via physical: "
-                    + "64B lost \(smallLost)/10, 1400B lost \(largeLost)/5, rtt min/avg \(rttDesc)"
-            )
-            ctx.stageSummaries.append(
-                "physical-link loss \(smallLost * 10)% small / \(largeLost * 20)% large"
-            )
-            if smallLost == 10 {
-                ctx.failures += 1
-                ctx.suspects.append("physical link unhealthy (supernode unreachable on physical path)")
-            } else if smallLost >= 2 || largeLost >= 2 {
-                ctx.failures += 1
-                ctx.suspects.append(
-                    "physical link to supernode is lossy (\(smallLost * 10)% small, \(largeLost * 20)% large); tunnel has no retransmission, so HTTPS stalls under this loss"
-                )
-            }
-        }
+    /// Optional unbound ICMP observations. They cannot establish tunnel path
+    /// selection or transport loss, so they never change the verdict.
+    private static func icmpSweep(_ ctx: inout Context, gateway: String?) {
+        guard let gateway, !ctx.overBudget else { return }
+        let results = pingSizes(&ctx, host: gateway, ifIndex: 0)
+        log(
+            &ctx,
+            "[probe] icmp gateway \(gateway), unbound/path unverified: \(detail(of: results, sizes: ctx.mtuSizes))"
+        )
+        log(
+            &ctx,
+            "[probe] note: ICMP is informational; no reply does not establish packet loss or an MTU fault. Physical UDP transport quality is not measured."
+        )
     }
 
     /// Two echo requests per size; returns "ok rtt=…"/"lost" per size.
@@ -243,24 +295,28 @@ public enum TunnelDiagnostics {
             var ok = 0
             var rtts: [Int] = []
             for seq in 0..<2 {
+                if ctx.overBudget { break }
                 switch icmpPing(
                     host: host, ifIndex: ifIndex,
-                    totalSize: size, sequence: UInt16(seq), timeout: icmpTimeout
+                    totalSize: size, sequence: UInt16(seq), timeout: ctx.timeout(icmpTimeout)
                 ) {
                 case .success(let rtt):
                     ok += 1
                     rtts.append(Int(rtt * 1000))
-                case .failure:
-                    break
+                case .failure(let error):
+                    results[size] = "unavailable: \(error)"
                 }
             }
-            results[size] = ok > 0 ? "ok rtt=\(rtts.first ?? 0)ms (\(ok)/2)" : "lost (0/2)"
+            if ok == 0 {
+                if size == ctx.mtuSizes.first {
+                    log(&ctx, "[probe] icmp: baseline unavailable; skipping larger packets")
+                    break
+                }
+                continue
+            }
+            results[size] = "ok rtt=\(rtts.first ?? 0)ms (\(ok)/2)"
         }
         return results
-    }
-
-    private static func okSizeCount(_ results: [Int: String], sizes: [Int]) -> Int {
-        sizes.filter { results[$0]?.hasPrefix("ok") == true }.count
     }
 
     private static func detail(of results: [Int: String], sizes: [Int]) -> String {
@@ -283,49 +339,55 @@ public enum TunnelDiagnostics {
         return String(cString: buf)
     }
 
-    /// Resolves each domain twice: through the tunnel and through the
-    /// physical interface. Identical answers on both paths for a blocked
-    /// domain mean the tunnel DNS leaked or the upstream is poisoned.
-    private static func dnsSweep(_ ctx: inout Context, resolver: String, domains: [String]) -> [String: [String]] {
+    /// Resolves through the tunnel, falling back across configured resolvers.
+    /// Answer equality is never evidence of leakage or poisoning.
+    private static func dnsSweep(_ ctx: inout Context, resolvers: [String], domains: [String])
+        -> [String: [String]]
+    {
         var answers: [String: [String]] = [:]
-        var tunnelOk = 0
-        var tunnelFail = 0
+        var attempted = 0
         for domain in domains {
             if ctx.overBudget {
-                log(&ctx, "[probe] dns: skipped remaining domains (time budget)")
+                ctx.incomplete = true
                 break
             }
-            let tunnel = dnsQuery(server: resolver, domain: domain, ifIndex: ctx.tunnelIndex)
-            let direct: Result<[String], ProbeError>? = ctx.physicalIndex.map {
-                dnsQuery(server: resolver, domain: domain, ifIndex: $0)
-            }
-            let tunnelDesc = describe(tunnel)
-            let directDesc = direct.map(describe) ?? "n/a"
-            log(&ctx, "[probe] dns \(domain): tunnel=\(tunnelDesc) direct=\(directDesc)")
-            if case .success(let ips) = tunnel, !ips.isEmpty {
-                tunnelOk += 1
-                answers[domain] = ips
-                if case .success(let directIps) = direct, Set(ips) == Set(directIps) {
-                    ctx.suspects.append("dns \(domain): tunnel answer identical to direct path (leak or poisoned upstream)")
+            attempted += 1
+            for resolver in resolvers {
+                if ctx.overBudget {
+                    ctx.incomplete = true
+                    break
                 }
-            } else {
-                tunnelFail += 1
+                let probeStart = ProcessInfo.processInfo.systemUptime
+                let result = dnsQuery(
+                    server: resolver, domain: domain, ifIndex: ctx.tunnelIndex,
+                    timeout: ctx.timeout(dnsTimeout))
+                log(&ctx, "[probe] dns \(domain) server=\(resolver): \(describe(result)) duration=\(elapsedMs(since: probeStart))ms")
+                let succeeded: Bool
+                if case .success(let ips) = result { succeeded = !ips.isEmpty } else { succeeded = false }
+                ctx.probes.append(DiagnosticsProbe(stage: "dns", domain: domain, durationMs: elapsedMs(since: probeStart), succeeded: succeeded, detail: "\(resolver): \(describe(result))"))
+                if case .success(let ips) = result, !ips.isEmpty {
+                    answers[domain] = ips
+                    break
+                }
+            }
+            if answers[domain] == nil, !ctx.overBudget {
+                ctx.failures += 1
+                ctx.suspects.append("DNS A lookup failed for \(domain); see resolver results")
             }
         }
-        ctx.stageSummaries.append("dns \(tunnelOk)/\(tunnelOk + tunnelFail) resolved")
-        ctx.failures += tunnelFail
-        if tunnelFail == domains.count, !domains.isEmpty {
-            ctx.suspects.append("tunnel DNS unreachable")
-        }
+        ctx.checks.append(DiagnosticsCheck.measured(id: "dns", passed: answers.count, attempted: attempted,
+            state: attempted != domains.count || ctx.overBudget ? .incomplete : (answers.count == attempted ? .passed : .failed),
+            probes: ctx.probes))
+        ctx.stageSummaries.append("dns \(answers.count)/\(attempted) resolved")
         return answers
     }
 
-    /// TCP connect to port 443 of the tunnel-resolved addresses, plus one
-    /// control connect over the physical interface to prove the underlying
-    /// link itself is healthy.
-    private static func tcpSweep(_ ctx: inout Context, domains: [String], answers: [String: [String]]) {
-        var ok = 0
-        var fail = 0
+    /// TCP connect to port 443 of tunnel-resolved IPv4 addresses.
+    private static func tcpSweep(_ ctx: inout Context, domains: [String], answers: [String: [String]])
+        -> [String: String]
+    {
+        var selected: [String: String] = [:]
+        var failedDomains = 0
         for domain in domains {
             guard let ips = answers[domain], !ips.isEmpty else {
                 log(&ctx, "[probe] tcp \(domain): skipped (no tunnel DNS answer)")
@@ -333,97 +395,128 @@ public enum TunnelDiagnostics {
             }
             for ip in ips.prefix(2) {
                 if ctx.overBudget {
-                    log(&ctx, "[probe] tcp: skipped remaining (time budget)")
+                    ctx.incomplete = true
                     break
                 }
-                switch tcpConnect(ip: ip, port: 443, ifIndex: ctx.tunnelIndex, timeout: tcpTimeout) {
+                let probeStart = ProcessInfo.processInfo.systemUptime
+                switch tcpConnect(
+                    ip: ip, port: 443, ifIndex: ctx.tunnelIndex, timeout: ctx.timeout(tcpTimeout))
+                {
                 case .success(let t):
-                    ok += 1
+                    selected[domain] = ip
+                    ctx.probes.append(DiagnosticsProbe(stage: "tcp", domain: domain, durationMs: Int((t * 1000).rounded()), succeeded: true, detail: "\(ip):443"))
                     log(&ctx, "[probe] tcp \(domain)(\(ip):443) via tunnel: ok \(Int(t * 1000))ms")
                 case .failure(let why):
-                    fail += 1
-                    log(&ctx, "[probe] tcp \(domain)(\(ip):443) via tunnel: fail \(why)")
+                    ctx.probes.append(DiagnosticsProbe(stage: "tcp", domain: domain, durationMs: elapsedMs(since: probeStart), succeeded: false, detail: "\(ip):443 · \(why)"))
+                    log(&ctx, "[probe] tcp \(domain)(\(ip):443) via tunnel: fail \(why) duration=\(elapsedMs(since: probeStart))ms")
                 }
+                if selected[domain] != nil { break }
+            }
+            if selected[domain] == nil, !ctx.overBudget {
+                failedDomains += 1
+                ctx.suspects.append("TCP candidates failed for \(domain)")
             }
         }
-        ctx.stageSummaries.append("tcp \(ok)/\(ok + fail) ok")
-        ctx.failures += fail
-        if fail > 0, ok == 0 {
-            ctx.suspects.append("TCP via tunnel unreachable")
-        }
+        ctx.checks.append(DiagnosticsCheck.measured(id: "tcp", passed: selected.count, attempted: selected.count + failedDomains,
+            state: ctx.overBudget || answers.isEmpty ? .incomplete : (failedDomains > 0 ? .failed : .passed),
+            probes: ctx.probes))
+        ctx.stageSummaries.append("tcp \(selected.count)/\(selected.count + failedDomains) domains ok")
+        ctx.failures += failedDomains
+        return selected
     }
 
     /// Full TLS handshake + HTTP/1.1 request through the tunnel: this is the
     /// exact exchange that fails when "the page does not load". The peer
     /// certificate subject is logged to expose interception.
-    private static func httpsSweep(_ ctx: inout Context, domains: [String], answers: [String: [String]]) {
+    private static func httpsSweep(_ ctx: inout Context, domains: [String], targets: [String: String])
+    {
         guard let iface = ctx.tunnelNWInterface else {
+            ctx.checks.append(DiagnosticsCheck.measured(id: "https", passed: 0, attempted: 0, state: .incomplete, probes: ctx.probes))
             log(&ctx, "[probe] https: skipped (no tunnel NWInterface)")
+            ctx.incomplete = true
             return
         }
         var ok = 0
         var fail = 0
         for domain in domains {
-            guard answers[domain]?.isEmpty == false else {
-                log(&ctx, "[probe] https \(domain): skipped (no tunnel DNS answer)")
+            guard let ip = targets[domain] else {
+                log(&ctx, "[probe] https \(domain): skipped (no successful TCP target)")
                 continue
             }
             if ctx.overBudget {
                 log(&ctx, "[probe] https: skipped remaining (time budget)")
                 break
             }
-            switch httpsGet(host: domain, interface: iface, timeout: httpsTimeout) {
+            ctx.httpsCompleted += 1
+            let probeStart = ProcessInfo.processInfo.systemUptime
+            switch httpsGet(host: domain, ip: ip, interface: iface, timeout: ctx.timeout(httpsTimeout)) {
             case .success(let r):
                 ok += 1
+                ctx.probes.append(DiagnosticsProbe(
+                    stage: "https", domain: domain, durationMs: elapsedMs(since: probeStart),
+                    succeeded: true, detail: "\(r.http) · \(r.cert)",
+                    tlsDurationMs: Int((r.tlsTime * 1000).rounded())))
                 log(
                     &ctx,
-                    "[probe] https \(domain) via tunnel: ok \(r.http)"
-                        + " tls=\(String(format: "%.2f", r.tlsTime))s cert=\"\(r.cert)\""
+                    "[probe] https \(domain)(\(ip):443) via tunnel: ok \(r.http)"
+                        + " duration=\(elapsedMs(since: probeStart))ms tls=\(Int((r.tlsTime * 1000).rounded()))ms cert=\"\(r.cert)\""
                 )
             case .failure(let why):
                 fail += 1
-                log(&ctx, "[probe] https \(domain) via tunnel: fail \(why)")
+                ctx.probes.append(DiagnosticsProbe(stage: "https", domain: domain, durationMs: elapsedMs(since: probeStart), succeeded: false, detail: why.description))
+                log(&ctx, "[probe] https \(domain) via tunnel: fail \(why) duration=\(elapsedMs(since: probeStart))ms")
             }
         }
         if fail > 0, ok == 0 {
-            ctx.suspects.append("TLS via tunnel broken (handshake or first response failed)")
+            ctx.suspects.append("HTTPS sample failed on tested tunnel targets; see per-domain errors")
         }
+        ctx.checks.append(DiagnosticsCheck.measured(id: "https", passed: ok, attempted: ok + fail,
+            state: ctx.overBudget || targets.isEmpty || ok + fail != targets.count ? .incomplete : (fail > 0 ? .failed : .passed),
+            probes: ctx.probes))
         ctx.stageSummaries.append("https \(ok)/\(ok + fail) ok")
         ctx.failures += fail
     }
 
-    private static func summarize(ctx: Context, answers: [String: [String]]) -> String {
+    static func summarize(ctx: Context) -> String {
         let stages = ctx.stageSummaries.joined(separator: ", ")
+        if ctx.cancellation.isCancelled { return "INCOMPLETE - tunnel session changed (\(stages))" }
+        if ctx.incomplete || ctx.overBudget {
+            let prefix = ctx.failures > 0 ? "PROBLEMS FOUND; INCOMPLETE" : "INCOMPLETE"
+            return "\(prefix) - some checks were not completed (\(stages)); "
+                + ctx.suspects.joined(separator: "; ")
+        }
         if ctx.failures == 0, ctx.suspects.isEmpty {
-            return "OK - all checks passed (\(stages))"
+            return "OK - required IPv4 checks passed (\(stages))"
         }
         var parts = ["PROBLEMS FOUND (\(stages))"]
         parts.append(contentsOf: ctx.suspects.map { "suspect: \($0)" })
         return parts.joined(separator: "; ")
     }
 
+}
+
+extension TunnelDiagnostics {
     // MARK: - Interface discovery
 
-    private static func discoverInterfaces(tunnelIPv4: String) -> Context? {
+    private static func discoverInterfaces(tunnelIPv4: String, cancellation: DiagnosticsCancellation, startedAt: TimeInterval)
+        -> Context?
+    {
         guard let tunnel = interfaceIndex(forTunnelIPv4: tunnelIPv4) else { return nil }
         let path = pathSnapshot()
-        let physical = path?.availableInterfaces.first {
-            $0.type == .wifi || $0.type == .wiredEthernet
-        } ?? path?.availableInterfaces.first { !$0.name.hasPrefix("utun") }
         let tunnelNW = path?.availableInterfaces.first { $0.name == tunnel.name }
         return Context(
-            startedAt: Date(),
+            startedAt: startedAt,
+            cancellation: cancellation,
             tunnelName: tunnel.name,
             tunnelIndex: tunnel.index,
-            tunnelNWInterface: tunnelNW,
-            physicalName: physical?.name,
-            physicalIndex: physical.flatMap { let i = if_nametoindex($0.name); return i == 0 ? nil : i },
-            physicalNWInterface: physical
+            tunnelNWInterface: tunnelNW
         )
     }
 
     /// Finds the utun interface that currently owns the assigned tunnel IPv4.
-    private static func interfaceIndex(forTunnelIPv4 address: String) -> (name: String, index: UInt32)? {
+    private static func interfaceIndex(forTunnelIPv4 address: String) -> (
+        name: String, index: UInt32
+    )? {
         var iflist: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&iflist) == 0, let first = iflist else { return nil }
         defer { freeifaddrs(iflist) }
@@ -463,21 +556,34 @@ public enum TunnelDiagnostics {
         monitor.start(queue: queue)
         _ = sem.wait(timeout: .now() + 3)
         monitor.cancel()
-        return path
+        return queue.sync {
+            monitor.pathUpdateHandler = nil
+            return path
+        }
     }
 
     // MARK: - DNS probe
 
-    private static func dnsQuery(server: String, domain: String, ifIndex: UInt32) -> Result<[String], ProbeError> {
+    private static func dnsQuery(
+        server: String, domain: String, ifIndex: UInt32, timeout: TimeInterval
+    ) -> Result<[String], ProbeError> {
         let id = UInt16.random(in: 0...UInt16.max)
         guard let query = DNSPacket.buildQuery(domain: domain, id: id) else {
             return .failure(ProbeError("bad domain"))
         }
-        let exchange = udpExchange(server: server, port: 53, payload: query, ifIndex: ifIndex, timeout: dnsTimeout)
+        let exchange = udpExchange(
+            server: server, port: 53, payload: query, ifIndex: ifIndex, timeout: timeout)
         switch exchange {
         case .failure(let why):
             return .failure(why)
         case .success(let data):
+            if data.count >= 4 {
+                let code = data[3] & 0x0f
+                if code != 0 { return .failure(ProbeError("DNS response rcode=\(code)")) }
+                if data[2] & 0x02 != 0 {
+                    return .failure(ProbeError("DNS response truncated; TCP fallback unavailable"))
+                }
+            }
             guard let answers = DNSPacket.parseAnswers(data, expectedID: id) else {
                 return .failure(ProbeError("unparseable response"))
             }
@@ -487,7 +593,8 @@ public enum TunnelDiagnostics {
 
     private static func describe(_ result: Result<[String], ProbeError>) -> String {
         switch result {
-        case .success(let ips): return ips.isEmpty ? "[] (no A records)" : "[\(ips.joined(separator: ", "))]"
+        case .success(let ips):
+            return ips.isEmpty ? "[] (no A records)" : "[\(ips.joined(separator: ", "))]"
         case .failure(let why): return why.description
         }
     }
@@ -495,31 +602,53 @@ public enum TunnelDiagnostics {
     private static func udpExchange(
         server: String, port: UInt16, payload: Data, ifIndex: UInt32, timeout: TimeInterval
     ) -> Result<Data, ProbeError> {
-        let fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        let family = server.contains(":") ? AF_INET6 : AF_INET
+        let fd = socket(family, SOCK_DGRAM, IPPROTO_UDP)
         guard fd >= 0 else { return .failure(ProbeError("socket: \(errnoString())")) }
         defer { close(fd) }
-        guard bindToInterface(fd, index: ifIndex) else { return .failure(ProbeError("bind-if: \(errnoString())")) }
-        guard setReceiveTimeout(fd, timeout: timeout) else { return .failure(ProbeError("rcvtimeo: \(errnoString())")) }
-
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = port.bigEndian
-        guard inet_pton(AF_INET, server, &addr.sin_addr) == 1 else { return .failure(ProbeError("bad server ip")) }
-
-        let sent = payload.withUnsafeBytes { buf in
-            withUnsafePointer(to: &addr) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                    sendto(fd, buf.baseAddress, buf.count, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+        guard bindToInterface(fd, index: ifIndex, family: family) else {
+            return .failure(ProbeError("bind-if: \(errnoString())"))
+        }
+        guard setReceiveTimeout(fd, timeout: timeout) else {
+            return .failure(ProbeError("rcvtimeo: \(errnoString())"))
+        }
+        var storage = sockaddr_storage()
+        let length: socklen_t
+        if family == AF_INET6 {
+            length = socklen_t(MemoryLayout<sockaddr_in6>.size)
+            let valid = withUnsafeMutablePointer(to: &storage) {
+                $0.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
+                    $0.pointee.sin6_len = UInt8(length)
+                    $0.pointee.sin6_family = sa_family_t(family)
+                    $0.pointee.sin6_port = port.bigEndian
+                    return inet_pton(family, server, &$0.pointee.sin6_addr)
                 }
             }
+            guard valid == 1 else { return .failure(ProbeError("bad server ip")) }
+        } else {
+            length = socklen_t(MemoryLayout<sockaddr_in>.size)
+            let valid = withUnsafeMutablePointer(to: &storage) {
+                $0.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                    $0.pointee.sin_len = UInt8(length)
+                    $0.pointee.sin_family = sa_family_t(family)
+                    $0.pointee.sin_port = port.bigEndian
+                    return inet_pton(family, server, &$0.pointee.sin_addr)
+                }
+            }
+            guard valid == 1 else { return .failure(ProbeError("bad server ip")) }
         }
-        guard sent == payload.count else { return .failure(ProbeError("sendto: \(errnoString())")) }
+        let connected = withUnsafePointer(to: &storage) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, length) }
+        }
+        guard connected == 0 else { return .failure(ProbeError("connect: \(errnoString())")) }
+        let sent = payload.withUnsafeBytes { send(fd, $0.baseAddress, $0.count, 0) }
+        guard sent == payload.count else { return .failure(ProbeError("send: \(errnoString())")) }
 
         var buffer = [UInt8](repeating: 0, count: 4096)
         let n = recv(fd, &buffer, buffer.count, 0)
         guard n > 0 else {
-            return .failure(ProbeError(errno == EAGAIN || errno == EWOULDBLOCK ? "timeout" : "recv: \(errnoString())"))
+            return .failure(
+                ProbeError(errno == EAGAIN || errno == EWOULDBLOCK ? "timeout" : "recv: \(errnoString())"))
         }
         return .success(Data(buffer[0..<n]))
     }
@@ -550,10 +679,12 @@ public enum TunnelDiagnostics {
         if !isV6 {
             setsockopt(fd, IPPROTO_IP, IP_DONTFRAG, &one, socklen_t(MemoryLayout<Int32>.size))
         }
-        guard setReceiveTimeout(fd, timeout: timeout) else { return .failure(ProbeError("rcvtimeo: \(errnoString())")) }
+        guard setReceiveTimeout(fd, timeout: timeout) else {
+            return .failure(ProbeError("rcvtimeo: \(errnoString())"))
+        }
 
         var message = [UInt8](repeating: 0, count: 8 + payloadLen)
-        message[0] = isV6 ? 128 : 8 // echo request
+        message[0] = isV6 ? 128 : 8  // echo request
         message[1] = 0
         // SOCK_DGRAM ping sockets: the kernel assigns the identifier (bytes
         // 4-5) per socket and demultiplexes replies by it — anything we
@@ -597,7 +728,7 @@ public enum TunnelDiagnostics {
             guard rc == 1 else { return .failure(ProbeError("bad host ip")) }
         }
 
-        let start = Date()
+        let start = ProcessInfo.processInfo.systemUptime
         let sent = message.withUnsafeBytes { buf in
             withUnsafePointer(to: &storage) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
@@ -610,16 +741,23 @@ public enum TunnelDiagnostics {
         let replyType: UInt8 = isV6 ? 129 : 0
         var buffer = [UInt8](repeating: 0, count: 4096)
         while true {
+            let remaining = timeout - (ProcessInfo.processInfo.systemUptime - start)
+            guard remaining > 0 else { return .failure(ProbeError("timeout")) }
+            guard setReceiveTimeout(fd, timeout: remaining) else {
+                return .failure(ProbeError("rcvtimeo: \(errnoString())"))
+            }
             let n = recv(fd, &buffer, buffer.count, 0)
             guard n > 0 else {
-                return .failure(ProbeError(errno == EAGAIN || errno == EWOULDBLOCK ? "timeout" : "recv: \(errnoString())"))
+                return .failure(
+                    ProbeError(errno == EAGAIN || errno == EWOULDBLOCK ? "timeout" : "recv: \(errnoString())")
+                )
             }
             if n >= 8, buffer[0] == replyType,
                 buffer[6] == UInt8(sequence >> 8), buffer[7] == UInt8(sequence & 0xff)
             {
-                return .success(Date().timeIntervalSince(start))
+                return .success((ProcessInfo.processInfo.systemUptime - start))
             }
-            if Date().timeIntervalSince(start) > timeout { return .failure(ProbeError("timeout")) }
+            if (ProcessInfo.processInfo.systemUptime - start) > timeout { return .failure(ProbeError("timeout")) }
         }
     }
 
@@ -637,7 +775,9 @@ public enum TunnelDiagnostics {
 
     // MARK: - TCP probe
 
-    private static func tcpConnect(ip: String, port: UInt16, ifIndex: UInt32, timeout: TimeInterval) -> Result<TimeInterval, ProbeError> {
+    private static func tcpConnect(ip: String, port: UInt16, ifIndex: UInt32, timeout: TimeInterval)
+        -> Result<TimeInterval, ProbeError>
+    {
         var storage = sockaddr_storage()
         let addrLen: socklen_t
         let family: Int32
@@ -677,37 +817,57 @@ public enum TunnelDiagnostics {
         }
 
         let flags = fcntl(fd, F_GETFL)
-        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+        guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else {
+            return .failure(ProbeError("nonblocking: \(errnoString())"))
+        }
 
-        let start = Date()
+        let start = ProcessInfo.processInfo.systemUptime
         let rc = withUnsafePointer(to: &storage) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
                 connect(fd, sa, addrLen)
             }
         }
-        if rc == 0 { return .success(Date().timeIntervalSince(start)) }
+        if rc == 0 { return .success((ProcessInfo.processInfo.systemUptime - start)) }
         guard errno == EINPROGRESS else { return .failure(ProbeError("connect: \(errnoString())")) }
 
         var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
         let prc = poll(&pfd, 1, Int32(timeout * 1000))
-        guard prc > 0 else { return .failure(ProbeError(prc == 0 ? "timeout" : "poll: \(errnoString())")) }
+        guard prc > 0 else {
+            return .failure(ProbeError(prc == 0 ? "timeout" : "poll: \(errnoString())"))
+        }
 
         var soError: Int32 = 0
         var len = socklen_t(MemoryLayout<Int32>.size)
-        getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &len)
-        guard soError == 0 else { return .failure(ProbeError("connect: \(String(cString: strerror(soError)))")) }
-        return .success(Date().timeIntervalSince(start))
+        guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &len) == 0 else {
+            return .failure(ProbeError("socket status: \(errnoString())"))
+        }
+        guard soError == 0 else {
+            return .failure(ProbeError("connect: \(String(cString: strerror(soError)))"))
+        }
+        return .success((ProcessInfo.processInfo.systemUptime - start))
     }
 
     // MARK: - HTTPS probe
 
     private static func httpsGet(
-        host: String, interface: NWInterface, timeout: TimeInterval
+        host: String, ip: String? = nil, interface: NWInterface? = nil, timeout: TimeInterval
     ) -> Result<(http: String, tlsTime: TimeInterval, cert: String), ProbeError> {
         let tls = NWProtocolTLS.Options()
+        sec_protocol_options_set_tls_server_name(tls.securityProtocolOptions, host)
+        sec_protocol_options_set_verify_block(
+            tls.securityProtocolOptions,
+            { _, trust, complete in
+                let secTrust = sec_trust_copy_ref(trust).takeRetainedValue()
+                let policy = SecPolicyCreateSSL(true, host as CFString)
+                guard SecTrustSetPolicies(secTrust, policy) == errSecSuccess else {
+                    complete(false)
+                    return
+                }
+                complete(SecTrustEvaluateWithError(secTrust, nil))
+            }, DispatchQueue(label: "net.dighole.vault.probe.trust"))
         let params = NWParameters(tls: tls)
         params.requiredInterface = interface
-        let connection = NWConnection(host: NWEndpoint.Host(host), port: 443, using: params)
+        let connection = NWConnection(host: NWEndpoint.Host(ip ?? host), port: 443, using: params)
 
         let semaphore = DispatchSemaphore(value: 0)
         let lock = NSLock()
@@ -721,35 +881,55 @@ public enum TunnelDiagnostics {
             if fresh { semaphore.signal() }
         }
 
-        let start = Date()
+        let start = ProcessInfo.processInfo.systemUptime
         var tlsTime: TimeInterval = 0
         var cert = ""
+        var response = Data()
+        func receiveMore() {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: min(8192, 65536 - response.count)) {
+                data, _, complete, error in
+                if let data { response.append(data) }
+                if let error {
+                    finish(.failure(ProbeError("recv: \(error.localizedDescription)")))
+                    return
+                }
+                if response.count >= 65536 || complete {
+                    guard let status = HTTPProbe.statusLine(response, complete: complete) else {
+                        finish(.failure(ProbeError("invalid or incomplete HTTP response")))
+                        return
+                    }
+                    finish(
+                        .success(
+                            (
+                                http: "\(status), received \(response.count) bytes"
+                                    + (complete ? " (EOF)" : " (sample limit)"), tlsTime: tlsTime, cert: cert
+                            )))
+                } else {
+                    receiveMore()
+                }
+            }
+        }
 
         connection.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                tlsTime = Date().timeIntervalSince(start)
+                tlsTime = (ProcessInfo.processInfo.systemUptime - start)
                 cert = peerCertSummary(connection) ?? ""
-                let request = "GET / HTTP/1.1\r\nHost: \(host)\r\nConnection: close\r\n\r\n"
-                connection.send(content: Data(request.utf8), completion: .contentProcessed { error in
-                    if let error {
-                        finish(.failure(ProbeError("send: \(error.localizedDescription)")))
-                        return
-                    }
-                    connection.receive(minimumIncompleteLength: 1, maximumLength: 512) { data, _, _, error in
-                        if let data, !data.isEmpty {
-                            let text = String(decoding: data, as: UTF8.self)
-                            let line = text.components(separatedBy: "\r\n").first ?? text
-                            finish(.success((http: line, tlsTime: tlsTime, cert: cert)))
-                        } else {
-                            finish(.failure(ProbeError("recv: \(error?.localizedDescription ?? "no data")")))
+                let request =
+                    "GET / HTTP/1.1\r\nHost: \(host)\r\nRange: bytes=0-65535\r\nConnection: close\r\n\r\n"
+                connection.send(
+                    content: Data(request.utf8),
+                    completion: .contentProcessed { error in
+                        if let error {
+                            finish(.failure(ProbeError("send: \(error.localizedDescription)")))
+                            return
                         }
-                    }
-                })
+                        receiveMore()
+                    })
             case .failed(let error):
                 finish(.failure(ProbeError("connection: \(error.localizedDescription)")))
             case .waiting(let error):
-                if Date().timeIntervalSince(start) > timeout {
+                if (ProcessInfo.processInfo.systemUptime - start) > timeout {
                     finish(.failure(ProbeError("waiting: \(error.localizedDescription)")))
                 }
             default:
@@ -758,10 +938,10 @@ public enum TunnelDiagnostics {
         }
         connection.start(queue: DispatchQueue(label: "net.dighole.vault.probe.https"))
 
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-            finish(.failure(ProbeError("timeout")))
-        }
-        _ = semaphore.wait(timeout: .now() + timeout + 1)
+        let timer = DispatchWorkItem { finish(.failure(ProbeError("timeout"))) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timer)
+        _ = semaphore.wait(timeout: .now() + timeout)
+        timer.cancel()
         connection.cancel()
         lock.lock()
         defer { lock.unlock() }
@@ -769,13 +949,17 @@ public enum TunnelDiagnostics {
     }
 
     private static func peerCertSummary(_ connection: NWConnection) -> String? {
-        guard let metadata = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata
+        guard
+            let metadata = connection.metadata(definition: NWProtocolTLS.definition)
+                as? NWProtocolTLS.Metadata
         else { return nil }
         let secMetadata = metadata.securityProtocolMetadata
         var subject: String?
         sec_protocol_metadata_access_peer_certificate_chain(secMetadata) { certificate in
             if subject == nil {
-                subject = SecCertificateCopySubjectSummary(sec_certificate_copy_ref(certificate).takeRetainedValue()) as String?
+                subject =
+                    SecCertificateCopySubjectSummary(
+                        sec_certificate_copy_ref(certificate).takeRetainedValue()) as String?
             }
         }
         return subject
@@ -786,15 +970,17 @@ public enum TunnelDiagnostics {
     private static func bindToInterface(_ fd: Int32, index: UInt32, family: Int32 = AF_INET) -> Bool {
         var value = index
         if family == AF_INET6 {
-            return setsockopt(fd, IPPROTO_IPV6, IPV6_BOUND_IF, &value, socklen_t(MemoryLayout<UInt32>.size)) == 0
+            return setsockopt(
+                fd, IPPROTO_IPV6, IPV6_BOUND_IF, &value, socklen_t(MemoryLayout<UInt32>.size)) == 0
         }
-        return setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &value, socklen_t(MemoryLayout<UInt32>.size)) == 0
+        return setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &value, socklen_t(MemoryLayout<UInt32>.size))
+            == 0
     }
 
     private static func setReceiveTimeout(_ fd: Int32, timeout: TimeInterval) -> Bool {
         var tv = timeval(
             tv_sec: Int(timeout),
-            tv_usec: Int32((timeout - Double(Int(timeout))) * 1_000_000)
+            tv_usec: Int32(max(1, (timeout - Double(Int(timeout))) * 1_000_000))
         )
         return setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size)) == 0
     }
@@ -815,12 +1001,10 @@ public enum TunnelDiagnostics {
 
 // MARK: - DNS packet codec (kept pure for unit tests)
 
-/// Probe failure reason. ExpressibleByStringLiteral so the probe code can
-/// keep writing `.failure(ProbeError("..."))`.
-struct ProbeError: Error, CustomStringConvertible, ExpressibleByStringLiteral {
+/// Probe failure reason retained in per-target results and logs.
+struct ProbeError: Error, CustomStringConvertible {
     let description: String
     init(_ description: String) { self.description = description }
-    init(stringLiteral value: String) { self.description = value }
 }
 
 /// Minimal DNS wire codec: builds a single-question A query and extracts the
@@ -831,22 +1015,28 @@ struct DNSPacket {
     static func buildQuery(domain: String, id: UInt16) -> Data? {
         var data = Data()
         data.append(contentsOf: [UInt8(id >> 8), UInt8(id & 0xff)])
-        data.append(contentsOf: [0x01, 0x00]) // RD
-        data.append(contentsOf: [0x00, 0x01]) // QDCOUNT
+        data.append(contentsOf: [0x01, 0x00])  // RD
+        data.append(contentsOf: [0x00, 0x01])  // QDCOUNT
         data.append(contentsOf: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let labels = domain.split(separator: ".", omittingEmptySubsequences: true)
+        let name = domain.hasSuffix(".") ? String(domain.dropLast()) : domain
+        let labels = name.split(separator: ".", omittingEmptySubsequences: false)
         guard !labels.isEmpty else { return nil }
         var nameLength = 1
         for label in labels {
-            guard label.count <= 63, label.allSatisfy({ $0.isASCII }) else { return nil }
+            guard !label.isEmpty, label.count <= 63,
+                label.utf8.allSatisfy({
+                    (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 45
+                }),
+                label.first != "-", label.last != "-"
+            else { return nil }
             nameLength += label.count + 1
             guard nameLength <= 255 else { return nil }
             data.append(UInt8(label.count))
             data.append(contentsOf: label.utf8)
         }
         data.append(0)
-        data.append(contentsOf: [0x00, 0x01]) // QTYPE A
-        data.append(contentsOf: [0x00, 0x01]) // QCLASS IN
+        data.append(contentsOf: [0x00, 0x01])  // QTYPE A
+        data.append(contentsOf: [0x00, 0x01])  // QCLASS IN
         return data
     }
 
@@ -860,15 +1050,18 @@ struct DNSPacket {
         }
         guard u16(0) == expectedID else { return nil }
         let flags = u16(2)
-        guard flags & 0x8000 != 0 else { return nil } // QR
-        guard flags & 0x000f == 0 else { return nil } // rcode NOERROR only
+        guard flags & 0x8000 != 0 else { return nil }  // QR
+        guard flags & 0x0200 == 0 else { return nil }  // truncated
+        guard flags & 0x7800 == 0 else { return nil }  // standard query
+        guard flags & 0x000f == 0 else { return nil }  // rcode NOERROR only
         let qdcount = Int(u16(4))
         let ancount = Int(u16(6))
 
+        guard qdcount == 1 else { return nil }
         var offset = 12
         for _ in 0..<qdcount {
             guard let next = skipName(data, offset) else { return nil }
-            offset = next + 4 // qtype + qclass
+            offset = next + 4  // qtype + qclass
             guard offset <= data.count else { return nil }
         }
 
@@ -880,7 +1073,7 @@ struct DNSPacket {
             let rdlength = Int(u16(nameEnd + 8))
             let rdata = nameEnd + 10
             guard rdata + rdlength <= data.count else { return nil }
-            if type == 1, rdlength == 4 {
+            if type == 1, u16(nameEnd + 2) == 1, rdlength == 4 {
                 answers.append("\(data[rdata]).\(data[rdata + 1]).\(data[rdata + 2]).\(data[rdata + 3])")
             }
             offset = rdata + rdlength
@@ -903,5 +1096,51 @@ struct DNSPacket {
             guard length & 0xc0 == 0 else { return nil }
             offset += length + 1
         }
+    }
+}
+
+/// A complete HTTP/1.x header is required before reporting HTTPS success.
+enum HTTPProbe {
+    static func statusLine(_ data: Data, complete: Bool = false) -> String? {
+        guard let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
+        let headers = String(decoding: data[..<end.lowerBound], as: UTF8.self)
+        guard let line = headers.components(separatedBy: "\r\n").first else { return nil }
+        let parts = line.split(separator: " ", maxSplits: 2)
+        guard parts.count >= 2, ["HTTP/1.0", "HTTP/1.1"].contains(String(parts[0])),
+            parts[1].count == 3, let code = Int(parts[1]), (200...599).contains(code)
+        else { return nil }
+        if complete, code != 204, code != 304 {
+            let fields = headers.components(separatedBy: "\r\n").dropFirst().compactMap { field -> (String, String)? in
+                guard let colon = field.firstIndex(of: ":") else { return nil }
+                return (field[..<colon].lowercased(), field[field.index(after: colon)...].trimmingCharacters(in: .whitespaces))
+            }
+            let body = Data(data[end.upperBound...])
+            if fields.contains(where: { $0.0 == "transfer-encoding" && $0.1.lowercased().contains("chunked") }) {
+                guard completeChunks(body) else { return nil }
+            } else if let length = fields.first(where: { $0.0 == "content-length" })?.1 {
+                guard let size = Int(length), size >= 0, body.count == size else { return nil }
+            }
+        }
+        return line
+    }
+
+    private static func completeChunks(_ data: Data) -> Bool {
+        var offset = data.startIndex
+        while offset < data.endIndex {
+            guard let end = data.range(of: Data("\r\n".utf8), in: offset..<data.endIndex),
+                  let sizeText = String(data: data[offset..<end.lowerBound], encoding: .ascii),
+                  let hex = sizeText.split(separator: ";", maxSplits: 1).first,
+                  let size = Int(hex, radix: 16), size >= 0 else { return false }
+            offset = end.upperBound
+            if size == 0 {
+                let tail = Data(data[offset...])
+                return tail == Data("\r\n".utf8) || tail.range(of: Data("\r\n\r\n".utf8)) != nil
+            }
+            guard size <= data.endIndex - offset, data.endIndex - offset - size >= 2 else { return false }
+            offset += size
+            guard data[offset] == 13, data[offset + 1] == 10 else { return false }
+            offset += 2
+        }
+        return false
     }
 }

@@ -6,6 +6,7 @@
 #
 # Prerequisites:
 #   - Rust toolchain with the targets below (rustup target add ...)
+#   - protoc (e.g. brew install protobuf)
 #   - Full Xcode (iOS SDK). If xcode-select points at the Command Line Tools,
 #     DEVELOPER_DIR is set automatically.
 #

@@ -51,7 +51,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// app's configure page via the "probeDomains" provider configuration.
     private var probeDomains: [String] = TunnelDiagnostics.defaultProbeDomains
     /// Guards against overlapping manual diagnostics runs.
-    private var diagnosticsRunning = false
+    private var diagnosticsCancellation: DiagnosticsCancellation?
+    private var diagnosticsProgress: DiagnosticsResult?
     private var edge: Edge!
     private var pendingStart: PendingStart?
     private var startTimeoutWorkItem: DispatchWorkItem?
@@ -69,9 +70,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Diagnostic: counts startTunnel invocations per extension process.
     private static var startTunnelCallCount = 0
     private var superNodeIp: String = ""
-    /// Saved alongside superNodeIp so diagnostics can use the supernode as
-    /// the physical-path control endpoint.
-    private var superNodePort: UInt16 = 0
     /// Tunnel MTU ceiling from the "mtu" provider configuration
     /// (Configure page); default is the built-in upper bound.
     private var mtuCap: Int = TunnelConstants.mtuUpperBound
@@ -151,7 +149,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             completionHandler(ConfigurationError.invalidConfiguration("port"))
             return
         }
-        self.superNodePort = port
 
         // The password is persisted in the OS VPN providerConfiguration: on macOS the
         // provider is a system extension running outside the user's session,
@@ -300,6 +297,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         password: String,
         id: Data
     ) {
+        diagnosticsCancellation?.cancel()
         networkConfigurationSequence &+= 1
         Logger.network.noticeAndFile(
             "[session:\(self.sessionID)] Trying supernode addresses \(candidates)"
@@ -444,6 +442,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             "[session:\(self.sessionID)] stopTunnel called, reason: \(Self.describeStopReason(reason))(\(reason.rawValue))",
             level: "NOTICE"
         )
+        self.diagnosticsCancellation?.cancel()
         self.stopRequested = true
         self.stopNetworkMonitoring()
         self.aliveTimer?.cancel()
@@ -504,6 +503,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// one only owns a zombie Rust session whose heartbeats would otherwise
     /// keep fighting the new session at the server.
     private func abandonSession() {
+        self.diagnosticsCancellation?.cancel()
         self.stopRequested = true
         self.stopNetworkMonitoring()
         self.aliveTimer?.cancel()
@@ -541,6 +541,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         case .configurationRemoved: return "configurationRemoved"
         case .superceded: return "superceded"
         case .appUpdate: return "appUpdate"
+        case .userLogout: return "userLogout"
+        case .userSwitch: return "userSwitch"
+        case .connectionFailed: return "connectionFailed"
+        case .sleep: return "sleep"
+        case .internalError: return "internalError"
         @unknown default: return "unknown"
         }
     }
@@ -605,6 +610,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             guard let self = self, !self.stopRequested, self.networkAvailable,
                 let edge = self.edge else { return }
             self.networkRecoveryWorkItem = nil
+            self.diagnosticsCancellation?.cancel()
             self.networkConfigurationSequence &+= 1
             self.reasserting = true
             do {
@@ -624,6 +630,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         pathMonitor?.cancel()
         pathMonitor = nil
         lastNetworkPath = nil
+        diagnosticsCancellation?.cancel()
         networkConfigurationSequence &+= 1
         reasserting = false
     }
@@ -803,16 +810,17 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         if !ipv6.isEmpty {
-            let ipv6Settings = NEIPv6Settings(addresses: [ipv6], networkPrefixLengths: [NSNumber(value: 128)] )// Client uses /128
+            // A /128 left public IPv6 unreachable on the tested macOS path.
+            // Keep the /120 compatibility prefix; server allocation and the
+            // explicit pool/default routes remain unchanged.
+            let ipv6Settings = NEIPv6Settings(
+                addresses: [ipv6], networkPrefixLengths: [NSNumber(value: 120)]
+            )
 
             let ipv6Network = extractIpv6Network(ipv6, prefixLen: ipv6Prefixlen)
             Logger.network.notice("IPv6 network: \(ipv6Network, privacy: .public)/\(ipv6Prefixlen)  :  \(ipv6, privacy: .public)")
 
-            // NEIPv6Route.default() alone does not materialize a route on
-            // macOS when the interface address is /128 (observed: address
-            // present on utun, but no default/pool route in the table).
-            // Declare the pool route explicitly so VPN-internal v6 traffic
-            // always enters the tunnel.
+            // Keep the entire server pool reachable as well as public IPv6.
             ipv6Settings.includedRoutes = [
                 NEIPv6Route(
                     destinationAddress: ipv6Network,
@@ -843,6 +851,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             ipv6Settings.excludedRoutes = excludedRoutesV6
             networkSettings.ipv6Settings = ipv6Settings
+            Logger.network.noticeAndFile(
+                "IPv6 settings: interface=\(ipv6)/120 pool=\(ipv6Network)/\(ipv6Prefixlen) included=pool,::/0 excluded=\(excludedRoutesV6.map(\.destinationAddress).joined(separator: ","))"
+            )
 
         }
 
@@ -884,6 +895,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private func applyAssignedIp(ipv4: String, ipv4Mask: String, ipv6: String, ipv6PrefixLen: Int32) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard !stopRequested else { return }
+        diagnosticsCancellation?.cancel()
         networkConfigurationSequence &+= 1
         let configurationSequence = networkConfigurationSequence
 
@@ -969,11 +981,20 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             switch command.command {
             case "diagnose":
                 runDiagnostics(completionHandler: completionHandler)
+            case "diagnosticsProgress":
+                DispatchQueue.main.async {
+                    completionHandler?(self.diagnosticsProgress.flatMap { try? JSONEncoder().encode($0) })
+                }
+            case "cancelDiagnostics":
+                DispatchQueue.main.async {
+                    self.diagnosticsCancellation?.cancel()
+                    completionHandler?(Data())
+                }
             case "logs":
                 // The macOS system extension is a sandboxed root daemon: its
                 // container is unreadable to the app, and writing into the
                 // app's container is sandbox-denied. Serving the log over
-                // this channel is the only way View Logs can show it. Keep
+                // this channel is the only way Runtime Logs can show it. Keep
                 // the reply bounded — the tail is what matters.
                 let log = FileLogger.shared.readLog() ?? ""
                 completionHandler?(String(log.suffix(512 * 1024)).data(using: .utf8))
@@ -982,27 +1003,29 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             return
         }
-        let status = ProviderStatus(
-            ip: assignedIp,
-            stats: PacketStats.shared.currentStats
-        )
-        completionHandler?(try? JSONEncoder().encode(status))
+        DispatchQueue.main.async {
+            let status = ProviderStatus(
+                ip: self.assignedIp,
+                stats: PacketStats.shared.currentStats
+            )
+            completionHandler?(try? JSONEncoder().encode(status))
+        }
     }
 
-    /// Manual diagnostics entry point (Status page button). Probing must be
+    /// Manual diagnostics entry point for both apps. Probing must be
     /// user-triggered only: an automatic run after every connect would bury
     /// the log in noise for the overwhelmingly common healthy case.
     private func runDiagnostics(completionHandler: ((Data?) -> Void)?) {
         // handleAppMessage's delivery queue is not documented; hop to main
         // where startFinished/stopRequested/assignedIp are owned.
         DispatchQueue.main.async {
-            guard self.startFinished, !self.stopRequested else {
+            guard self.startFinished, !self.stopRequested, !self.reasserting else {
                 completionHandler?(try? JSONEncoder().encode(
                     DiagnosticsResult(summary: "tunnel is not up", lines: [])
                 ))
                 return
             }
-            guard !self.diagnosticsRunning else {
+            guard self.diagnosticsCancellation == nil else {
                 completionHandler?(try? JSONEncoder().encode(
                     DiagnosticsResult(summary: "diagnostics already running", lines: [])
                 ))
@@ -1017,22 +1040,32 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 ))
                 return
             }
-            self.diagnosticsRunning = true
+            let cancellation = DiagnosticsCancellation()
+            self.diagnosticsCancellation = cancellation
+            self.diagnosticsProgress = DiagnosticsResult(summary: "RUNNING", lines: [], checks: [], activeCheck: "dns")
+            let sequence = self.networkConfigurationSequence
             let dnsServers = self.dns
             let domains = self.probeDomains
             let ipv4Mask = self.assignedIPv4Mask
             let mtu = self.appliedMtu
-            let control: (host: String, port: UInt16)? =
-                self.superNodeIp.isEmpty || self.superNodePort == 0
-                ? nil : (self.superNodeIp, self.superNodePort)
             DispatchQueue.global(qos: .utility).async { [weak self] in
-                let result = TunnelDiagnostics.run(
+                var result = TunnelDiagnostics.run(
                     dnsServers: dnsServers, tunnelIPv4: tunnelIPv4, tunnelIPv4Mask: ipv4Mask,
                     domains: domains,
-                    controlEndpoint: control, tunnelMtu: mtu
+                    tunnelMtu: mtu, cancellation: cancellation,
+                    onProgress: { [weak self] progress in
+                        DispatchQueue.main.async {
+                            guard self?.diagnosticsCancellation === cancellation else { return }
+                            self?.diagnosticsProgress = progress
+                        }
+                    }
                 )
                 DispatchQueue.main.async {
-                    self?.diagnosticsRunning = false
+                    if self?.networkConfigurationSequence != sequence || self?.stopRequested != false || self?.reasserting != false {
+                        result.summary = "INCOMPLETE - tunnel session changed; run diagnostics again"
+                    }
+                    self?.diagnosticsProgress = result
+                    self?.diagnosticsCancellation = nil
                     completionHandler?(try? JSONEncoder().encode(result))
                 }
             }

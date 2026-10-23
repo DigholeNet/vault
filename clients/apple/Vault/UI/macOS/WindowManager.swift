@@ -1,48 +1,69 @@
-//
-//  WindowManager.swift
-//  Vault
-//
-//
+#if os(macOS)
+import AppKit
 import SwiftUI
 
-#if os(macOS)
-    class WindowManager {
+/// Owns long-lived windows independently of the menu bar popover lifecycle.
+final class WindowManager {
+    static let shared = WindowManager()
+    private var controllers: [String: NSWindowController] = [:]
+    private var factories: [String: () -> NSWindowController] = [:]
+    private var didConfigure = false
+    private init() {}
 
-        static let shared = WindowManager()
-
-        private var windowControllers: [String: NSWindowController] = [:]
-
-        private init() {}
-
-        func register<T: NSWindowController>(
-            _ controller: T,
-            with identifier: String
-        ) {
-            windowControllers[identifier] = controller
+    func configure(vpnManager: VpnManager, appData: AppData, config: VaultConfig) {
+        guard !didConfigure else { return }
+        didConfigure = true
+        factories["configure"] = { [unowned self] in
+            makeWindow(id: "configure", title: "Vault Settings", size: NSSize(width: 660, height: 480),
+                minimum: NSSize(width: 600, height: 430), content:
+                    MacosConfigureView(config: config)
+                    .environmentObject(appData).environmentObject(LanguageManager.shared))
         }
-
-        func setTitle(_ title: String, for identifier: String) {
-            windowControllers[identifier]?.window?.title = title
+        factories["status"] = { [unowned self] in
+            makeWindow(id: "status", title: "Diagnostics & Logs", size: NSSize(width: 760, height: 600),
+                minimum: NSSize(width: 620, height: 480), content:
+                    MacosStatusView(vpnManager: vpnManager)
+                    .environmentObject(appData).environmentObject(config).environmentObject(LanguageManager.shared))
         }
-
-        func showWindow(withIdentifier identifier: String) {
-            guard let targetController = windowControllers[identifier] else {
-                return
-            }
-
-            for (id, controller) in windowControllers where id != identifier {
-                controller.window?.orderOut(nil)
-            }
-
-            if targetController.window == nil {
-                targetController.showWindow(nil)
-            }
-
-            if let window = targetController.window {
-                NSApp.setActivationPolicy(.regular)
-                NSApp.activate(ignoringOtherApps: true)
-                window.makeKeyAndOrderFront(nil)
-            }
+        factories["about"] = { [unowned self] in
+            makeWindow(id: "about", title: "About", size: NSSize(width: 380, height: 340),
+                minimum: NSSize(width: 380, height: 340), resizable: false, content:
+                    MacosAboutView().environmentObject(LanguageManager.shared))
+        }
+        factories["welcome"] = { [unowned self] in
+            makeWindow(id: "welcome", title: "Welcome to Vault", size: NSSize(width: 480, height: 360),
+                minimum: NSSize(width: 480, height: 360), resizable: false, content:
+                    MacosWelcomeView().environmentObject(LanguageManager.shared))
         }
     }
+
+    private func makeWindow<Content: View>(id: String, title: String, size: NSSize,
+        minimum: NSSize, resizable: Bool = true, content: Content) -> NSWindowController {
+        var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable]
+        if resizable { style.insert(.resizable) }
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: style, backing: .buffered, defer: false)
+        window.title = LanguageManager.shared.tr(title)
+        window.minSize = minimum
+        window.isReleasedWhenClosed = false
+        window.contentViewController = NSHostingController(rootView: content)
+        if !window.setFrameUsingName("vault-\(id)-v2") { window.center() }
+        window.setFrameAutosaveName("vault-\(id)-v2")
+        return NSWindowController(window: window)
+    }
+
+    func showWindow(withIdentifier id: String) {
+        if controllers[id] == nil { controllers[id] = factories[id]?() }
+        guard let window = controllers[id]?.window else { return }
+        MacosPreferences.shared.applyActivationPolicy()
+        NSApp.activate(ignoringOtherApps: true)
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func refreshTitles() {
+        for (id, title) in ["configure": "Vault Settings", "status": "Diagnostics & Logs", "about": "About", "welcome": "Welcome to Vault"] {
+            controllers[id]?.window?.title = LanguageManager.shared.tr(title)
+        }
+    }
+}
 #endif

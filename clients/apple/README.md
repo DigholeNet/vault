@@ -1,412 +1,112 @@
 # Vault for iOS & macOS
 
-**Vault** is the Apple client of the [Vault VPN](../../README.md) system,
-available on iOS & macOS. It connects to the supernode over an encrypted
-tunnel via the NetworkExtension framework.
+SwiftUI clients using NetworkExtension and the shared [Rust VPN core](../../core/).
+The app requires iOS 18.5+ or macOS 15.5+; the Swift package supports iOS 18+
+and macOS 15+. Build with full Xcode, a Swift 6 toolchain (Swift 5 language mode),
+Rust and `protoc`.
 
-## Network recovery
+## Usage
 
-The tunnel extension monitors physical network paths and coalesces changes for
-750 ms before requesting a reconnect. Wake-up also checks for a stale session.
-Recovery keeps the tunnel and traffic counters alive; the core creates a fresh
-UDP socket and interrupts any retry backoff. The system reports `reasserting`
-until the new handshake and tunnel settings finish. An unreachable server no
-longer cancels the tunnel after 15 seconds; the core continues retrying.
+- **iOS:** Status shows the connection button, session clock, assigned IPv4/IPv6
+  addresses and traffic. Configure edits settings immediately; Diagnostics holds
+  connection checks and logs. About shows the app icon and version.
+- **macOS:** the menu bar shows connection state. The popover has a connection
+  button, session clock, traffic, and Diagnostics / Settings / Quit actions.
+  Settings groups General, Connection, Network and Advanced; connection/network/
+  advanced edits require Save and apply on the next connection. General changes
+  apply immediately. About is at the bottom of the Settings sidebar.
+- Closing a macOS window leaves the VPN running; Quit disconnects it. Login-item
+  registration may require approval in System Settings.
 
-Server addresses are resolved once at tunnel startup and handed to the core,
-which races all of them Happy-Eyeballs style (IPv6 first, 300 ms stagger) on
-every (re)connect — a dead address family costs at most one stagger interval.
-Re-resolving the original hostname during a running tunnel is follow-up work.
-Paths whose interface/gateway signature does not change fall back to the
-core heartbeat timeout.
+macOS keyboard shortcuts: `⌘,` Settings, `⌘1`–`⌘4` Settings sections, `⌘S` Save,
+`⌘W` Close, `⌘Return` Connect/Disconnect, `⌘⇧D` Diagnostics, `⌘Q` Quit.
+Tab / Shift-Tab moves between controls; Space / Return activates an action.
 
-## Connectivity diagnostics
+## Diagnostics & logs
 
-The status page has a **Run Diagnostics** button, visible only while the
-tunnel is up. It asks the provider (over the provider-message channel) to run
-a probe suite from inside the extension and shows the summary; every step is
-also written to the extension's file log with a `[probe]` prefix. On iOS that
-file is the shared App Group log shown by About → View Logs. On macOS the
-system extension is a sandboxed root daemon: its container is unreadable to
-the app and writing into the app's container is sandbox-denied, so View Logs
-fetches the extension log over the provider-message channel (command "logs"),
-merges it chronologically with the app log, and caches the last fetch as
-`Logs/vault.ne.log` for viewing while the tunnel is down.
+Connect the VPN, then start diagnostics manually. Both platforms share the
+request/progress model and result interpretation:
 
-Because the extension's own sockets bypass the tunnel, each probe pins itself
-to an interface explicitly (`IP_BOUND_IF` / `NWParameters.requiredInterface`)
-— the utun interface for the tunnel path, the physical interface for a
-direct-path control:
+- Tunnel-bound IPv4 DNS, TCP and HTTPS checks, plus app-process HTTPS using the
+  system resolver and default routes. HTTPS reads a bounded sample (64 KiB).
+- Per-check times are request averages, including retries and failures; total
+  time is wall-clock elapsed time. All times use milliseconds.
+- Route checks use current provider addresses, not the persisted display cache.
+  Missing evidence or a changed session makes verification incomplete.
+- ICMP is informational. Missing replies do not establish packet loss or an MTU
+  fault. These checks are not a comprehensive IPv6 or DNS-leak audit.
 
-- **ICMP/MTU sweep** to the first tunnel DNS server at packet sizes 64 / 1400
-  / 1427 with DF set — small packets passing while large ones are lost
-  reports `suspect: MTU black hole on tunnel path`.
-- **DNS** — each probe domain is resolved through the tunnel and through the
-  physical interface; identical answers on both paths report a possible leak
-  or poisoned upstream, timeouts report `suspect: tunnel DNS unreachable`.
-- **TCP** — connect to port 443 of the tunnel-resolved addresses, plus one
-  physical-path control connect.
-- **HTTPS** — full TLS handshake + HTTP/1.1 request through the tunnel,
-  logging the status line, handshake time and the peer certificate subject
-  (exposes interception).
+Logs are under Diagnostics → Runtime Logs. iOS follows new entries automatically;
+macOS also offers search, source filters, optional auto-scroll and Copy. macOS
+fetches the system extension's log over provider messages and caches it for
+viewing after disconnecting. Diagnostic time budgets are 60 seconds in the
+provider, 20 seconds for app HTTPS, and 95 seconds overall.
 
-The probed domains come from **Configure → Probe Domains** (comma-separated;
-empty uses `www.google.com, github.com, t.co`). The suite is strictly manual —
-it never runs automatically — so healthy sessions do not accumulate probe
-noise in the log.
+Probe domains are configurable under macOS Settings → Advanced or iOS Configure.
+Empty uses `www.google.com, github.com, t.co`.
 
+## Build & test
 
-## Technology Stack
-
-### Core Technologies
-- **Language**: Swift 6.0 (with Swift 5 language mode)
-- **UI Framework**: SwiftUI
-- **Minimum OS Versions**: iOS 18+, macOS 15+
-- **Build System**: Xcode + Swift Package Manager
-
-### Key Dependencies
-| Package | Version | Purpose |
-|---------|---------|---------|
-| [vault-core](../../core/) | workspace | Rust VPN core (handshake, heartbeat, reconnect, crypto, data pump) |
-| [bridge](../bridge/) | workspace | UniFFI wrapper crate generating the Swift/Kotlin bindings |
-| UniFFI | 0.32 | Rust → Swift bindings generator |
-
-The VPN core protocol and cryptography are implemented in Rust
-(`vault-core`, client feature). `VaultCore` is only a thin Swift glue
-layer over the UniFFI bindings; the Rust code is built into
-`VaultCore/Frameworks/VaultCoreFFI.xcframework` (not committed) by
-`VaultCore/Scripts/build-xcframework.sh`.
-
-### Cryptography
-
-Implemented in `vault-core` — see [docs/protocol.md](../../docs/protocol.md)
-for the handshake (SPAKE2 PAKE + X25519), key derivation (HKDF-SHA256), and
-AEAD algorithms (AES-128/256-GCM, ChaCha20-Poly1305).
-
-## Project Structure
-
-```
-vault-apple/
-├── Config/
-│   └── Shared.xcconfig       # App group + bundle ID prefix (forks edit here)
-├── Vault/                      # Main iOS/macOS Application
-│   ├── VaultApp.swift          # App entry point (@main)
-│   ├── VpnManager.swift        # VPN connection manager
-│   ├── VaultCommon.swift       # Shared utilities and config
-│   ├── Vault.entitlements      # App entitlements
-│   └── UI/                     # Platform-specific UI
-│       ├── iOS/               # iOS SwiftUI views
-│       │   ├── IosMainView.swift
-│       │   ├── IosStatusView.swift
-│       │   ├── IosConfigureView.swift
-│       │   └── IosAboutView.swift
-│       └── macOS/             # macOS SwiftUI views
-│           ├── MacosMenuView.swift      # Menu bar extra
-│           ├── MacosConfigureView.swift
-│           ├── MacosAboutView.swift
-│           └── WindowManager.swift
-│
-├── VaultCore/                  # Swift Package - glue layer over the Rust core
-│   ├── Package.swift          # SPM manifest (binaryTarget + glue target)
-│   ├── Scripts/
-│   │   └── build-xcframework.sh   # Builds Rust libs + Swift bindings + XCFramework
-│   ├── Frameworks/            # VaultCoreFFI.xcframework (generated, not committed)
-│   ├── Sources/VaultCore/     # Glue source code
-│   │   ├── Generated/         # UniFFI-generated Swift bindings (not committed)
-│   │   ├── Edge.swift         # Edge glue class (delegates to RustEdge)
-│   │   ├── EdgeConfig.swift   # Edge configuration
-│   │   ├── PacketStats.swift  # Cross-process traffic statistics
-│   │   ├── FileLogger.swift   # Shared file logger (App Group container)
-│   │   └── Extension.swift    # Logger / hex helpers, app group id
-│   └── Tests/VaultCoreTests/  # Glue unit tests (Swift Testing)
-│
-├── TunnelProvider/             # Shared packet tunnel source (iOS app extension + macOS system extension)
-│   └── PacketTunnelProvider.swift   # NEPacketTunnelProvider implementation
-│
-├── VaultNetworkExtension/      # iOS app extension target
-│   ├── Info.plist
-│   └── VaultNetworkExtension.entitlements
-│
-├── VaultSystemExtension/       # macOS system extension target
-│   ├── main.swift             # System extension entry point
-│   ├── Info.plist
-│   ├── InfoPlist.xcstrings
-│   └── VaultSystemExtension(-Distribution).entitlements
-│
-├── VaultTests/                 # App-level tests
-│   └── VaultTests.swift
-│
-├── VaultUITests/              # UI tests
-├── Vault.xcodeproj/           # Xcode project
-└── ../../PRIVACY.md           # Privacy policy (repository root)
-```
-
-## Architecture Overview
-
-### Component Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer                         │
-│  ┌──────────────────┐      ┌──────────────────┐            │
-│  │   iOS App        │      │   macOS App      │            │
-│  │  (TabView UI)    │      │ (Menu Bar Extra) │            │
-│  └────────┬─────────┘      └────────┬─────────┘            │
-│           │                         │                       │
-│           └────────────┬────────────┘                       │
-│                        ▼                                    │
-│              ┌──────────────────┐                          │
-│              │   VpnManager     │                          │
-│              │  (Connection Mgr)│                          │
-│              └────────┬─────────┘                          │
-└───────────────────────┼─────────────────────────────────────┘
-                        │
-┌───────────────────────┼─────────────────────────────────────┐
-│           NetworkExtension Framework                         │
-│                       ▼                                      │
-│              ┌──────────────────┐                          │
-│              │PacketTunnelProvider│                          │
-│              │  (VPN Extension) │                          │
-│              └────────┬─────────┘                          │
-└───────────────────────┼─────────────────────────────────────┘
-                        │
-┌───────────────────────┼─────────────────────────────────────┐
-│                 VaultCore (glue layer)                       │
-│                       ▼                                      │
-│              ┌──────────────────┐                          │
-│              │      Edge        │  Swift glue (UniFFI)      │
-│              └────────┬─────────┘                          │
-│                       ▼                                      │
-│              ┌──────────────────┐                          │
-│              │  vault-core   │  Rust: handshake, heartbeat│
-│              │  (ClientSession) │  reconnect, crypto, pump   │
-│              └──────────────────┘                          │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Data Flow
-
-1. **User toggles VPN** → VpnManager.connect()/disconnect()
-2. **Start tunnel** → PacketTunnelProvider.startTunnel() creates virtual interface
-3. **Edge initialization** → vault-core ClientSession starts: DNS, handshake, heartbeat (Rust)
-4. **Packet flow**:
-   - **Outbound**: System → PacketTunnel → Edge.writeData() → Encrypt → UDP (Rust)
-   - **Inbound**: UDP → Decrypt (Rust) → EdgeCallbacks → PacketTunnel → System
-
-## Build and Test Commands
-
-### Building the Rust Core (required after cloning)
-
-The XCFramework and Swift bindings are generated artifacts and not
-committed. Build them once after cloning, and again after pulling
-vault-core updates:
+From `clients/apple`:
 
 ```bash
-# Requires: Rust toolchain (targets: aarch64-apple-ios, aarch64-apple-ios-sim,
-# x86_64-apple-ios, aarch64-apple-darwin, x86_64-apple-darwin) and full Xcode.
+# Generate the Rust XCFramework and UniFFI Swift bindings after cloning or core changes.
 VaultCore/Scripts/build-xcframework.sh
+
+# Unsigned builds; choose an installed simulator for UI tests.
+xcodebuild -project Vault.xcodeproj -scheme Vault \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project Vault.xcodeproj -scheme Vault \
+  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+
+swift test --package-path VaultCore
+xcodebuild -project Vault.xcodeproj -scheme Vault \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
-### Building the Project
-
-```bash
-# Build VaultCore Swift Package
-cd VaultCore && swift build
-
-# Build entire project with Xcode
-xcodebuild -project Vault.xcodeproj -scheme Vault -configuration Debug
-
-# Build for iOS Simulator
-xcodebuild -project Vault.xcodeproj -scheme Vault -destination 'platform=iOS Simulator,name=iPhone 16'
-
-# Build for macOS
-xcodebuild -project Vault.xcodeproj -scheme Vault -destination 'platform=macOS'
-```
-
-### Running Tests
-
-```bash
-# Run VaultCore glue tests
-cd VaultCore && swift test
-
-# Run all tests via Xcode
-xcodebuild test -project Vault.xcodeproj -scheme Vault -destination 'platform=iOS Simulator,name=iPhone 16'
-```
+The framework build script lists the required Rust targets. Generated bindings
+and `VaultCore/Frameworks/VaultCoreFFI.xcframework` are not committed. Swift Testing
+covers core/glue logic; XCTest covers app/UI tests. CI also runs SwiftLint.
+Unsigned builds validate compilation; real tunnel tests need signed targets.
 
 ## Building Your Own Fork
 
-The bundle IDs and the app group shipped in this repo are registered under
-the Dighole team and cannot be provisioned by another Apple Developer
-account. To build or distribute your own fork:
+Set `TEAM_ID` in git-ignored `Config/Local.xcconfig` or pass it when packaging
+from the repository root:
 
-1. Edit `Config/Shared.xcconfig` — set `APP_BUNDLE_ID_PREFIX` and
-   `APP_GROUP_ID` to identifiers registered under your own team (register
-   the app group in your Apple Developer account).
-2. Set your team ID in `Config/Local.xcconfig` (git-ignored:
-   `TEAM_ID = ABCDE12345`), or pass `TEAM_ID` to
-   `scripts/package-apple.sh`.
-3. For Developer ID distribution, create your own provisioning profiles and
-   point `MACOS_EXPORT_OPTIONS` at your own export-options plist (see
-   [docs/releasing.md](../../docs/releasing.md)).
-
-Everything else — entitlements, the extensions' Info.plists, the Mach
-service name, and the app group resolved at runtime — derives from the
-xcconfig values.
-
-## Code Style Guidelines
-
-### Naming Conventions
-- **Files**: PascalCase matching the primary type (e.g., `Edge.swift`, `VpnManager.swift`)
-- **Classes/Structs**: PascalCase (e.g., `PacketTunnelProvider`, `EdgeConfig`)
-- **Methods/Variables**: camelCase (e.g., `writeData`, `vpnStatus`)
-- **Private Properties**: Use `fileprivate` or `private` appropriately
-
-### Code Organization
-- One class/struct per file, named after the type
-- Extensions grouped by functionality in `Extension.swift`
-- Platform-specific code guarded with `#if os(iOS)` / `#if os(macOS)`
-
-### Comments
-- File headers use `//` style with author and date
-- Documentation comments for public APIs using `///`
-
-### Import Style
-```swift
-import SwiftUI
-import NetworkExtension
-import VaultCore  // Local package
+```bash
+TEAM_ID=ABCDE12345 scripts/package-apple.sh
 ```
 
-## Key Modules Explained
+Outputs go to `dist/`. Signing profiles, notarization and CI setup are documented
+in [Releasing](../../docs/releasing.md#apple-packaging-and-signing).
+For a fork, change `APP_BUNDLE_ID_PREFIX` and `APP_GROUP_ID` in
+`Config/Shared.xcconfig` to identifiers registered to your team, and supply your
+own provisioning/export profiles. Bundle IDs, entitlements and Mach service names
+derive from those values.
 
-### Edge.swift
-Thin Swift glue over the Rust `RustEdge` (vault-core `ClientSession` via
-UniFFI). Keeps the public API used by `PacketTunnelProvider` (`init` with
-callbacks, `writeData`, `close`) while the Rust runtime handles:
-- UDP socket, DNS resolution and handshake with the supernode
-- Heartbeat and exponential-backoff reconnect
-- Packet encryption/decryption and the data pump
-- Traffic statistics
+The iOS provider is an embedded app extension; macOS uses a system extension.
+On macOS, install the signed app in `/Applications` and approve the extension in
+System Settings. macOS App Groups are team-prefixed; the system extension runs
+outside the user's session, so status/log communication uses provider messages.
 
-### PacketTunnelProvider.swift
-The NetworkExtension packet tunnel implementation:
-- Creates virtual network interface
-- Routes IP packets between system and Edge
-- Applies network settings (IP, DNS, routes)
+## Source layout
 
-### VpnManager.swift
-App-side VPN controller:
-- NETunnelProviderManager lifecycle
-- Configuration persistence
-- Status observation and notification
+| Path | Purpose |
+|---|---|
+| `Vault/` | Shared app state, configuration, VPN controller and diagnostics model |
+| `Vault/UI/iOS/`, `Vault/UI/macOS/` | Platform UI |
+| `TunnelProvider/` | Shared packet tunnel provider |
+| `VaultCore/` | Rust bindings, Swift glue, diagnostics and unit tests |
+| `VaultNetworkExtension/`, `VaultSystemExtension/` | Platform extension targets |
+| `VaultTests/`, `VaultUITests/` | App and UI tests |
+| `Config/` | Signing and identifier configuration |
 
-## Configuration
+Non-secret settings use App Group storage. The password is stored in Keychain
+and copied into the OS VPN profile for on-demand restarts; disconnecting does
+not delete that profile. Physical-path changes trigger reconnects; the core
+retries unreachable servers. IPv6 interfaces use a `/120` compatibility prefix
+without changing server allocation. Actual routing must be verified on-device.
 
-User configuration uses App Group `@AppStorage` for non-secret settings.
-The app password is stored in Keychain; connecting also saves a copy in the
-OS-managed VPN profile (`providerConfiguration`) for on-demand restarts,
-including macOS system-extension launches outside the user session.
-Disconnecting does not delete that saved profile or its password.
-Keychain failures are shown on the configuration screen with a retry action.
-Legacy plaintext credentials are removed only after a successful Keychain save;
-a failed read is retried as a read rather than saving an empty placeholder.
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `id` | String | Device unique identifier (hex UUID) |
-| `host` | String | Server hostname or IP |
-| `port` | Int | Server port (default: 9527) |
-| `password` | String | Connection password (Keychain and OS VPN profile, not `@AppStorage`) |
-| `ip` | String | Assigned virtual IP |
-| `dns` | String | DNS servers (comma-separated) |
-
-## Security Considerations
-
-### Network Security
-- Server IP excluded from VPN routes (prevent routing loops)
-- DNS traffic tunneled by default
-- MTU probed from the underlying link (link MTU minus tunnel overhead, clamped to 1280...1427)
-
-Cryptographic properties are covered by
-[docs/protocol.md](../../docs/protocol.md); the required entitlements are
-listed under Deployment Notes → Capabilities.
-
-## Testing Strategy
-
-### Unit Tests (VaultCoreTests)
-- `GlueTests.swift`: glue layer tests (hex parsing, config, formatting)
-- The core protocol and crypto are tested in vault-core's Rust test suite
-
-### Test Requirements
-- Tests use Swift Testing framework (not XCTest)
-
-### UI Tests
-- Minimal UI test coverage in `VaultUITests/`
-- Relies on manual testing for UI flows
-
-## Deployment Notes
-
-### Platform Packaging of the Tunnel Provider
-
-- **iOS**: the provider ships as an app extension
-  (`VaultNetworkExtension.appex`) embedded in `PlugIns/`.
-- **macOS**: Developer ID only provisions the *system extension* variant of
-  Network Extension entitlements, so the provider ships as a system
-  extension (`net.dighole.Vault.VaultSystemExtension.systemextension`)
-  embedded in `Library/SystemExtensions/`. Both targets share the same
-  source (`TunnelProvider/PacketTunnelProvider.swift`).
-  Note: the `.systemextension` bundle file name (minus extension) must equal
-  the extension's bundle identifier — `sysextd` rejects the activation with
-  a misleading `OSSystemExtensionErrorDomain` code 4 ("Extension not found")
-  otherwise. The target achieves this via
-  `PRODUCT_NAME = $(PRODUCT_BUNDLE_IDENTIFIER)`; `PRODUCT_MODULE_NAME` stays
-  `VaultSystemExtension` so the Swift module name is unchanged.
-
-macOS specifics:
-
-- The app must run from `/Applications` to activate the system extension;
-  the first activation requires user approval in System Settings → General →
-  Login Items & Extensions. For debugging, copy the built app to
-  `/Applications` and launch it there (use "Wait for the executable to be
-  launched" in the scheme to attach the debugger).
-- Debug and Release builds use different entitlements and signing
-  identities (development vs. Developer ID, manual signing with named
-  provisioning profiles) — see
-  [docs/releasing.md](../../docs/releasing.md#macos-signing-specifics).
-
-### App Group
-
-The unprefixed group ID comes from `APP_GROUP_ID` in
-`Config/Shared.xcconfig`; the signing team's prefix is added automatically
-(see Building Your Own Fork for using your own team).
-
-- iOS: `group.net.dighole.vault`
-- macOS: team-prefixed form `<team-id>.group.net.dighole.vault`
-  (`$(TeamIdentifierPrefix)$(APP_GROUP_ID)` in entitlements) — required for
-  Developer ID and for the system extension's Mach service.
-
-### Bundle Identifiers
-
-Derived from `APP_BUNDLE_ID_PREFIX` in `Config/Shared.xcconfig`:
-
-- Main App: `net.dighole.Vault`
-- iOS app extension: `net.dighole.Vault.VaultNetworkExtension`
-- macOS system extension: `net.dighole.Vault.VaultSystemExtension`
-
-### Capabilities
-The app requires special entitlements that must be provisioned:
-1. Network Extension (Packet Tunnel; `-systemextension` variant on macOS
-   Release)
-2. VPN API Access
-3. App Groups
-4. System Extension install (macOS only)
-
-## Development Workflow
-
-1. **Core Changes**: The VPN core lives in `core/` (vault-core, Rust); the UniFFI wrapper in `clients/bridge/` — rebuild with `VaultCore/Scripts/build-xcframework.sh`
-2. **UI Changes**: Modify platform-specific files in `Vault/UI/`
-3. **Extension Changes**: Modify `TunnelProvider/PacketTunnelProvider.swift` (shared by the iOS app extension and the macOS system extension)
-
-## License
-
-MIT — see [LICENSE](../../LICENSE)
+See [Protocol](../../docs/protocol.md), [Privacy](../../PRIVACY.md) and
+[License](../../LICENSE) for shared project details.

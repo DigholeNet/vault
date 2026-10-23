@@ -9,30 +9,18 @@ import SwiftUI
 import VaultCore
 import os.log
 
-class VpnStatusUtil {
-
-    public static func getStatus(_ vpnStatus: VpnStatus) -> String {
-        switch vpnStatus {
-
-        case .off:
-            return LanguageManager.shared.tr("Off")
-        case .connecting:
-            return LanguageManager.shared.tr("Connecting")
-        case .on:
-            return LanguageManager.shared.tr("On")
-        case .disconnecting:
-            return LanguageManager.shared.tr("Disconnecting")
+enum VpnStatusUtil {
+    static func titleKey(for status: VpnStatus) -> String {
+        switch status {
+        case .off: return "Disconnected"
+        case .connecting: return "Connecting"
+        case .on: return "Connected"
+        case .disconnecting: return "Disconnecting…"
         }
     }
 
-}
-
-extension NumberFormatter {
-    static var noneSeparator: NumberFormatter {
-        let formater = NumberFormatter()
-        formater.numberStyle = .decimal
-        formater.groupingSeparator = ""
-        return formater
+    static func getStatus(_ status: VpnStatus) -> String {
+        LanguageManager.shared.tr(titleKey(for: status))
     }
 }
 
@@ -42,6 +30,13 @@ class AppData: ObservableObject {
     /// Set when the user tries to connect without server configuration;
     /// the UI should guide them to the configure page.
     @Published var showConfigureGuide: Bool = false
+
+    @Published var connectedSince: Date?
+
+    #if os(macOS)
+    @Published var connectionError: String?
+    @Published var isRecovering = false
+    #endif
 
     // Packet statistics (total)
     @Published var packetsSent: UInt64 = 0

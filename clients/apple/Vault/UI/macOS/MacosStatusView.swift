@@ -1,212 +1,238 @@
-//
-//  MacosStatusView.swift
-//  Vault
-//
-//
-
-import Network
+#if os(macOS)
+import AppKit
 import SwiftUI
 import VaultCore
 
-#if os(macOS)
-    struct MacosStatusView: View {
-        var vpnManager: VpnManager
-        @EnvironmentObject var appData: AppData
-        @EnvironmentObject var config: VaultConfig
-        @EnvironmentObject var languageManager: LanguageManager
+struct MacosStatusView: View {
+    let vpnManager: VpnManager
+    @EnvironmentObject var appData: AppData
+    @EnvironmentObject var config: VaultConfig
+    @EnvironmentObject var languageManager: LanguageManager
+    @State private var tab = 0
+    @StateObject private var model = DiagnosticsViewModel()
+    private var result: DiagnosticsResult? { model.result }
+    private var running: Bool { model.running }
+    private var cancelRequested: Bool { model.cancelRequested }
+    private var startedAt: TimeInterval? { model.startedAt }
+    private var progressReceived: TimeInterval { model.progressReceived }
+    private var completedAt: Date? { model.completedAt }
+    private var logText: String { model.logText }
+    private var loadingLogs: Bool { model.loadingLogs }
+    @State private var logFilter = "all"
+    @State private var search = ""
+    @State private var followsTail = true
 
-        @State private var isDiagnosing = false
-        @State private var diagnosticsSummary: String?
-
-        private func runDiagnostics() {
-            isDiagnosing = true
-            diagnosticsSummary = nil
-            vpnManager.requestDiagnostics { result in
-                DispatchQueue.main.async {
-                    isDiagnosing = false
-                    diagnosticsSummary =
-                        result?.summary
-                        ?? languageManager.tr("Diagnostics failed: no response from the tunnel.")
-                }
-            }
-        }
-
-        @ViewBuilder
-        private var diagnosticsSection: some View {
-            VStack(spacing: 10) {
-                Button(action: runDiagnostics) {
-                    HStack(spacing: 8) {
-                        if isDiagnosing {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text(languageManager.tr(isDiagnosing ? "Running Diagnostics..." : "Run Diagnostics"))
-                    }
-                }
-                .disabled(isDiagnosing)
-
-                if let summary = diagnosticsSummary {
-                    // The summary is the verdict: keep it fully visible
-                    // (wrap, don't truncate), selectable for bug reports,
-                    // and colored by outcome.
-                    Text(summary)
-                        .font(.system(size: 12))
-                        .foregroundColor(summary.hasPrefix("OK") ? .green : .red)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 20)
-                }
-            }
-        }
-
-        var parsedIPs: (ipv4: String?, ipv6: String?) {
-            config.ip.parsedIPv4AndIPv6()
-        }
-
-        var body: some View {
-            VStack(spacing: 24) {
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("", selection: $tab) {
+                    Text(languageManager.tr("Connection Diagnostics")).tag(0)
+                    Text(languageManager.tr("Runtime Logs")).tag(1)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 260)
                 Spacer()
-
-                // Connection Info & Statistics — only meaningful while the
-                // tunnel is up; when off these would be leftovers from the
-                // previous session.
-                if appData.vpnStatus == .on {
-                    let ips = parsedIPs
-
-                    VStack(spacing: 20) {
-                    // IP Addresses Section
-                    if ips.ipv4 != nil || ips.ipv6 != nil {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if let ipv4 = ips.ipv4 {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "server.rack")
-                                        .foregroundColor(.blue)
-                                        .font(.system(size: 14))
-                                    Text(languageManager.tr("IPv4:"))
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.gray)
-                                    Text(ipv4)
-                                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                }
-                            }
-
-                            if let ipv6 = ips.ipv6 {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "server.rack")
-                                        .foregroundColor(.green)
-                                        .font(.system(size: 14))
-                                    Text(languageManager.tr("IPv6:"))
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.gray)
-                                    Text(ipv6)
-                                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                        .foregroundColor(.primary)
-                                        .lineLimit(1)
-                                    Spacer()
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 20)
+                if tab == 0 {
+                    if running {
+                        Button(languageManager.tr(cancelRequested ? "Cancelling…" : "Cancel")) {
+                            model.cancel(using: vpnManager)
+                        }.disabled(cancelRequested)
+                    } else {
+                        Button(action: diagnose) {
+                            Label(languageManager.tr(result == nil ? "Run Diagnostics" : "Run Again"), systemImage: "arrow.clockwise")
+                        }.disabled(appData.vpnStatus != .on)
                     }
+                }
+            }.padding(20)
+            Divider()
+            if tab == 0 { diagnostics }
+            else { logs }
+            Divider()
+            HStack {
+                if tab == 1 {
+                    Toggle(languageManager.tr("Auto-scroll"), isOn: $followsTail).toggleStyle(.switch).controlSize(.small)
+                }
+                Spacer()
+                Button(languageManager.tr("Copy")) { copy(tab == 0 ? diagnosticText : filteredLogs) }
+                    .disabled(tab == 0 ? result == nil : filteredLogs.isEmpty)
+            }.padding(16)
+        }
+        .task(id: tab) {
+            guard tab == 1 else { return }
+            await model.refreshLogs(using: vpnManager)
+        }
 
-                    if ips.ipv4 != nil || ips.ipv6 != nil {
-                        Divider()
-                            .padding(.horizontal, 20)
+    }
+
+    private var diagnostics: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                if running || result != nil {
+                    resultHeader
+                    sessionAddresses
+                    checkTable
+                    if running {
+                        Text(languageManager.tr(result?.activeCheck == "icmp" ? "Completing optional tunnel observations…" : "Results update as each check completes."))
+                            .font(.body).foregroundStyle(.secondary)
                     }
-                    HStack(spacing: 0) {
-                        // Sent Stats
-                        VStack(spacing: 8) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.up.circle.fill")
-                                    .foregroundColor(.blue)
-                                    .font(.system(size: 20))
-                                Text(languageManager.tr("Sent"))
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.gray)
+                    if let result, !result.lines.isEmpty {
+                        DisclosureGroup(languageManager.tr("Target Details")) {
+                            let domains = result.domains ?? []
+                            ForEach(domains, id: \.self) { domain in
+                                DisclosureGroup(domain) {
+                                    if let probes = result.probes, probes.contains(where: { $0.domain == domain }) {
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            ForEach(probes.filter { $0.domain == domain }) { probe in
+                                                HStack(alignment: .top, spacing: 8) {
+                                                    Image(systemName: probe.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                                        .foregroundStyle(probe.succeeded ? Color.green : .red)
+                                                    VStack(alignment: .leading, spacing: 4) {
+                                                        Text(probe.stage == "application" ? languageManager.tr("Application access") : probe.stage.uppercased())
+                                                            .font(.body.weight(.medium))
+                                                        Text(probe.detail).font(.system(.body, design: .monospaced))
+                                                            .foregroundStyle(.secondary).textSelection(.enabled)
+                                                            .fixedSize(horizontal: false, vertical: true)
+                                                        if let tls = probe.tlsDurationMs {
+                                                            Text("TLS  \(tls) ms").font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)
+                                                        }
+                                                    }
+                                                    Spacer(minLength: 8)
+                                                    Text("\(probe.durationMs) ms").font(.system(.body, design: .monospaced))
+                                                }
+                                            }
+                                        }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                                            .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))
+                                    } else {
+                                        Text(result.lines.filter { $0.contains(domain) }.joined(separator: "\n"))
+                                            .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                                            .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
+                                    }
+                                }.padding(.vertical, 5)
                             }
-
-                            Text("\(appData.packetsSent)")
-                                .font(.system(size: 18, weight: .semibold, design: .monospaced))
-
-                            Text(PacketStats.formatBytes(appData.bytesSent))
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
-
-                            HStack(spacing: 2) {
-                                Text("+")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.blue)
-                                Text(PacketStats.formatBytes(appData.bytesSentPerSecond) + "/s")
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(.blue)
+                            if !running && !result.summary.hasPrefix("OK") {
+                                Text(result.summary).font(.body).foregroundStyle(.secondary)
+                                    .textSelection(.enabled).padding(.top, 8)
                             }
-                            .padding(.top, 2)
-                        }
-                        .frame(maxWidth: .infinity)
-
-                        Divider()
-                            .frame(height: 80)
-
-                        // Received Stats
-                        VStack(spacing: 8) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.down.circle.fill")
-                                    .foregroundColor(.green)
-                                    .font(.system(size: 20))
-                                Text(languageManager.tr("Received"))
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.gray)
-                            }
-
-                            Text("\(appData.packetsReceived)")
-                                .font(.system(size: 18, weight: .semibold, design: .monospaced))
-
-                            Text(PacketStats.formatBytes(appData.bytesReceived))
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
-
-                            HStack(spacing: 2) {
-                                Text("+")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.green)
-                                Text(PacketStats.formatBytes(appData.bytesReceivedPerSecond) + "/s")
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(.green)
-                            }
-                            .padding(.top, 2)
-                        }
-                        .frame(maxWidth: .infinity)
+                        }.font(.body)
                     }
-                    .padding(.horizontal, 20)
-                    }
-                    .padding(.vertical, 20)
-
-                    diagnosticsSection
                 } else {
-                    // Mirror the iOS status page: show the current state
-                    // instead of a blank window when the tunnel is down.
-                    Text(VpnStatusUtil.getStatus(appData.vpnStatus))
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundColor(.gray)
+                    VStack(spacing: 16) {
+                        Image(systemName: "stethoscope").font(.system(size: 42)).foregroundStyle(.blue)
+                        Text(languageManager.tr("Check your connection")).font(.system(size: 15, weight: .semibold))
+                        Text(languageManager.tr(appData.vpnStatus == .on
+                            ? "Test tunnel DNS, TCP, HTTPS, and application access. Durations are measured in milliseconds."
+                            : "Connect the VPN before running diagnostics. Logs are available while disconnected."))
+                            .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 450)
+                        Button(languageManager.tr("Run Diagnostics"), action: diagnose)
+                            .buttonStyle(.borderedProminent).disabled(appData.vpnStatus != .on)
+                    }.frame(maxWidth: .infinity).padding(.vertical, 70)
                 }
-
-                Spacer()
+            }.padding(24)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    private var resultHeader: some View {
+        HStack(alignment: .top, spacing: 14) {
+            if running { ProgressView().controlSize(.large).padding(8) }
+            else {
+                Image(systemName: passed ? "checkmark.circle.fill" : (incomplete ? "clock.fill" : "exclamationmark.circle.fill"))
+                    .font(.system(size: 28)).foregroundStyle(passed ? Color.green : (incomplete ? .orange : .red))
             }
-            .frame(minWidth: 400, minHeight: 250)
-            .padding(20)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(languageManager.tr(running ? "Checking connection…" : (passed ? "Connectivity checks passed" : (incomplete ? "Diagnostics incomplete" : "Connectivity issues found"))))
+                    .font(.system(size: 14, weight: .semibold))
+                if running, let startedAt {
+                    TimelineView(.periodic(from: .now, by: 0.1)) { context in
+                        Text(languageManager.tr("Elapsed") + "  \(max(0, Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))) ms")
+                            .font(.body).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    ProgressView(value: Double(result?.checks?.count ?? 0), total: 4).frame(maxWidth: 300)
+                } else {
+                    HStack(spacing: 10) {
+                        if let completedAt { Text(completedAt, style: .time) }
+                        if let duration = result?.durationMs { Text(languageManager.tr("Total duration") + "  \(duration) ms") }
+                    }.font(.body).monospacedDigit().foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
         }
     }
-
-    #Preview {
-        let appData = AppData()
-        let config = VaultConfig()
-        MacosStatusView(vpnManager: VpnManager(config: config, appData: appData))
-            .environmentObject(appData)
-            .environmentObject(config)
-            .environmentObject(LanguageManager.shared)
+    private var sessionAddresses: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "network").foregroundStyle(.secondary)
+            Text(appData.vpnStatus == .on || appData.isRecovering
+                ? (config.ip.isEmpty ? languageManager.tr("Waiting for server-assigned addresses…") : config.ip.replacingOccurrences(of: "/", with: "  ·  "))
+                : languageManager.tr("Disconnected"))
+                .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
     }
+    private var checkTable: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(languageManager.tr("Check")); Spacer()
+                Text(languageManager.tr("Result")).frame(width: 80)
+                Text(languageManager.tr(DiagnosticsPresentation.durationHeading(result))).frame(width: 100, alignment: .trailing)
+            }.font(.body).foregroundStyle(.secondary).padding(12).background(.quaternary.opacity(0.4))
+            ForEach(DiagnosticsPresentation.checkIDs, id: \.self) { id in
+                let check = result?.checks?.first { $0.id == id }
+                let active = running && (result?.activeCheck ?? "dns") == id && check == nil
+                HStack(spacing: 8) {
+                    if active { ProgressView().controlSize(.mini).frame(width: 14) }
+                    else {
+                        Image(systemName: check?.state == .passed ? "checkmark.circle.fill" : (check?.state == .failed ? "xmark.circle.fill" : "minus.circle"))
+                            .foregroundStyle(check?.state == .passed ? Color.green : (check?.state == .failed ? Color.red : .secondary))
+                            .frame(width: 14)
+                    }
+                    Text(languageManager.tr(checkLabel(id))).font(.body)
+                    Spacer()
+                    Text(check.map { $0.attempted == 0 ? languageManager.tr("Not measured") : "\($0.passed)/\($0.attempted)" }
+                        ?? languageManager.tr(active ? "Checking" : (running ? "Waiting" : "Not measured")))
+                        .font(.body).monospacedDigit().foregroundStyle(.secondary).frame(width: 80)
+                    if let check {
+                        Text(check.sampleCount == 0 || check.attempted == 0 ? "—" : "\(check.durationMs) ms")
+                            .font(.system(.body, design: .monospaced)).frame(width: 100, alignment: .trailing)
+                            .help(languageManager.tr("Mean request time, including failures and retries."))
+                    } else if active {
+                        TimelineView(.periodic(from: .now, by: 0.1)) { context in
+                            Text("\(max(0, Int((ProcessInfo.processInfo.systemUptime - progressReceived) * 1000))) ms")
+                                .font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)
+                        }.frame(width: 100, alignment: .trailing)
+                    } else { Text("—").foregroundStyle(.secondary).frame(width: 100, alignment: .trailing) }
+                }.padding(12)
+                if id != "application" { Divider() }
+            }
+        }.clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+    }
+    private var logs: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("", selection: $logFilter) {
+                    Text(languageManager.tr("All")).tag("all")
+                    Text(languageManager.tr("Application")).tag("app")
+                    Text(languageManager.tr("Tunnel")).tag("ne")
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 230)
+                TextField(languageManager.tr("Search logs"), text: $search)
+                    .textFieldStyle(.roundedBorder)
+            }.padding(16)
+            if loadingLogs { ProgressView(languageManager.tr("Loading logs...")).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else if filteredLogs.isEmpty {
+                Text(languageManager.tr("No matching logs.")).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else { LogTextView(text: filteredLogs, followsTail: followsTail) }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    private var filteredLogs: String {
+        DiagnosticsPresentation.filteredLogs(logText, source: logFilter, search: search)
+    }
+    private var passed: Bool { model.passed }
+    private var incomplete: Bool { model.incomplete }
+    private var diagnosticText: String { model.diagnosticText }
+    private func checkLabel(_ id: String) -> String { DiagnosticsPresentation.label(for: id) }
+    private func diagnose() { model.run(using: vpnManager, connected: appData.vpnStatus == .on) }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+    }
+
+}
 #endif

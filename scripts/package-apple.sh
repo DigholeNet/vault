@@ -55,7 +55,7 @@ TEAM_ID="${TEAM_ID:-}"
 # Fail fast with a clear message when no team is available: the committed
 # Shared.xcconfig ships with an empty TEAM_ID, so signing needs TEAM_ID
 # from the environment or from Config/Local.xcconfig (git-ignored).
-if [[ -z "$TEAM_ID" ]] && ! grep -q '^TEAM_ID = [A-Z0-9]\{10\}$' \
+if [[ -z "$TEAM_ID" ]] && ! grep -Eq '^[[:blank:]]*TEAM_ID[[:blank:]]*=[[:blank:]]*[A-Z0-9]{10}[[:space:]]*(//.*)?$' \
     "$APPLE_DIR/Config/Shared.xcconfig" "$APPLE_DIR/Config/Local.xcconfig" 2>/dev/null; then
     echo "error: no Apple Developer team configured." >&2
     echo "Pass TEAM_ID (e.g. TEAM_ID=ABCDE12345 $0) or set TEAM_ID in clients/apple/Config/Local.xcconfig." >&2

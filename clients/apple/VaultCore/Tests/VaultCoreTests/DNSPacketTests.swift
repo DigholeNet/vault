@@ -33,7 +33,7 @@ import Testing
     #expect(DNSPacket.buildQuery(domain: "", id: 1) == nil)
     #expect(DNSPacket.buildQuery(domain: String(repeating: "a", count: 64) + ".com", id: 1) == nil)
     #expect(DNSPacket.buildQuery(domain: "héxample.com", id: 1) == nil)
-    #expect(DNSPacket.buildQuery(domain: "one.two..three", id: 1) != nil) // empty labels dropped
+    #expect(DNSPacket.buildQuery(domain: "one.two..three", id: 1) == nil) // empty interior labels are invalid
 }
 
 /// Builds a minimal response: header + echoed question + one answer whose

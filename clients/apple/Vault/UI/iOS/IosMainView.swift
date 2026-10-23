@@ -16,7 +16,7 @@ import SwiftUI
 
         var body: some View {
             TabView(selection: $selectedTab) {
-                NavigationView {
+                NavigationStack {
                     IosStatusView(vpnManager: vpnManager)
                 }.tabItem {
                     Label(languageManager.tr("Status"), systemImage: "bolt.heart")
@@ -28,11 +28,17 @@ import SwiftUI
                     Label(languageManager.tr("Configure"), systemImage: "server.rack")
                 }.tag(1)
 
-                NavigationView {
-                    IosAboutView(selectedTab: $selectedTab)
+                NavigationStack {
+                    IosDiagnosticsView(vpnManager: vpnManager)
+                }.tabItem {
+                    Label(languageManager.tr("Diagnostics"), systemImage: "stethoscope")
+                }.tag(2)
+
+                NavigationStack {
+                    IosAboutView()
                 }.tabItem {
                     Label(languageManager.tr("About"), systemImage: "questionmark.app")
-                }.tag(2)
+                }.tag(3)
             }
             .alert(
                 languageManager.tr("Server Not Configured"),

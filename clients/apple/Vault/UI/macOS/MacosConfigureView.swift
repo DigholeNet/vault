@@ -1,162 +1,436 @@
-//
-//  MacosConfigureView.swift
-//  Vault
-//
-//
-
-import SwiftUI
-
 #if os(macOS)
-    struct MacosConfigureView: View {
+import AppKit
+import ServiceManagement
+import SwiftUI
+import VaultCore
 
-        @ObservedObject var config: VaultConfig
-        @EnvironmentObject var languageManager: LanguageManager
-
-        @State private var isSecured: Bool = true
-        // The port is edited as text and only persisted when it parses to
-        // 1...65535; an invalid edit stays visible with an error hint
-        // instead of being written to the shared defaults.
-        @State private var portText: String = ""
-        @State private var portInvalid: Bool = false
-
-        var body: some View {
-
-            ZStack {
-
-                Form {
-                    Section {
-                        HStack {
-                            Image(systemName: "accessibility")
-                            TextField(
-                                "ID", text: $config.id, prompt: Text("ID")
-                            )
-                            .autocorrectionDisabled()
-                            .disabled(true)
-                        }
-                    }
-
-                    Section {
-                        HStack {
-                            Image(
-                                systemName:
-                                    "externaldrive.connected.to.line.below")
-                            TextField(
-                                languageManager.tr("Host"), text: $config.host,
-                                prompt: Text(languageManager.tr("IP Address or domain"))
-                            ).autocorrectionDisabled()
-                        }
-                        HStack {
-                            Image(systemName: "number.circle")
-                            TextField(
-                                languageManager.tr("Port"), text: $portText,
-                                prompt: Text("1-65535")
-                            )
-                            .autocorrectionDisabled()
-                            .onChange(of: portText) { newValue in
-                                if let port = Int(newValue), (1...65535).contains(port) {
-                                    portInvalid = false
-                                    config.port = port
-                                } else {
-                                    portInvalid = true
-                                }
-                            }
-                        }
-                        if portInvalid {
-                            Text(languageManager.tr("Port must be a number between 1 and 65535."))
-                                .foregroundColor(.red)
-                                .font(.footnote)
-                        }
-                        HStack {
-                            Group {
-                                if isSecured {
-                                    HStack {
-                                        Image(systemName: "p.circle.fill")
-                                        SecureField(
-                                            languageManager.tr("Password"), text: $config.password
-                                        )
-                                    }
-                                } else {
-                                    HStack {
-                                        Image(systemName: "p.circle.fill")
-                                        TextField(
-                                            languageManager.tr("Password"), text: $config.password
-                                        )
-                                        .autocorrectionDisabled()
-                                    }
-                                }
-                            }
-                            Button(action: {
-                                isSecured.toggle()
-
-                            }) {
-                                Image(
-                                    systemName: self.isSecured
-                                        ? "eye.slash" : "eye"
-                                )
-                                .accentColor(.gray)
-                            }
-                        }
-                        HStack {
-                            Image(systemName: "arrow.up.arrow.down.circle")
-                            TextField(
-                                languageManager.tr("MTU"), text: $config.mtu,
-                                prompt: Text("1280-1427")
-                            )
-                            .autocorrectionDisabled()
-                        }
-                    }
-
-                    Section {
-                        HStack {
-                            Image(systemName: "network")
-                            TextField(
-                                languageManager.tr("DNS"), text: $config.dns,
-                                prompt: Text(languageManager.tr("DNS Server"))
-                            )
-                            .autocorrectionDisabled()
-                        }
-                    } footer: {
-                        Text(languageManager.tr("DNS server address separated by comma."))
-                    }
-
-                    Section {
-                        HStack {
-                            Image(systemName: "stethoscope")
-                            TextField(
-                                languageManager.tr("Probe Domains"), text: $config.probeDomains,
-                                prompt: Text(languageManager.tr("Domains to probe"))
-                            )
-                            .autocorrectionDisabled()
-                        }
-                    } footer: {
-                        Text(languageManager.tr("Domains probed by Run Diagnostics, separated by comma. Empty uses defaults."))
-                    }
-
-                    Section {
-                        if let error = config.passwordStorageError {
-                            Text(languageManager.tr(error))
-                                .foregroundColor(.red)
-                                .font(.footnote)
-                            Button(languageManager.tr("Retry")) { config.retryPasswordStorage() }
-                        }
-                    }
-
-                }.formStyle(.grouped)
-
+struct MacosConfigureView: View {
+    enum Page: String, CaseIterable, Identifiable {
+        case general = "General", connection = "Connection", network = "Network", advanced = "Advanced"
+        var id: String { rawValue }
+        var symbol: String {
+            switch self {
+            case .general: return "gearshape"
+            case .connection: return "link"
+            case .network: return "globe"
+            case .advanced: return "slider.horizontal.3"
             }
-            .onAppear {
-                portText = String(config.port)
-                portInvalid = !(1...65535).contains(config.port)
-            }
-
         }
+    }
+    @ObservedObject var config: VaultConfig
+    @EnvironmentObject var appData: AppData
+    @EnvironmentObject var languageManager: LanguageManager
+    @ObservedObject private var preferences = MacosPreferences.shared
+    @State private var page: Page = .connection
+    @State private var host = ""
+    @State private var port = ""
+    @State private var password = ""
+    @State private var dns = ""
+    @State private var mtu = ""
+    @State private var domains = ""
+    @State private var revealsPassword = false
+    @State private var feedback: String?
+    @State private var isError = false
+    @State private var loaded = false
+    @State private var confirmReset = false
+    private enum Control: Hashable {
+        case section(Page), about, host, port, password, revealedPassword, reveal, dns, mtu, domains
+        case launch, autoConnect, dock, language, copyV4, copyV6, copyID, retryPassword, restore, save
+    }
+    @FocusState private var focusedControl: Control?
+    @State private var keyboardControl: Control? = .host
 
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(Page.allCases) { item in
+                    Button {
+                        select(item)
+                    } label: {
+                        Label(languageManager.tr(item.rawValue), systemImage: item.symbol)
+                            .font(.body.weight(page == item ? .medium : .regular))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10).padding(.vertical, 9)
+                            .background(page == item ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                            .foregroundStyle(page == item ? Color.accentColor : .primary)
+                    }.buttonStyle(.plain)
+                    .keyboardShortcut(KeyEquivalent(Character(String((Page.allCases.firstIndex(of: item) ?? 0) + 1))))
+                    .macosKeyboardAction(focus: $keyboardControl, id: .section(item)) { select(item) }
+                    .accessibilityAddTraits(page == item ? .isSelected : [])
+                }
+                Spacer()
+                Button {
+                    WindowManager.shared.showWindow(withIdentifier: "about")
+                } label: {
+                    Label(languageManager.tr("About"), systemImage: "questionmark.app")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                }
+                .buttonStyle(.plain).font(.body).foregroundStyle(.secondary)
+                .macosKeyboardAction(focus: $keyboardControl, id: .about) { WindowManager.shared.showWindow(withIdentifier: "about") }
+            }
+            .padding(12).frame(width: 150).frame(maxHeight: .infinity)
+            .background(.quaternary.opacity(0.3))
+            Divider()
+            VStack(alignment: .leading, spacing: 0) {
+                Text(languageManager.tr(page.rawValue)).font(.system(size: 15, weight: .semibold)).padding([.horizontal, .top], 24)
+                Form {
+                    switch page {
+                    case .general: general
+                    case .connection: connection
+                    case .network: network
+                    case .advanced: advanced
+                    }
+                }.formStyle(.grouped)
+                if let feedback {
+                    Text(languageManager.tr(feedback))
+                        .font(.body).foregroundStyle(isError ? Color.red : Color.secondary)
+                        .textSelection(.enabled).padding(.horizontal, 24).padding(.bottom, 10)
+                }
+                if page != .general {
+                    HStack {
+                        if page == .advanced {
+                            Button(languageManager.tr("Restore Defaults")) { confirmReset = true }
+                                .macosKeyboardAction(focus: $keyboardControl, id: .restore) { confirmReset = true }
+                        }
+                        Spacer()
+                        Button(languageManager.tr("Save"), action: save)
+                            .buttonStyle(.borderedProminent).keyboardShortcut("s")
+                            .macosKeyboardAction(focus: $keyboardControl, id: .save, action: save)
+                    }.padding(.horizontal, 24).padding(.bottom, 20)
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .macosKeyboardNavigation { event in
+            if event.type == .leftMouseDown {
+                if let current = keyboardControl, !isTextControl(current) { keyboardControl = nil }
+                return false
+            }
+            let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+            if event.keyCode == 48, modifiers.subtracting(.shift).isEmpty {
+                moveKeyboardFocus(nextControl(after: keyboardControl, backwards: modifiers.contains(.shift)), window: event.window)
+                return true
+            }
+            if event.keyCode == 53, modifiers.isEmpty { event.window?.performClose(nil); return true }
+            if modifiers == .command, let key = event.charactersIgnoringModifiers {
+                if let number = Int(key), (1...Page.allCases.count).contains(number) {
+                    select(Page.allCases[number - 1]); event.window?.makeFirstResponder(nil)
+                    return true
+                }
+                if key.lowercased() == "s", page != .general { save(); return true }
+                if key.lowercased() == "w" { event.window?.performClose(nil); return true }
+            }
+            if modifiers.isEmpty, let current = keyboardControl {
+                if case .section(let section) = current {
+                    let index = Page.allCases.firstIndex(of: section) ?? 0
+                    if event.keyCode == 125 || event.keyCode == 126 {
+                        select(Page.allCases[(index + (event.keyCode == 126 ? Page.allCases.count - 1 : 1)) % Page.allCases.count])
+                        return true
+                    }
+                    if event.keyCode == 124 { moveKeyboardFocus(firstControl, window: event.window); return true }
+                }
+                if current == .language, [123, 124, 125, 126].contains(event.keyCode) {
+                    moveLanguage(by: event.keyCode == 123 || event.keyCode == 126 ? -1 : 1); return true
+                }
+                if !event.isARepeat, [36, 49, 76].contains(event.keyCode), !isTextControl(current) {
+                    activate(current); return true
+                }
+            }
+            return false
+        }
+        .onChange(of: focusedControl) { _, control in
+            if let control { keyboardControl = control }
+        }
+        .onExitCommand { NSApp.keyWindow?.performClose(nil) }
+        .onAppear {
+            guard !loaded else { return }
+            loaded = true
+            host = config.host; port = String(config.port); password = config.password
+            dns = config.dns; mtu = config.mtu; domains = config.probeDomains
+            preferences.refreshLoginStatus()
+            DispatchQueue.main.async { focusedControl = .host }
+        }
+        .onChange(of: languageManager.language) { _, _ in WindowManager.shared.refreshTitles() }
+        .onChange(of: page) { _, _ in preferences.refreshLoginStatus() }
+        .alert(languageManager.tr("Login item could not be updated"), isPresented: Binding(
+            get: { preferences.launchError != nil }, set: { if !$0 { preferences.launchError = nil } })) {
+                Button(languageManager.tr("Open System Settings")) { SMAppService.openSystemSettingsLoginItems() }
+                Button(languageManager.tr("OK"), role: .cancel) {}
+            } message: { Text(languageManager.tr(preferences.launchError ?? "")) }
+        .confirmationDialog(languageManager.tr("Restore advanced defaults?"), isPresented: $confirmReset) {
+            Button(languageManager.tr("Restore Defaults")) { mtu = ""; domains = ""; feedback = "Defaults restored. Save to apply."; isError = false }
+        }
     }
 
-    #Preview {
-        @Previewable @State var config = VaultConfig()
-        MacosConfigureView(config: config)
-            .environmentObject(LanguageManager.shared)
+    private var general: some View {
+        Group {
+            Section {
+                Toggle(languageManager.tr("Launch at Login"), isOn: Binding(
+                    get: { preferences.launchAtLogin }, set: { preferences.setLaunchAtLogin($0) }))
+                    .macosKeyboardAction(focus: $keyboardControl, id: .launch) { preferences.setLaunchAtLogin(!preferences.launchAtLogin) }
+                Toggle(languageManager.tr("Connect when Vault opens"), isOn: $preferences.autoConnect)
+                    .macosKeyboardAction(focus: $keyboardControl, id: .autoConnect) { preferences.autoConnect.toggle() }
+                Toggle(languageManager.tr("Show in Dock"), isOn: $preferences.showInDock)
+                    .macosKeyboardAction(focus: $keyboardControl, id: .dock) { preferences.showInDock.toggle() }
+                Picker(languageManager.tr("Language"), selection: $languageManager.language) {
+                    ForEach(AppLanguage.allCases) { Text($0.displayName).tag($0) }
+                }
+                .macosKeyboardAction(focus: $keyboardControl, id: .language) { moveLanguage(by: 1) }
+            } footer: {
+                Text(languageManager.tr("Closing a window keeps the VPN running. Quit ends the connection.")).font(.body)
+            }
+        }
+    }
+    private var connection: some View {
+        Group {
+            Section {
+                TextField(languageManager.tr("Server"), text: $host, prompt: Text("vpn.example.com"))
+                    .autocorrectionDisabled()
+                    .focused($focusedControl, equals: .host)
+                    .onSubmit { focusedControl = .port }
+                TextField(languageManager.tr("Port"), text: $port)
+                    .focused($focusedControl, equals: .port)
+                    .onSubmit { focusedControl = passwordControl }
+                HStack {
+                    if revealsPassword {
+                        TextField(languageManager.tr("Password"), text: $password)
+                            .focused($focusedControl, equals: .revealedPassword).onSubmit(save)
+                    } else {
+                        SecureField(languageManager.tr("Password"), text: $password)
+                            .focused($focusedControl, equals: .password).onSubmit(save)
+                    }
+                    Button { togglePasswordVisibility() } label: {
+                        Image(systemName: revealsPassword ? "eye.slash" : "eye")
+                    }.buttonStyle(.plain).help(languageManager.tr("Show or hide password"))
+                    .accessibilityLabel(languageManager.tr("Show or hide password"))
+                    .macosKeyboardAction(focus: $keyboardControl, id: .reveal, action: togglePasswordVisibility)
+                }
+            } footer: { Text(languageManager.tr("Changes apply the next time you connect.")).font(.body) }
+            if let error = config.passwordStorageError {
+                Section {
+                    Text(languageManager.tr(error)).foregroundStyle(.red)
+                    Button(languageManager.tr("Retry")) { config.retryPasswordStorage() }
+                        .macosKeyboardAction(focus: $keyboardControl, id: .retryPassword) { config.retryPasswordStorage() }
+                }
+            }
+        }
+    }
+    private var network: some View {
+        Group {
+            Section(languageManager.tr("DNS Servers")) {
+                TextField(languageManager.tr("DNS"), text: $dns, prompt: Text("1.1.1.1, 8.8.8.8"))
+                    .autocorrectionDisabled().focused($focusedControl, equals: .dns).onSubmit(save)
+                Text(languageManager.tr("DNS server address separated by comma.")).font(.body).foregroundStyle(.secondary)
+            }
+            Section(languageManager.tr("Tunnel Addresses")) {
+                if appData.vpnStatus == .on || appData.isRecovering {
+                    let addresses = config.ip.parsedIPv4AndIPv6()
+                    if let ipv4 = addresses.ipv4 { addressRow("IPv4", ipv4) }
+                    if let ipv6 = addresses.ipv6 { addressRow("IPv6", ipv6) }
+                    if addresses.ipv4 == nil && addresses.ipv6 == nil {
+                        Text(languageManager.tr("Waiting for server-assigned addresses…")).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(languageManager.tr("Addresses are assigned by the server after connecting."))
+                        .foregroundStyle(.secondary)
+                }
+                Text(languageManager.tr("Assigned by the server. Addresses may change after reconnecting."))
+                    .font(.body).foregroundStyle(.secondary)
+            }
+        }
+    }
+    private var advanced: some View {
+        Group {
+            Section {
+                TextField(languageManager.tr("MTU"), text: $mtu, prompt: Text("1280–1427"))
+                    .focused($focusedControl, equals: .mtu).onSubmit { focusedControl = .domains }
+                Text(languageManager.tr("Leave empty for automatic MTU. Valid range: 1280–1427."))
+                    .font(.body).foregroundStyle(.secondary)
+                TextField(languageManager.tr("Probe Domains"), text: $domains, prompt: Text("www.google.com, github.com, t.co"))
+                    .autocorrectionDisabled().focused($focusedControl, equals: .domains).onSubmit(save)
+                Text(languageManager.tr("Domains probed by Run Diagnostics, separated by comma. Empty uses defaults."))
+                    .font(.body).foregroundStyle(.secondary)
+            }
+            Section(languageManager.tr("Client Identifier")) {
+                HStack {
+                    Text(config.id).font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button(languageManager.tr("Copy")) { copy(config.id) }
+                        .macosKeyboardAction(focus: $keyboardControl, id: .copyID) { copy(config.id) }
+                }
+                Text(languageManager.tr("Identifies this client. Usually no changes are needed."))
+                    .font(.body).foregroundStyle(.secondary)
+            }
+        }
+    }
+    private func addressRow(_ family: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(family).font(.body).foregroundStyle(.secondary).frame(width: 35, alignment: .leading)
+            Text(value).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+            Button { copy(value) } label: { Image(systemName: "doc.on.doc") }
+                .buttonStyle(.plain).help(languageManager.tr("Copy"))
+                .accessibilityLabel(languageManager.tr("Copy") + " " + family)
+                .macosKeyboardAction(focus: $keyboardControl, id: family == "IPv4" ? .copyV4 : .copyV6) { copy(value) }
+        }
+    }
+    private var firstControl: Control {
+        switch page {
+        case .general: return .launch
+        case .connection: return .host
+        case .network: return .dns
+        case .advanced: return .mtu
+        }
+    }
+    private var focusOrder: [Control] {
+        var order = Page.allCases.map(Control.section)
+        switch page {
+        case .general: order += [.launch, .autoConnect, .dock, .language]
+        case .connection:
+            order += [.host, .port, passwordControl, .reveal]
+            if config.passwordStorageError != nil { order.append(.retryPassword) }
+            order.append(.save)
+        case .network:
+            order.append(.dns)
+            if appData.vpnStatus == .on || appData.isRecovering {
+                let ip = config.ip.parsedIPv4AndIPv6()
+                if ip.ipv4 != nil { order.append(.copyV4) }
+                if ip.ipv6 != nil { order.append(.copyV6) }
+            }
+            order.append(.save)
+        case .advanced: order += [.mtu, .domains, .copyID, .restore, .save]
+        }
+        return order + [.about]
+    }
+    private func nextControl(after current: Control?, backwards: Bool) -> Control? {
+        let order = focusOrder
+        guard let current, let index = order.firstIndex(of: current) else {
+            return backwards ? order.last : order.first
+        }
+        return order[(index + (backwards ? order.count - 1 : 1)) % order.count]
+    }
+    private func select(_ selected: Page) {
+        page = selected
+        feedback = nil
+        focusedControl = nil
+        keyboardControl = .section(selected)
+    }
+    private func isTextControl(_ control: Control) -> Bool {
+        [.host, .port, .password, .revealedPassword, .dns, .mtu, .domains].contains(control)
+    }
+    private func moveKeyboardFocus(_ control: Control?, window: NSWindow?) {
+        keyboardControl = control
+        if let control, isTextControl(control) {
+            focusedControl = control
+        } else {
+            focusedControl = nil
+            window?.makeFirstResponder(nil)
+        }
+    }
+    private func activate(_ control: Control) {
+        switch control {
+        case .section(let selected): select(selected)
+        case .about: WindowManager.shared.showWindow(withIdentifier: "about")
+        case .launch: preferences.setLaunchAtLogin(!preferences.launchAtLogin)
+        case .autoConnect: preferences.autoConnect.toggle()
+        case .dock: preferences.showInDock.toggle()
+        case .language: moveLanguage(by: 1)
+        case .reveal: togglePasswordVisibility()
+        case .copyV4: if let ip = config.ip.parsedIPv4AndIPv6().ipv4 { copy(ip) }
+        case .copyV6: if let ip = config.ip.parsedIPv4AndIPv6().ipv6 { copy(ip) }
+        case .copyID: copy(config.id)
+        case .retryPassword: config.retryPasswordStorage()
+        case .restore: confirmReset = true
+        case .save: save()
+        default: break
+        }
+    }
+    private func moveLanguage(by offset: Int) {
+        let all = AppLanguage.allCases
+        let index = all.firstIndex(of: languageManager.language) ?? 0
+        languageManager.language = all[(index + offset + all.count) % all.count]
+    }
+    private var passwordControl: Control { revealsPassword ? .revealedPassword : .password }
+    private func togglePasswordVisibility() {
+        focusedControl = nil
+        revealsPassword.toggle()
+        let inputFocus = $focusedControl
+        let target = passwordControl
+        DispatchQueue.main.async { inputFocus.wrappedValue = target }
     }
 
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+    }
+    private func save() {
+        feedback = nil; isError = true
+        switch page {
+        case .general: return
+        case .connection:
+            let cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard SettingsValidation.isValidServer(cleanHost) else {
+                feedback = "Enter a server IP address or hostname without a URL scheme."; return
+            }
+            guard let number = Int(port), (1...65535).contains(number) else {
+                feedback = "Port must be a number between 1 and 65535."; return
+            }
+            guard !password.isEmpty else { feedback = "Enter the server password."; return }
+            config.host = cleanHost; config.port = number
+            // Avoid overwriting an unreadable Keychain item with an unchanged draft.
+            if password != config.password { config.password = password }
+            if let error = config.passwordStorageError { feedback = error; return }
+            host = cleanHost
+        case .network:
+            guard SettingsValidation.isValidDNSList(dns) else {
+                feedback = "Enter valid DNS IP addresses, separated by commas."; return
+            }
+            config.dns = dns.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .advanced:
+            let cleanMtu = mtu.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard SettingsValidation.isValidMTU(cleanMtu) else {
+                feedback = "MTU must be between 1280 and 1427, or empty for automatic."; return
+            }
+            let cleanDomains = domains.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard SettingsValidation.isValidProbeList(cleanDomains) else { feedback = "Enter domain names separated by commas, without URLs."; return }
+            config.mtu = cleanMtu; config.probeDomains = cleanDomains
+        }
+        isError = false
+        feedback = "Saved. Changes apply the next time you connect."
+    }
+}
+
+struct MacosWelcomeView: View {
+    @EnvironmentObject var languageManager: LanguageManager
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(spacing: 12) {
+                MacosAppIcon(size: 40)
+                Text("Vault").font(.system(size: 20, weight: .semibold))
+            }
+            Text(languageManager.tr("Get started with Vault")).font(.system(size: 15, weight: .semibold))
+            VStack(alignment: .leading, spacing: 14) {
+                step("1", "Configure your server", "Enter the server address, port, and password.")
+                step("2", "Approve the VPN", "macOS will ask permission to add a VPN configuration.")
+                step("3", "Connect", "Connect from the menu bar. Closing this window keeps Vault available.")
+            }
+            HStack {
+                Spacer()
+                Button(languageManager.tr("Configure Server")) {
+                    WindowManager.shared.showWindow(withIdentifier: "configure")
+                }.buttonStyle(.borderedProminent)
+            }
+        }.padding(28)
+    }
+    private func step(_ number: String, _ title: String, _ detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(number).font(.headline).frame(width: 25, height: 25)
+                .background(.blue.opacity(0.1), in: Circle()).foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(languageManager.tr(title)).font(.body.weight(.medium))
+                Text(languageManager.tr(detail)).font(.body).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
 #endif

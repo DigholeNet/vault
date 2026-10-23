@@ -19,13 +19,84 @@ import Foundation
 
 public enum RouteCheck {
 
+    public struct Assessment: Sendable {
+        public var issues: [String] = []
+        public var unavailable: [String] = []
+    }
+
+    /// `assignedIP` must come from the live provider, never a persisted cache.
+    /// Missing metadata cannot establish a route mismatch or an IPv6 bypass.
+    public static func assess(
+        routes: (ipv4: String?, ipv6: String?), assignedIP: String?
+    ) -> Assessment {
+        var result = Assessment()
+        guard let assignedIP, !assignedIP.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            result.unavailable.append("Current tunnel addresses unavailable; route check incomplete")
+            return result
+        }
+        let parts = assignedIP.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count <= 2 else {
+            result.unavailable.append("Tunnel address metadata invalid; route check incomplete")
+            return result
+        }
+        let ipv4 = parts.first.map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+        let ipv6 = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let validV4 = isAddress(ipv4, family: AF_INET)
+        let validV6 = isAddress(ipv6, family: AF_INET6)
+        if validV4 {
+            if let route = routes.ipv4 {
+                if !sameAddress(route, ipv4) {
+                    result.issues.append("IPv4 route to 1.1.1.1 selects \(route); expected tunnel address \(ipv4)")
+                }
+            } else {
+                result.unavailable.append("IPv4 route unavailable; cannot verify tunnel routing")
+            }
+        } else {
+            result.unavailable.append("Tunnel IPv4 address unavailable; route check incomplete")
+        }
+        if validV6 {
+            if let route = routes.ipv6 {
+                if !sameAddress(route, ipv6) {
+                    result.issues.append("IPv6 route selects \(route); expected tunnel address \(ipv6)")
+                }
+            } else {
+                result.unavailable.append("IPv6 route unavailable; cannot verify tunnel routing")
+            }
+        } else if !ipv6.isEmpty {
+            result.unavailable.append("Tunnel IPv6 address invalid; route check incomplete")
+        } else if validV4, let route = routes.ipv6 {
+            // Only a valid, live IPv4-only assignment supports this inference.
+            result.issues.append("IPv6 route selects \(route) but the current provider reports no tunnel IPv6 address; possible IPv6 bypass")
+        }
+        return result
+    }
+
+    private static func isAddress(_ address: String, family: Int32) -> Bool {
+        var bytes = in6_addr()
+        return inet_pton(family, address, &bytes) == 1
+    }
+
     /// Local addresses the default routes select for IPv4/IPv6 traffic.
-    /// nil means no route exists for that family at all.
+    /// nil means the socket probe could not determine a local address.
     public static func defaultRouteLocalAddresses() -> (ipv4: String?, ipv6: String?) {
         (
             probe(family: AF_INET, address: "1.1.1.1", port: 53),
             probe(family: AF_INET6, address: "2606:4700:4700::1111", port: 53)
         )
+    }
+
+    public static func sameAddress(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let lhs, let rhs else { return false }
+        for family in [AF_INET, AF_INET6] {
+            var a = in6_addr()
+            var b = in6_addr()
+            if inet_pton(family, lhs, &a) == 1, inet_pton(family, rhs, &b) == 1 {
+                return withUnsafeBytes(of: a) { aa in
+                    withUnsafeBytes(of: b) { bb in aa.elementsEqual(bb) }
+                }
+            }
+        }
+        return false
     }
 
     private static func probe(family: Int32, address: String, port: UInt16) -> String? {
@@ -94,5 +165,20 @@ public enum RouteCheck {
                 return String(cString: buf)
             }
         }
+    }
+}
+
+extension DiagnosticsResult {
+    public mutating func appendRouteAssessment(_ assessment: RouteCheck.Assessment) {
+        if !assessment.issues.isEmpty {
+            if summary.hasPrefix("OK") { summary = "PROBLEMS FOUND (route check)" }
+            summary += "; " + assessment.issues.joined(separator: "; ")
+        }
+        if !assessment.unavailable.isEmpty {
+            if summary.hasPrefix("OK") { summary = "INCOMPLETE (route check)" }
+            else if !summary.contains("INCOMPLETE") { summary += "; INCOMPLETE (route check)" }
+            summary += "; " + assessment.unavailable.joined(separator: "; ")
+        }
+        lines.append(contentsOf: (assessment.issues + assessment.unavailable).map { "[probe] route: \($0)" })
     }
 }

@@ -55,7 +55,7 @@ import SwiftUI
                             )
                             .keyboardType(.numberPad)
                             .autocorrectionDisabled()
-                            .onChange(of: portText) { newValue in
+                            .onChange(of: portText) { _, newValue in
                                 if let port = Int(newValue), (1...65535).contains(port) {
                                     portInvalid = false
                                     config.port = port
@@ -142,6 +142,14 @@ import SwiftUI
                         }
                     } footer: {
                         Text(languageManager.tr("Domains probed by Run Diagnostics, separated by comma. Empty uses defaults."))
+                    }
+
+                    Section {
+                        Picker(languageManager.tr("Language"), selection: $languageManager.language) {
+                            ForEach(AppLanguage.allCases) { language in
+                                Text(language.displayName).tag(language)
+                            }
+                        }
                     }
 
                     Section {

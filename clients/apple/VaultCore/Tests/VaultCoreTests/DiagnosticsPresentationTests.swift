@@ -1,0 +1,53 @@
+import Testing
+@testable import VaultCore
+
+@Test func sessionClockClampsAndKeepsHoursPastOneDay() {
+    #expect(DiagnosticsPresentation.connectionDuration(-5) == "00:00:00")
+    #expect(DiagnosticsPresentation.connectionDuration(1476.9) == "00:24:36")
+    #expect(DiagnosticsPresentation.connectionDuration(90061) == "25:01:01")
+}
+
+@Test func logSearchCombinesSourceAndCaseInsensitiveText() {
+    let text = "[app] HTTPS ready\n[ne] DNS ready\n[ne] HTTPS failed"
+    #expect(DiagnosticsPresentation.filteredLogs(text, source: "ne", search: "https") == "[ne] HTTPS failed")
+    #expect(DiagnosticsPresentation.filteredLogs(text, source: "all", search: "ready") == "[app] HTTPS ready\n[ne] DNS ready")
+    #expect(DiagnosticsPresentation.filteredLogs(text, source: "app", search: "DNS").isEmpty)
+}
+
+@Test func resultPresentationDoesNotMarkIncompleteChecksPassed() {
+    let check = DiagnosticsCheck(id: "dns", passed: 0, attempted: 0, state: .incomplete, durationMs: 0)
+    #expect(!DiagnosticsPresentation.passed(DiagnosticsResult(summary: "OK", lines: [], checks: [check])))
+    #expect(DiagnosticsPresentation.incomplete(DiagnosticsResult(summary: "PROBLEMS FOUND; INCOMPLETE", lines: [])))
+    #expect(DiagnosticsPresentation.passed(DiagnosticsResult(summary: "OK - legacy result", lines: [])))
+}
+
+@Test func successfulRetriesDoNotFailDomainSummary() {
+    let domain = "example.com"
+    var probes = DiagnosticsPresentation.checkIDs.map {
+        DiagnosticsProbe(stage: $0, domain: domain, durationMs: 100, succeeded: true, detail: "ok")
+    }
+    probes.insert(DiagnosticsProbe(stage: "dns", domain: domain, durationMs: 500,
+        succeeded: false, detail: "first resolver timed out"), at: 0)
+    let result = DiagnosticsResult(summary: "OK", lines: [], probes: probes)
+    #expect(DiagnosticsPresentation.domainState(result, domain: domain) == .passed)
+    #expect(result.probes?.first?.succeeded == false)
+}
+
+@Test func domainSummaryKeepsFailuresAndMissingStagesDistinct() {
+    let failed = DiagnosticsResult(summary: "PROBLEMS FOUND", lines: [], probes: [
+        DiagnosticsProbe(stage: "dns", domain: "example.com", durationMs: 100, succeeded: false, detail: "timeout")
+    ])
+    #expect(DiagnosticsPresentation.domainState(failed, domain: "example.com") == .failed)
+    #expect(DiagnosticsPresentation.domainState(failed, domain: "other.com") == .incomplete)
+}
+
+@Test func legacyStageDurationIsNotLabelledAnAverage() {
+    let legacy = DiagnosticsResult(summary: "OK", lines: [], checks: [
+        DiagnosticsCheck(id: "dns", passed: 3, attempted: 3, state: .passed, durationMs: 600)
+    ])
+    #expect(DiagnosticsPresentation.durationHeading(legacy) == "Duration")
+    let measured = DiagnosticsResult(summary: "OK", lines: [], checks: [
+        DiagnosticsCheck(id: "dns", passed: 3, attempted: 3, state: .passed, durationMs: 200, sampleCount: 3)
+    ])
+    #expect(DiagnosticsPresentation.durationHeading(measured) == "Average duration")
+}
