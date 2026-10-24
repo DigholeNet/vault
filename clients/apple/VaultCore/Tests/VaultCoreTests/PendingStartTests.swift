@@ -31,3 +31,22 @@ import Testing
     }
     #expect(!closed)
 }
+
+@Test func duplicateStartsShareSuccessOrFailureAndCannotBeCompletedAgain() {
+    for fails in [false, true] {
+        var replies = 0
+        let callback: (Error?) -> Void = { error in
+            replies += 1
+            #expect((error != nil) == fails)
+        }
+        let start = PendingStart(completion: callback)
+        #expect(start.appendCompletion(callback))
+        #expect(start.appendCompletion(callback))
+        let completion = start.takeCompletion()
+        #expect(!start.isPending)
+        #expect(!start.appendCompletion(callback))
+        completion?(fails ? EdgeError.connectionFailed : nil)
+        #expect(replies == 3)
+        #expect(start.takeCompletion() == nil)
+    }
+}

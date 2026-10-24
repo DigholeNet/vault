@@ -25,6 +25,10 @@ class VpnManager {
     private var stopCompletions: [(Bool) -> Void] = []
     #if os(macOS)
     var systemExtensionManager = SystemExtensionManager.shared
+    var providerStartupTimeout: TimeInterval = 30
+    func queryProviderStarted(completion: @escaping (Bool) -> Void) {
+        sendProviderCommand("startupStatus", timeout: 0.5) { completion($0 == Data([1])) }
+    }
     #endif
     /// Serializes preparation, cancellation and teardown on both platforms.
     private var connectionLifecycle = VPNConnectionLifecycle()
@@ -542,10 +546,12 @@ extension VpnManager {
                 self.observeVPNStatus(for: manager)
                 let finish: () -> Void = {
                     DispatchQueue.main.async {
-                        guard self.connectionLifecycle.acceptsStop(token) else { return }
-                        manager.connection.stopVPNTunnel()
-                        self.connectionLifecycle.finishStopJob(token)
-                        self.completeStopIfPossible()
+                        #if os(macOS)
+                        let deadline = ProcessInfo.processInfo.systemUptime + self.providerStartupTimeout
+                        #else
+                        let deadline = ProcessInfo.processInfo.systemUptime
+                        #endif
+                        self.stopTunnelWhenReady(token, manager: manager, deadline: deadline)
                     }
                 }
                 if manager.isOnDemandEnabled {
@@ -569,6 +575,43 @@ extension VpnManager {
         }
         if let manager { stop(manager, nil) }
         else { loadProviderManager(stop) }
+    }
+
+    /// A connecting session can still be allocating its utun inside nehelper.
+    /// Stopping before the provider enters startTunnel leaves that allocation orphaned.
+    private func stopTunnelWhenReady(_ token: UInt64, manager: NETunnelProviderManager, deadline: TimeInterval) {
+        guard connectionLifecycle.acceptsStop(token) else { return }
+        #if os(macOS)
+        if manager.connection.status == .connecting {
+            queryProviderStarted { started in
+                DispatchQueue.main.async {
+                    guard self.connectionLifecycle.acceptsStop(token) else { return }
+                    if started || manager.connection.status != .connecting {
+                        self.finishTunnelStop(token, manager: manager)
+                    } else if ProcessInfo.processInfo.systemUptime >= deadline {
+                        Logger.network.errorAndFile("Provider startup did not settle; disconnect can be retried")
+                        self.connectionLifecycle.finishStopJob(token, succeeded: false)
+                        self.completeStopIfPossible()
+                    } else {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            self.stopTunnelWhenReady(token, manager: manager, deadline: deadline)
+                        }
+                    }
+                }
+            }
+            return
+        }
+        #endif
+        finishTunnelStop(token, manager: manager)
+    }
+
+    private func finishTunnelStop(_ token: UInt64, manager: NETunnelProviderManager) {
+        guard connectionLifecycle.acceptsStop(token) else { return }
+        if manager.connection.status != .disconnected && manager.connection.status != .invalid {
+            manager.connection.stopVPNTunnel()
+        }
+        connectionLifecycle.finishStopJob(token)
+        completeStopIfPossible()
     }
 
     /// Send a provider-message command and return the raw reply. The reply

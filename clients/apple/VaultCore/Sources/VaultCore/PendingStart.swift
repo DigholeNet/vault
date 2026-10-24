@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: MIT
 import Foundation
 
-/// Owns one tunnel start completion. Access only on the provider's main queue.
+/// Owns the completions for one (possibly repeated) tunnel start. Access only on the provider's main queue.
 public final class PendingStart {
-    private var completion: ((Error?) -> Void)?
+    private var completions: [(Error?) -> Void]
     private var failureScheduled = false
 
     public init(completion: @escaping (Error?) -> Void) {
-        self.completion = completion
+        self.completions = [completion]
     }
 
-    public var isPending: Bool { completion != nil }
+    public var isPending: Bool { !completions.isEmpty }
+
+    @discardableResult
+    public func appendCompletion(_ completion: @escaping (Error?) -> Void) -> Bool {
+        guard isPending else { return false }
+        completions.append(completion)
+        return true
+    }
 
     public func scheduleFailure() -> Bool {
         guard isPending, !failureScheduled else { return false }
@@ -20,8 +27,9 @@ public final class PendingStart {
 
     /// Claim completion before performing any success or failure side effects.
     public func takeCompletion() -> ((Error?) -> Void)? {
-        let result = completion
-        completion = nil
-        return result
+        guard isPending else { return nil }
+        let callbacks = completions
+        completions.removeAll()
+        return { error in callbacks.forEach { $0(error) } }
     }
 }

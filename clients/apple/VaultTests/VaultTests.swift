@@ -165,6 +165,13 @@ private final class DelayedLoadVpnManager: VpnManager {
     var preparationCalls = 0
     var activationRequests: [OSSystemExtensionRequest] = []
     var approvalPrompts = 0
+    var startupProbe: ((Bool) -> Void)?
+    var onStartupProbe: (() -> Void)?
+
+    override func queryProviderStarted(completion: @escaping (Bool) -> Void) {
+        startupProbe = completion
+        onStartupProbe?()
+    }
 
     override func loadAndCreateProviderManager(_ complete: @escaping (NETunnelProviderManager?, Bool) -> Void) {
         preparationCalls += 1
@@ -320,9 +327,7 @@ extension VaultTests {
             profile.testConnection.startError = NEVPNError(.configurationInvalid)
             var saved: ((Error?) -> Void)?
             let saving = expectation(description: "failed connection profile cleanup")
-            let stopping = expectation(description: "failed connection tunnel stopped")
             profile.onSave = { saved = $0; saving.fulfill() }
-            profile.testConnection.onStop = { stopping.fulfill() }
             controller.prepared?(profile, reloadSucceeded)
             await fulfillment(of: [saving], timeout: 2)
             XCTAssertEqual(profile.testConnection.startCalls, reloadSucceeded ? 1 : 0)
@@ -330,9 +335,8 @@ extension VaultTests {
             controller.connect()
             XCTAssertEqual(controller.activationRequests.count, 1)
             saved?(nil)
-            await fulfillment(of: [stopping], timeout: 2)
-            profile.testConnection.testStatus = .disconnected
-            controller.updateVPNStatus(profile)
+            await drainMainQueue()
+            XCTAssertEqual(profile.testConnection.stopCalls, 0)
             XCTAssertEqual(controller.vpnStatus, .off)
             XCTAssertNotNil(controller.appData.connectionError)
             XCTAssertFalse(profile.isOnDemandEnabled)
@@ -450,6 +454,101 @@ extension VaultTests {
         await fulfillment(of: [retried], timeout: 2)
         XCTAssertEqual(firstReplies, 1)
         XCTAssertEqual(controller.vpnStatus, .off)
+    }
+
+    @MainActor
+    func testEarlyCancellationWaitsForProviderStartupBeforeStopping() async throws {
+        let controller = try makeController()
+        let profile = TestTunnelManager()
+        profile.isOnDemandEnabled = true
+        profile.testConnection.testStatus = .connecting
+        controller.activeVPN = profile
+        profile.onSave = { $0?(nil) }
+        let probing = expectation(description: "waiting for provider to own the startup")
+        controller.onStartupProbe = { probing.fulfill() }
+        let completed = expectation(description: "cancellation finished")
+        controller.disconnect { succeeded in XCTAssertTrue(succeeded); completed.fulfill() }
+        await fulfillment(of: [probing], timeout: 2)
+        XCTAssertEqual(profile.testConnection.stopCalls, 0)
+        XCTAssertFalse(profile.isOnDemandEnabled)
+        XCTAssertEqual(controller.vpnStatus, .disconnecting)
+        var repeatedCompletions = 0
+        for _ in 0..<10 {
+            controller.disconnect { succeeded in
+                XCTAssertTrue(succeeded)
+                repeatedCompletions += 1
+            }
+            controller.connect()
+        }
+        XCTAssertTrue(controller.activationRequests.isEmpty)
+        XCTAssertEqual(repeatedCompletions, 0)
+        let stopping = expectation(description: "provider acknowledged startup, stopping is now safe")
+        profile.testConnection.onStop = { stopping.fulfill() }
+        controller.startupProbe?(true)
+        await fulfillment(of: [stopping], timeout: 2)
+        XCTAssertEqual(profile.testConnection.stopCalls, 1)
+        XCTAssertEqual(controller.vpnStatus, .disconnecting)
+        profile.testConnection.testStatus = .disconnected
+        controller.updateVPNStatus(profile)
+        await fulfillment(of: [completed], timeout: 2)
+        XCTAssertEqual(repeatedCompletions, 10)
+        XCTAssertEqual(profile.testConnection.stopCalls, 1)
+        XCTAssertNil(controller.appData.connectionError)
+    }
+
+    @MainActor
+    func testCancellationCanSettleWhenStartupConnectsOrFailsWithoutAReply() async throws {
+        for startupSucceeded in [true, false] {
+            let controller = try makeController()
+            let profile = TestTunnelManager()
+            profile.testConnection.testStatus = .connecting
+            controller.activeVPN = profile
+            let probing = expectation(description: "startup queried")
+            controller.onStartupProbe = { probing.fulfill() }
+            let completed = expectation(description: "startup settled")
+            controller.disconnect { succeeded in XCTAssertTrue(succeeded); completed.fulfill() }
+            await fulfillment(of: [probing], timeout: 2)
+            profile.testConnection.testStatus = startupSucceeded ? .connected : .disconnected
+            controller.startupProbe?(false)
+            await drainMainQueue()
+            XCTAssertEqual(profile.testConnection.stopCalls, startupSucceeded ? 1 : 0)
+            if startupSucceeded {
+                profile.testConnection.testStatus = .disconnected
+                controller.updateVPNStatus(profile)
+            }
+            await fulfillment(of: [completed], timeout: 2)
+            XCTAssertEqual(controller.vpnStatus, .off)
+            XCTAssertNil(controller.appData.connectionError)
+        }
+    }
+
+    @MainActor
+    func testStartupWaitTimeoutReportsFailureWithoutUnsafeStopAndAllowsRetry() async throws {
+        let controller = try makeController()
+        controller.providerStartupTimeout = 0
+        let profile = TestTunnelManager()
+        profile.testConnection.testStatus = .connecting
+        controller.activeVPN = profile
+        let probing = expectation(description: "startup queried")
+        controller.onStartupProbe = { probing.fulfill() }
+        let failed = expectation(description: "unsafe cancellation rejected")
+        controller.disconnect { succeeded in XCTAssertFalse(succeeded); failed.fulfill() }
+        await fulfillment(of: [probing], timeout: 2)
+        controller.startupProbe?(false)
+        await fulfillment(of: [failed], timeout: 2)
+        XCTAssertEqual(profile.testConnection.stopCalls, 0)
+        XCTAssertEqual(controller.vpnStatus, .connecting)
+        XCTAssertNotNil(controller.appData.connectionError)
+        profile.testConnection.testStatus = .connected
+        let stopping = expectation(description: "retry stops an initialized provider")
+        profile.testConnection.onStop = { stopping.fulfill() }
+        let completed = expectation(description: "retry completed")
+        controller.disconnect { succeeded in XCTAssertTrue(succeeded); completed.fulfill() }
+        await fulfillment(of: [stopping], timeout: 2)
+        profile.testConnection.testStatus = .disconnected
+        controller.updateVPNStatus(profile)
+        await fulfillment(of: [completed], timeout: 2)
+        XCTAssertNil(controller.appData.connectionError)
     }
 
     @MainActor

@@ -97,6 +97,29 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         options: [String: NSObject]?,
         completionHandler: @escaping (Error?) -> Void
     ) {
+        DispatchQueue.main.async {
+            self.startTunnelOnMain(options: options, completionHandler: completionHandler)
+        }
+    }
+
+    private func startTunnelOnMain(
+        options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void
+    ) {
+        // Duplicate system callbacks must not reset or fail the in-flight session.
+        if let pending = pendingStart, pending.appendCompletion(completionHandler) {
+            Logger.network.noticeAndFile("[session:\(sessionID)] Coalescing duplicate startTunnel")
+            return
+        }
+        if startFinished, !stopRequested {
+            completionHandler(nil)
+            return
+        }
+        guard Self.claimStart() else {
+            completionHandler(ConfigurationError.invalidConfiguration("start in progress"))
+            return
+        }
+        let pending = PendingStart(completion: completionHandler)
+        pendingStart = pending
         FileLogger.shared.processTag = "ne"
         // Route Rust core/bridge logs into the same shared file. Must happen
         // before the first Edge (RustEdge) is created so the logger picks it up.
@@ -122,21 +145,19 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             let protoConfig = protocolConfiguration as? NETunnelProviderProtocol
         else {
             Logger.network.error("Invalid protocol configuration type")
-            completionHandler(
-                ConfigurationError.invalidConfiguration("protocol type")
-            )
+            finishStart(with: ConfigurationError.invalidConfiguration("protocol type"))
             return
         }
 
         guard let conf = protoConfig.providerConfiguration else {
             Logger.network.error("No provider configuration found")
-            completionHandler(ConfigurationError.missingConfiguration)
+            finishStart(with: ConfigurationError.missingConfiguration)
             return
         }
 
         guard let rawHost = conf["host"] as? String, !rawHost.isEmpty else {
             Logger.network.error("Missing or empty host")
-            completionHandler(ConfigurationError.invalidConfiguration("host"))
+            finishStart(with: ConfigurationError.invalidConfiguration("host"))
             return
         }
         // Accept "[::1]" style input by stripping URL-style brackets.
@@ -146,7 +167,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         guard let port = conf["port"] as? UInt16 else {
             Logger.network.error("Missing or invalid port")
-            completionHandler(ConfigurationError.invalidConfiguration("port"))
+            finishStart(with: ConfigurationError.invalidConfiguration("port"))
             return
         }
 
@@ -155,15 +176,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         // so App Group UserDefaults are not shared with it.
         guard let password = conf["password"] as? String, !password.isEmpty else {
             Logger.network.error("Missing password")
-            completionHandler(
-                ConfigurationError.invalidConfiguration("password")
-            )
+            finishStart(with: ConfigurationError.invalidConfiguration("password"))
             return
         }
 
         guard let id = conf["id"] as? Data else {
             Logger.network.error("Missing id")
-            completionHandler(ConfigurationError.invalidConfiguration("id"))
+            finishStart(with: ConfigurationError.invalidConfiguration("id"))
             return
         }
 
@@ -194,17 +213,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             )
         }
 
-        // Resolve the supernode address on a background queue so a slow
-        // DNS lookup does not block startTunnel.
-        guard Self.claimStart() else {
-            Logger.network.error(
-                "startTunnel rejected: another start is in progress (pid \(ProcessInfo.processInfo.processIdentifier), provider \(ObjectIdentifier(self).hashValue, privacy: .public))"
-            )
-            completionHandler(
-                ConfigurationError.invalidConfiguration("start in progress")
-            )
-            return
-        }
         // The system sometimes spawns a second provider instance for the
         // same tunnel while a previous one still holds a live session. Both
         // sessions share one peer id, so the supernode evicts the older one
@@ -218,26 +226,26 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else {
-                Self.releaseStart()
-                completionHandler(EdgeError.connectionFailed)
+                DispatchQueue.main.async {
+                    if let completion = pending.takeCompletion() {
+                        Self.releaseStart()
+                        completion(EdgeError.connectionFailed)
+                    }
+                }
                 return
             }
             let candidates = self.resolveAllAddresses(host)
             DispatchQueue.main.async {
                 guard !self.stopRequested else {
-                    Self.releaseStart()
-                    completionHandler(EdgeError.connectionFailed)
+                    self.finishStart(with: EdgeError.connectionFailed)
                     return
                 }
                 guard !candidates.isEmpty else {
                     Logger.network.error("Failed to resolve hostname: \(host)")
-                    Self.releaseStart()
-                    completionHandler(EdgeError.connectionFailed)
+                    self.finishStart(with: EdgeError.connectionFailed)
                     return
                 }
                 self.superNodeIp = candidates.first ?? host
-                // Held for the whole start: finishStart invokes it exactly once.
-                self.pendingStart = PendingStart(completion: completionHandler)
                 self.startEdge(
                     candidates: candidates,
                     host: host,
@@ -257,8 +265,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// every failed start cycle.
     private static let startFailCountKey = "consecutiveStartFailures"
     /// Guards against overlapping startTunnel calls: each start owns
-    /// exactly one Edge and one completion handler; overlapping starts
-    /// would clobber them and lose completion handlers. Process-wide so it
+    /// exactly one Edge and a shared set of completion handlers. Process-wide so it
     /// also protects against the system creating multiple provider
     /// instances in the same extension process.
     private static let startLock = NSLock()
@@ -435,6 +442,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         with reason: NEProviderStopReason,
         completionHandler: @escaping () -> Void
     ) {
+        DispatchQueue.main.async {
+            self.stopTunnelOnMain(with: reason, completionHandler: completionHandler)
+        }
+    }
+
+    private func stopTunnelOnMain(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         // Synchronous log: the process may be suspended or killed right
         // after the completion handler runs; an async write could lose the
         // line that explains why the tunnel went away.
@@ -979,6 +992,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         struct Command: Codable { var command: String }
         if let command = try? JSONDecoder().decode(Command.self, from: messageData) {
             switch command.command {
+            case "startupStatus":
+                DispatchQueue.main.async {
+                    let started = !self.stopRequested && (self.pendingStart != nil || self.startFinished)
+                    completionHandler?(Data([started ? 1 : 0]))
+                }
             case "diagnose":
                 runDiagnostics(completionHandler: completionHandler)
             case "diagnosticsProgress":
