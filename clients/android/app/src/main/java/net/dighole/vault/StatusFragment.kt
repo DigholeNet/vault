@@ -10,16 +10,13 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
-import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import androidx.core.content.edit
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import net.dighole.vault.VaultVpnService.Companion.PREFS_NAME
-import java.util.Locale
 import net.dighole.vault.data.readVaultConfig
 
 class StatusFragment : Fragment() {
@@ -29,18 +26,18 @@ class StatusFragment : Fragment() {
     private lateinit var tvStatusDetail: TextView
     private lateinit var tvIpv4Address: TextView
     private lateinit var tvIpv6Address: TextView
-    private lateinit var tvSentStats: TextView
-    private lateinit var tvReceivedStats: TextView
-    private lateinit var progressBar: ProgressBar
+    private lateinit var duration: android.widget.Chronometer
+    private lateinit var sentPackets: TextView
+    private lateinit var receivedPackets: TextView
+    private lateinit var sentBytes: TextView
+    private lateinit var receivedBytes: TextView
+    private lateinit var sentSpeed: TextView
+    private lateinit var receivedSpeed: TextView
 
     private var isConnected = false
     private var isConnecting = false
     private var currentIp: String = ""
     private var currentIpv6: String = ""
-
-    // Track last displayed text to avoid unnecessary updates (prevents flickering)
-    private var lastSentText: String = ""
-    private var lastReceivedText: String = ""
 
     private val vpnLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -59,17 +56,6 @@ class StatusFragment : Fragment() {
         Log.d("StatusFragment", "onCreate")
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putBoolean(KEY_IS_CONNECTED, isConnected)
-        outState.putBoolean(KEY_IS_CONNECTING, isConnecting)
-        outState.putString(KEY_CURRENT_IP, currentIp)
-        outState.putString(KEY_CURRENT_IPV6, currentIpv6)
-        outState.putString(KEY_LAST_SENT_TEXT, lastSentText)
-        outState.putString(KEY_LAST_RECEIVED_TEXT, lastReceivedText)
-        Log.d("StatusFragment", "onSaveInstanceState: connected=$isConnected")
-    }
-
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -86,9 +72,18 @@ class StatusFragment : Fragment() {
         tvStatusDetail = view.findViewById(R.id.tvStatusDetail)
         tvIpv4Address = view.findViewById(R.id.tvIpv4Address)
         tvIpv6Address = view.findViewById(R.id.tvIpv6Address)
-        tvSentStats = view.findViewById(R.id.tvSentStats)
-        tvReceivedStats = view.findViewById(R.id.tvReceivedStats)
-        progressBar = view.findViewById(R.id.progressBar)
+        duration = view.findViewById(R.id.connectionDuration)
+        duration.setOnChronometerTickListener { timer ->
+            val elapsed = StatusPresentation.duration(android.os.SystemClock.elapsedRealtime() - timer.base)
+            timer.text = elapsed
+            timer.contentDescription = getString(R.string.connected_duration, elapsed)
+        }
+        sentPackets = view.findViewById(R.id.tvSentPackets)
+        receivedPackets = view.findViewById(R.id.tvReceivedPackets)
+        sentBytes = view.findViewById(R.id.tvSentBytes)
+        receivedBytes = view.findViewById(R.id.tvReceivedBytes)
+        sentSpeed = view.findViewById(R.id.tvSentSpeed)
+        receivedSpeed = view.findViewById(R.id.tvReceivedSpeed)
 
         btnToggleVpn.setOnClickListener {
             if (isConnected) {
@@ -98,9 +93,8 @@ class StatusFragment : Fragment() {
             }
         }
 
-        // Restore state from savedInstanceState (rotation / process death)
-        // or from the application-wide cache (fresh start while service is running).
-        restoreUiState(savedInstanceState)
+        restoreStateFromPrefs()
+        renderTrafficStats((requireContext().applicationContext as VaultApplication).latestTrafficStats)
 
         viewLifecycleOwner.lifecycleScope.launch {
             val app = requireContext().applicationContext as? VaultApplication ?: return@launch
@@ -121,38 +115,24 @@ class StatusFragment : Fragment() {
     private fun restoreStateFromPrefs() {
         val prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-        val wasConnected = prefs.getBoolean("vpn_connected", false)
-        VaultFileLogger.event("StatusFragment", "RESTORE_PREFS connected=$wasConnected serviceRunning=${isVpnServiceRunning()} " +
-            "cached=${(requireContext().applicationContext as? VaultApplication)?.currentVpnStatus}")
-
-        if (wasConnected) {
-            val isServiceRunning = isVpnServiceRunning()
-            if (!isServiceRunning) {
-                // Service was killed (e.g., device reboot), clear stale state
-                Log.d("StatusFragment", "Service was killed, clearing stale state")
-                prefs.edit().apply {
-                    putBoolean("vpn_connected", false)
-                    putBoolean("vpn_connecting", false)
-                    putString("vpn_assigned_ipv4", "")
-                    putString("vpn_assigned_ipv6", "")
-                    commit()
-                }
-                isConnected = false
-                isConnecting = false
-                currentIp = ""
-                currentIpv6 = ""
-            } else {
+        val app = requireContext().applicationContext as VaultApplication
+        when (val event = app.currentVpnStatus) {
+            is VpnStatusEvent.Connected -> {
                 isConnected = true
-                val app = requireContext().applicationContext as? VaultApplication
-                isConnecting = app?.currentVpnStatus is VpnStatusEvent.Reconnecting
-                currentIp = prefs.getString("vpn_assigned_ipv4", "") ?: ""
-                currentIpv6 = prefs.getString("vpn_assigned_ipv6", "") ?: ""
+                isConnecting = false
+                currentIp = event.ipv4
+                currentIpv6 = event.ipv6
             }
-        } else {
-            isConnected = false
-            isConnecting = false
-            currentIp = ""
-            currentIpv6 = ""
+            is VpnStatusEvent.Reconnecting -> { isConnected = true; isConnecting = true }
+            is VpnStatusEvent.Error, is VpnStatusEvent.Disconnected -> {
+                isConnected = false; isConnecting = false; currentIp = ""; currentIpv6 = ""
+            }
+            else -> {
+                isConnected = isVpnServiceRunning() && prefs.getBoolean("vpn_connected", false)
+                isConnecting = false
+                currentIp = if (isConnected) prefs.getString("vpn_assigned_ipv4", "").orEmpty() else ""
+                currentIpv6 = if (isConnected) prefs.getString("vpn_assigned_ipv6", "").orEmpty() else ""
+            }
         }
 
         Log.d(
@@ -166,25 +146,16 @@ class StatusFragment : Fragment() {
         return VaultVpnService.isRunning
     }
 
-    private fun saveStateToPrefs() {
-        requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().apply {
-                putBoolean("vpn_connected", isConnected)
-                putBoolean("vpn_connecting", isConnecting)
-                putString("vpn_assigned_ipv4", currentIp)
-                putString("vpn_assigned_ipv6", currentIpv6)
-                commit()
-            }
-
-        Log.d(
-            "StatusFragment",
-            "State saved: connected=$isConnected, connecting=$isConnecting, ipv4=$currentIp, ipv6=$currentIpv6"
-        )
+    override fun onPause() {
+        duration.stop()
+        super.onPause()
     }
 
-    override fun onPause() {
-        super.onPause()
-        saveStateToPrefs()
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        if (view != null) {
+            if (hidden) duration.stop() else restoreStateFromPrefs()
+        }
     }
 
     private fun connectVpn() {
@@ -194,7 +165,11 @@ class StatusFragment : Fragment() {
                 Log.d("StatusFragment", "Config loaded for connect")
 
                 if (config.host.isEmpty() || config.password.isEmpty()) {
-                    tvStatusDetail.text = getString(R.string.status_configure_first)
+                    com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                        .setMessage(R.string.status_configure_first)
+                        .setPositiveButton(R.string.nav_configure) { _, _ ->
+                            (activity as? MainActivity)?.navigateTo(R.id.nav_configure)
+                        }.setNegativeButton(R.string.cancel_description, null).show()
                     return@launch
                 }
 
@@ -213,6 +188,7 @@ class StatusFragment : Fragment() {
                 isConnected = false
                 updateUI()
                 tvStatusDetail.text = getString(R.string.status_error_prefix, _e.message)
+                tvStatusDetail.visibility = View.VISIBLE
             }
         }
     }
@@ -255,121 +231,52 @@ class StatusFragment : Fragment() {
                 isConnected = false
                 updateUI()
                 tvStatusDetail.text = getString(R.string.status_error_starting, _e.message)
+                tvStatusDetail.visibility = View.VISIBLE
             }
         }
     }
 
     private fun updateUI() {
-        Log.d(
-            "StatusFragment",
-            "updateUI: isConnected=$isConnected, isConnecting=$isConnecting, ip=$currentIp"
-        )
-        VaultFileLogger.event("StatusFragment", "RENDER connected=$isConnected connecting=$isConnecting")
-        when {
-            isConnecting -> {
-                btnToggleVpn.setImageResource(R.drawable.ic_disconnected)
-                // During recovery the service still exists; allow a manual stop.
-                btnToggleVpn.isEnabled = isConnected
-                tvStatus.text = getString(
-                    if (isConnected) R.string.status_reconnecting else R.string.status_connecting
-                )
-                tvStatus.setTextColor(
-                    ContextCompat.getColor(
-                        requireContext(),
-                        android.R.color.holo_orange_dark
-                    )
-                )
-                tvStatusDetail.text = getString(
-                    if (isConnected) R.string.status_tap_to_disconnect else R.string.status_please_wait
-                )
-                tvIpv4Address.visibility = View.GONE
-                tvIpv6Address.visibility = View.GONE
-                progressBar.visibility = View.VISIBLE
-            }
-
-            isConnected -> {
-                btnToggleVpn.setImageResource(R.drawable.ic_connected)
-                btnToggleVpn.isEnabled = true
-                tvStatus.text = getString(R.string.status_on)
-                tvStatus.setTextColor(
-                    ContextCompat.getColor(
-                        requireContext(),
-                        android.R.color.holo_green_dark
-                    )
-                )
-                tvStatusDetail.text = getString(R.string.status_tap_to_disconnect)
-
-                if (currentIp.isNotEmpty()) {
-                    tvIpv4Address.text = getString(R.string.ip_format, currentIp)
-                    tvIpv4Address.visibility = View.VISIBLE
-                } else {
-                    tvIpv4Address.visibility = View.GONE
-                }
-
-                if (currentIpv6.isNotEmpty()) {
-                    tvIpv6Address.text = getString(R.string.ipv6_format, currentIpv6)
-                    tvIpv6Address.visibility = View.VISIBLE
-                } else {
-                    tvIpv6Address.visibility = View.GONE
-                }
-
-                tvSentStats.visibility = View.VISIBLE
-                tvReceivedStats.visibility = View.VISIBLE
-                progressBar.visibility = View.GONE
-            }
-
-            else -> {
-                btnToggleVpn.setImageResource(R.drawable.ic_disconnected)
-                btnToggleVpn.isEnabled = true
-                tvStatus.text = getString(R.string.status_off)
-                tvStatus.setTextColor(
-                    ContextCompat.getColor(
-                        requireContext(),
-                        android.R.color.holo_red_dark
-                    )
-                )
-                tvStatusDetail.text = getString(R.string.status_tap_to_connect)
-                tvIpv4Address.visibility = View.GONE
-                tvIpv6Address.visibility = View.GONE
-                tvSentStats.visibility = View.GONE
-                tvReceivedStats.visibility = View.GONE
-                progressBar.visibility = View.GONE
-            }
-        }
+        val root = view ?: return
+        val app = requireContext().applicationContext as VaultApplication
+        val connected = isConnected && !isConnecting
+        tvStatus.setText(when {
+            isConnecting && isConnected -> R.string.status_reconnecting
+            isConnecting -> R.string.status_connecting
+            isConnected -> R.string.status_on
+            else -> R.string.status_off
+        })
+        btnToggleVpn.setImageResource(if (isConnected) R.drawable.ic_connected else R.drawable.ic_disconnected)
+        btnToggleVpn.isEnabled = !isConnecting || isConnected
+        btnToggleVpn.alpha = if (btnToggleVpn.isEnabled) 1f else 0.5f
+        btnToggleVpn.contentDescription = getString(
+            if (isConnected) R.string.status_tap_to_disconnect else R.string.status_tap_to_connect)
+        val error = app.currentVpnStatus as? VpnStatusEvent.Error
+        tvStatusDetail.text = error?.let { getString(R.string.status_error_prefix, it.message.orEmpty()) }.orEmpty()
+        tvStatusDetail.visibility = if (error == null) View.GONE else View.VISIBLE
+        duration.visibility = if (connected) View.VISIBLE else View.GONE
+        if (connected) {
+            duration.base = app.ensureConnectionStarted()
+            duration.text = StatusPresentation.duration(android.os.SystemClock.elapsedRealtime() - duration.base)
+            if (!isHidden && isResumed) duration.start()
+        } else duration.stop()
+        root.findViewById<View>(R.id.connectionInfo).visibility = if (connected) View.VISIBLE else View.GONE
+        root.findViewById<View>(R.id.rowIpv4).visibility = if (currentIp.isNotEmpty()) View.VISIBLE else View.GONE
+        root.findViewById<View>(R.id.rowIpv6).visibility = if (currentIpv6.isNotEmpty()) View.VISIBLE else View.GONE
+        root.findViewById<View>(R.id.ipDivider).visibility =
+            if (currentIp.isNotEmpty() || currentIpv6.isNotEmpty()) View.VISIBLE else View.GONE
+        tvIpv4Address.text = currentIp
+        tvIpv6Address.text = currentIpv6
+        renderTrafficStats(app.latestTrafficStats)
     }
 
-    private fun updateTrafficStats(
-        bytesSent: Long,
-        bytesReceived: Long,
-        sendSpeed: Long,
-        receiveSpeed: Long
-    ) {
-        val sentStr = formatBytes(bytesSent)
-        val receivedStr = formatBytes(bytesReceived)
-        val sendSpeedStr = formatBytes(sendSpeed)
-        val receiveSpeedStr = formatBytes(receiveSpeed)
-
-        val newSentText = getString(R.string.traffic_sent, sentStr, sendSpeedStr)
-        val newReceivedText = getString(R.string.traffic_received, receivedStr, receiveSpeedStr)
-
-        // Only update if text actually changed (prevents flickering)
-        if (newSentText != lastSentText) {
-            tvSentStats.text = newSentText
-            lastSentText = newSentText
-        }
-        if (newReceivedText != lastReceivedText) {
-            tvReceivedStats.text = newReceivedText
-            lastReceivedText = newReceivedText
-        }
-    }
-
-    private fun formatBytes(bytes: Long): String {
-        return when {
-            bytes >= 1_073_741_824 -> "%.2f GB".format(Locale.ROOT, bytes / 1_073_741_824.0)
-            bytes >= 1_048_576 -> "%.2f MB".format(Locale.ROOT, bytes / 1_048_576.0)
-            bytes >= 1_024 -> "%.2f KB".format(Locale.ROOT, bytes / 1_024.0)
-            else -> "$bytes B"
-        }
+    private fun renderTrafficStats(stats: VpnStatusEvent.TrafficStats?) {
+        sentPackets.text = (stats?.packetsSent ?: 0).coerceAtLeast(0).toString()
+        receivedPackets.text = (stats?.packetsReceived ?: 0).coerceAtLeast(0).toString()
+        sentBytes.text = StatusPresentation.bytes(stats?.bytesSent ?: 0)
+        receivedBytes.text = StatusPresentation.bytes(stats?.bytesReceived ?: 0)
+        sentSpeed.text = "+ " + StatusPresentation.bytes(stats?.sendSpeed ?: 0) + "/s"
+        receivedSpeed.text = "+ " + StatusPresentation.bytes(stats?.receiveSpeed ?: 0) + "/s"
     }
 
     private fun generateDeviceId(): String {
@@ -396,37 +303,10 @@ class StatusFragment : Fragment() {
     }
 
     /**
-     * Restore UI state from [savedInstanceState] or the application-level cache.
-     */
-    private fun restoreUiState(savedInstanceState: Bundle?) {
-        if (savedInstanceState != null) {
-            isConnected = savedInstanceState.getBoolean(KEY_IS_CONNECTED, false)
-            isConnecting = savedInstanceState.getBoolean(KEY_IS_CONNECTING, false)
-            currentIp = savedInstanceState.getString(KEY_CURRENT_IP, "")
-            currentIpv6 = savedInstanceState.getString(KEY_CURRENT_IPV6, "")
-            lastSentText = savedInstanceState.getString(KEY_LAST_SENT_TEXT, "")
-            lastReceivedText = savedInstanceState.getString(KEY_LAST_RECEIVED_TEXT, "")
-            Log.d("StatusFragment", "State restored from savedInstanceState")
-            updateUI()
-            return
-        }
-
-        val app = requireContext().applicationContext as? VaultApplication
-        app?.currentVpnStatus?.let { event ->
-            if (event !is VpnStatusEvent.TrafficStats) {
-                applyVpnEvent(event, saveToPrefs = false, update = false)
-                Log.d("StatusFragment", "State restored from VaultApplication cache")
-            }
-        }
-        updateUI()
-    }
-
-    /**
      * Apply a [VpnStatusEvent] to local state.
      */
     private fun applyVpnEvent(
         event: VpnStatusEvent,
-        saveToPrefs: Boolean = true,
         update: Boolean = true
     ) {
         if (event !is VpnStatusEvent.TrafficStats) {
@@ -438,7 +318,6 @@ class StatusFragment : Fragment() {
                 isConnecting = false
                 currentIp = event.ipv4
                 currentIpv6 = event.ipv6
-                if (saveToPrefs) saveStateToPrefs()
                 if (update) updateUI()
             }
 
@@ -446,7 +325,6 @@ class StatusFragment : Fragment() {
                 // isConnected also means a service is available to disconnect.
                 isConnected = true
                 isConnecting = true
-                if (saveToPrefs) saveStateToPrefs()
                 if (update) updateUI()
             }
 
@@ -455,7 +333,6 @@ class StatusFragment : Fragment() {
                 isConnecting = false
                 currentIp = ""
                 currentIpv6 = ""
-                if (saveToPrefs) saveStateToPrefs()
                 if (update) updateUI()
             }
 
@@ -464,29 +341,17 @@ class StatusFragment : Fragment() {
                 isConnecting = false
                 currentIp = ""
                 currentIpv6 = ""
-                if (saveToPrefs) saveStateToPrefs()
-                if (update) updateUI()
+                if (update) {
+                    updateUI()
+                    tvStatusDetail.text = getString(R.string.status_error_prefix, event.message.orEmpty())
+                }
             }
 
-            is VpnStatusEvent.TrafficStats -> {
-                updateTrafficStats(
-                    event.bytesSent,
-                    event.bytesReceived,
-                    event.sendSpeed,
-                    event.receiveSpeed
-                )
-            }
+            is VpnStatusEvent.TrafficStats -> renderTrafficStats(event)
         }
     }
 
     companion object {
-        private const val KEY_IS_CONNECTED = "is_connected"
-        private const val KEY_IS_CONNECTING = "is_connecting"
-        private const val KEY_CURRENT_IP = "current_ip"
-        private const val KEY_CURRENT_IPV6 = "current_ipv6"
-        private const val KEY_LAST_SENT_TEXT = "last_sent_text"
-        private const val KEY_LAST_RECEIVED_TEXT = "last_received_text"
-
         fun newInstance() = StatusFragment()
     }
 }

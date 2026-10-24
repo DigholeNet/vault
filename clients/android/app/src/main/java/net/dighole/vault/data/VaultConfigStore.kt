@@ -11,6 +11,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.CancellationException
 
 internal object ConfigKeys {
+    val MTU = stringPreferencesKey("mtu")
+    val PROBE_DOMAINS = stringPreferencesKey("probe_domains")
     val HOST = stringPreferencesKey("host")
     val PORT = intPreferencesKey("port")
     val DNS = stringPreferencesKey("dns")
@@ -46,6 +48,8 @@ internal class VaultConfigStore(
                 host = prefs[ConfigKeys.HOST] ?: "",
                 port = prefs[ConfigKeys.PORT] ?: VaultConfig().port,
                 dns = prefs[ConfigKeys.DNS] ?: VaultConfig().dns,
+                mtu = prefs[ConfigKeys.MTU].orEmpty(),
+                probeDomains = prefs[ConfigKeys.PROBE_DOMAINS].orEmpty(),
                 password = password.orEmpty()
             )
         }
@@ -59,6 +63,8 @@ internal class VaultConfigStore(
             prefs[ConfigKeys.HOST] = config.host
             prefs[ConfigKeys.PORT] = config.port
             prefs[ConfigKeys.DNS] = config.dns
+            prefs[ConfigKeys.MTU] = config.mtu
+            prefs[ConfigKeys.PROBE_DOMAINS] = config.probeDomains
         }
         clearLegacyPassword()
     }

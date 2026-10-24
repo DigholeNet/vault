@@ -14,6 +14,22 @@ Features:
 - IPv4 and IPv6 support
 - Split tunneling for server traffic
 
+## Interface
+
+The four tabs follow the iOS client: Status, Configure, Diagnostics, and About.
+Android uses Material 3 controls and light/dark surfaces. Configuration groups
+and field order match iOS; language selection lives in Configure. Saving keeps
+the page open, and connection changes apply on the next connection. Drafts
+survive tab switches, rotation, and language changes.
+
+Diagnostics checks VPN-bound DNS, TCP, and HTTPS separately for IPv4 and IPv6,
+then checks application HTTPS through the default route. Expand a check to see
+each target and request duration. An absent AAAA record skips that target's
+IPv6 TCP/HTTPS checks. Ping samples are informational and do not affect the
+connectivity verdict. Logs update every second while visible, wrap to the screen width, and can be
+copied or cleared while offline. Updates pause when the log page is hidden or
+the app enters the background. Scrolling back keeps your reading position.
+
 ## Network recovery
 
 Once connected, the VPN keeps its TUN interface and native session through long
@@ -34,6 +50,7 @@ close the session. Initial connection failures retain their existing behavior.
 │                 Android App                 │
 │  MainActivity ─ StatusFragment (status UI)  │
 │               ├ ConfigureFragment (config)  │
+│               ├ DiagnosticsFragment         │
 │               └ AboutFragment               │
 │                      │ bind/controls        │
 │               VaultVpnService (VpnService)  │
@@ -91,10 +108,14 @@ Server settings in the app:
 
 | Setting | Description | Default |
 |---|---|---|
+| Device ID | Read-only peer identifier | Generated on device |
 | Host | Vault server hostname or IP | Required |
 | Port | Server UDP port | 9527 |
 | Password | Authentication password | Required |
-| DNS | Comma-separated DNS servers | 1.1.1.1,8.8.8.8 |
+| MTU | 1280–1427; empty uses link-based automatic sizing | Automatic |
+| DNS | Comma-separated DNS IP addresses; empty uses defaults | 1.1.1.1,8.8.8.8 |
+| Probe domains | Comma-separated diagnostic domains; empty uses defaults | www.google.com,github.com,t.co |
+| Language | App language; takes effect immediately | System |
 
 The server assigns the client's virtual IP address (IPv4 and/or IPv6) in the
 handshake response.

@@ -248,7 +248,16 @@ class VaultVpnService : VpnService() {
                 val host = config.host
                 val port = config.port
                 val password = config.password
-                val dnsServers = config.dns.split(",").map { it.trim() }
+                val dnsServers = config.dns.ifBlank { "1.1.1.1,8.8.8.8" }.split(",").map { it.trim() }
+                if (!sessionGate.update(sessionToken) {
+                    config.mtu.toIntOrNull()?.takeIf { it in MIN_VPN_MTU..VPN_MTU }?.let {
+                        tunnelMtu = it
+                        vpnIoHandler?.stop()
+                        vpnIoHandler = VpnIoHandler(scope = scope, serviceRunning = serviceRunning,
+                            mtu = tunnelMtu, logTag = TAG,
+                            onUplinkPacket = { packet -> edge?.writeData(packet) })
+                    }
+                }) return@launch
 
                 if (!sessionGate.update(sessionToken) {
                     serverHost = host
@@ -846,7 +855,9 @@ class VaultVpnService : VpnService() {
                                 stats.bytesSent,
                                 stats.bytesReceived,
                                 stats.sendSpeed,
-                                stats.receiveSpeed
+                                stats.receiveSpeed,
+                                stats.packetsSent,
+                                stats.packetsReceived
                             )
                         )
                     }

@@ -1,0 +1,207 @@
+// SPDX-License-Identifier: MIT
+package net.dighole.vault
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.TextView
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.tabs.TabLayout
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.collectLatest
+
+class DiagnosticsFragment : Fragment() {
+    private val model by lazy { androidx.lifecycle.ViewModelProvider(this)[DiagnosticsViewModel::class.java] }
+    private var tab = 0
+    private var logText = ""
+    private var logUpdates: Job? = null
+    private val logMutex = Mutex()
+    private var clearingLogs = false
+    private var logsRendered = false
+    private val expanded = mutableSetOf<Int>()
+    private val labels = listOf(R.string.check_dns, R.string.check_tcp, R.string.check_https,
+        R.string.check_dns6, R.string.check_tcp6, R.string.check_https6, R.string.check_app,
+        R.string.check_ping, R.string.check_ping6)
+
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View =
+        inflater.inflate(R.layout.fragment_diagnostics, container, false)
+
+    override fun onViewCreated(view: View, state: Bundle?) {
+        tab = state?.getInt("tab") ?: tab
+        view.findViewById<TabLayout>(R.id.diagnosticTabs).apply {
+            addTab(newTab().setText(R.string.checks))
+            addTab(newTab().setText(R.string.runtime_logs))
+            selectTab(getTabAt(tab))
+            addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+                override fun onTabSelected(selected: TabLayout.Tab) {
+                    tab = selected.position; render(); updateLogUpdates()
+                }
+                override fun onTabUnselected(selected: TabLayout.Tab) = Unit
+                override fun onTabReselected(selected: TabLayout.Tab) = Unit
+            })
+        }
+        view.findViewById<MaterialButton>(R.id.btnRunChecks).setOnClickListener { runChecks() }
+        view.findViewById<MaterialButton>(R.id.btnClearLogs).setOnClickListener { clearLogs() }
+        view.findViewById<MaterialButton>(R.id.btnCopyLogs).setOnClickListener {
+            requireContext().getSystemService(ClipboardManager::class.java)
+                .setPrimaryClip(ClipData.newPlainText(getString(R.string.runtime_logs), logText))
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            (requireContext().applicationContext as VaultApplication).vpnStatusEvents.collect {
+                if (it !is VpnStatusEvent.TrafficStats) {
+                    if (!connected()) model.cancel()
+                    render()
+                }
+            }
+        }
+        viewLifecycleOwner.lifecycleScope.launch { model.state.collect { render() } }
+        viewLifecycleOwner.lifecycleScope.launch {
+            model.state.collectLatest { state ->
+                if (state.running) {
+                    while (true) {
+                        if (!isHidden && isResumed) view.findViewById<TextView>(R.id.tvDiagnosticElapsed).text =
+                            getString(R.string.elapsed, android.os.SystemClock.elapsedRealtime() - state.startedAt)
+                        kotlinx.coroutines.delay(100)
+                    }
+                }
+            }
+        }
+        render()
+        updateLogUpdates()
+    }
+
+    private fun connected(): Boolean =
+        (requireContext().applicationContext as VaultApplication).currentVpnStatus is VpnStatusEvent.Connected
+
+    private fun render() {
+        val root = view ?: return
+        val state = model.state.value
+        val results = state.results
+        root.findViewById<View>(R.id.checksPanel).visibility = if (tab == 0) View.VISIBLE else View.GONE
+        root.findViewById<View>(R.id.logsPanel).visibility = if (tab == 1) View.VISIBLE else View.GONE
+        root.findViewById<TextView>(R.id.tvDiagnosticSummary).setText(
+            if (!state.running && results.isEmpty() && !connected()) R.string.checks_disconnected else state.header)
+        root.findViewById<MaterialButton>(R.id.btnRunChecks).apply {
+            isEnabled = connected() && !state.running
+            setText(if (results.isEmpty()) R.string.run_checks else R.string.run_again)
+        }
+        root.findViewById<View>(R.id.diagnosticProgress).visibility = if (state.running) View.VISIBLE else View.GONE
+        root.findViewById<TextView>(R.id.tvDiagnosticElapsed).apply {
+            visibility = if (state.startedAt > 0) View.VISIBLE else View.GONE
+            text = getString(R.string.elapsed, state.elapsedMs)
+        }
+        val rows = root.findViewById<LinearLayout>(R.id.diagnosticRows)
+        rows.removeAllViews()
+        labels.forEachIndexed { index, label ->
+            val samples = results.filter { it.stage == index }
+            val row = layoutInflater.inflate(R.layout.diagnostic_row, rows, false)
+            row.findViewById<TextView>(R.id.checkTitle).setText(label)
+            row.findViewById<TextView>(R.id.checkSummary).text = if (samples.isEmpty()) getString(R.string.not_measured)
+            else (if (samples.all { it.passed }) "✓ " else "! ") + getString(R.string.probe_detail,
+                samples.count { it.passed }, samples.size, samples.filter { index < 7 || it.passed }.let { measured ->
+                    if (measured.isEmpty()) 0 else measured.sumOf { it.durationMs } / measured.size
+                })
+            row.findViewById<TextView>(R.id.checkDetails).apply {
+                text = samples.joinToString("\n\n") { "${it.domain} · ${it.durationMs} ms\n${it.detail}" }
+                visibility = if (index in expanded) View.VISIBLE else View.GONE
+            }
+            row.setOnClickListener {
+                row.findViewById<TextView>(R.id.checkDetails).apply {
+                    if (index in expanded) expanded.remove(index) else expanded.add(index)
+                    visibility = if (index in expanded) View.VISIBLE else View.GONE
+                }
+            }
+            rows.addView(row)
+        }
+    }
+
+    private fun runChecks() {
+        if (connected()) model.run(requireContext())
+    }
+
+    /** Poll only while the log tab is visible; unchanged content never resets selection or scroll. */
+    private fun updateLogUpdates() {
+        val visible = view != null && isResumed && !isHidden && tab == 1 && !clearingLogs
+        if (!visible) { logUpdates?.cancel(); logUpdates = null; return }
+        if (logUpdates?.isActive == true) return
+        logUpdates = viewLifecycleOwner.lifecycleScope.launch {
+            while (isActive) {
+                refreshLogs(false)
+                delay(1000)
+            }
+        }
+    }
+
+    private suspend fun refreshLogs(clear: Boolean) = logMutex.withLock {
+        try {
+            val content = if (clear) VaultFileLogger.clearAndRead() else VaultFileLogger.readLogs()
+            val root = view ?: return@withLock
+            val text = root.findViewById<TextView>(R.id.tvLogs)
+            if (!clear && text.selectionStart >= 0 && text.selectionEnd > text.selectionStart) return@withLock
+            val scroll = root.findViewById<android.widget.ScrollView>(R.id.logScroll)
+            val followTail = clear || !logsRendered || !scroll.canScrollVertically(1)
+            val previousY = scroll.scrollY
+            if (content != logText || !logsRendered) {
+                logText = content
+                text.text = content.ifEmpty { getString(R.string.no_logs) }
+                logsRendered = true
+                scroll.post {
+                    if (followTail) scroll.fullScroll(View.FOCUS_DOWN) else scroll.scrollTo(0, previousY)
+                }
+            }
+            root.findViewById<MaterialButton>(R.id.btnCopyLogs).isEnabled = content.isNotEmpty() && !clearingLogs
+            root.findViewById<MaterialButton>(R.id.btnClearLogs).isEnabled = content.isNotEmpty() && !clearingLogs
+        } catch (cancelled: CancellationException) { throw cancelled
+        } catch (_: Exception) {
+            logsRendered = false
+            view?.findViewById<TextView>(R.id.tvLogs)?.setText(R.string.logs_failed)
+            view?.findViewById<MaterialButton>(R.id.btnCopyLogs)?.isEnabled = false
+        }
+    }
+
+    private fun clearLogs() {
+        if (clearingLogs) return
+        clearingLogs = true
+        updateLogUpdates()
+        view?.findViewById<MaterialButton>(R.id.btnCopyLogs)?.isEnabled = false
+        view?.findViewById<MaterialButton>(R.id.btnClearLogs)?.isEnabled = false
+        viewLifecycleOwner.lifecycleScope.launch {
+            try { refreshLogs(true) } finally {
+                clearingLogs = false
+                view?.findViewById<MaterialButton>(R.id.btnClearLogs)?.isEnabled = logText.isNotEmpty() && logsRendered
+                view?.findViewById<MaterialButton>(R.id.btnCopyLogs)?.isEnabled = logText.isNotEmpty() && logsRendered
+                updateLogUpdates()
+            }
+        }
+    }
+
+    override fun onResume() { super.onResume(); updateLogUpdates() }
+    override fun onPause() { logUpdates?.cancel(); logUpdates = null; super.onPause() }
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        if (!hidden) render()
+        updateLogUpdates()
+    }
+    override fun onDestroyView() {
+        logUpdates?.cancel()
+        logUpdates = null
+        logsRendered = false
+        super.onDestroyView()
+    }
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt("tab", tab)
+    }
+}

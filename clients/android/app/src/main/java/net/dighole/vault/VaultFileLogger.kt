@@ -129,6 +129,26 @@ object VaultFileLogger {
         }
     }
 
+    /** Queue UI reads/clears behind Kotlin writes; append-only native writes remain safe. */
+    suspend fun readLogs(): String = queuedLogs(false)
+    suspend fun clearAndRead(): String = queuedLogs(true)
+
+    private suspend fun queuedLogs(clear: Boolean): String = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+        writerThread.execute {
+            try {
+                if (clear) {
+                    logFile?.let { FileOutputStream(it, false).use { stream -> stream.flush() } }
+                    prevLogFile?.delete()
+                }
+                val content = listOfNotNull(prevLogFile, logFile).filter { it.exists() }
+                    .joinToString("\n") { it.readText() }
+                if (continuation.isActive) continuation.resumeWith(Result.success(content))
+            } catch (error: java.io.IOException) {
+                if (continuation.isActive) continuation.resumeWith(Result.failure(error))
+            }
+        }
+    }
+
     private fun rotateIfNeeded(file: File) {
         val prev = prevLogFile ?: return
         if (file.exists() && file.length() > MAX_LOG_SIZE) {

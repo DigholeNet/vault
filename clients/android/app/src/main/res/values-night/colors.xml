@@ -1,0 +1,16 @@
+<?xml version="1.0" ?>
+<resources>
+    <color name="vault_blue">#A9C7FF</color>
+    <color name="vault_background">#101318</color>
+    <color name="vault_surface">#1B2028</color>
+    <color name="vault_text">#E4E8F0</color>
+    <color name="connection_connected">#30D158</color>
+    <color name="connection_disconnected">#FF453A</color>
+<color name="status_uplink">#0A84FF</color>
+<color name="status_downlink">#30D158</color>
+<color name="status_background">#000000</color>
+    <color name="configure_body">#F3F4F6</color>
+    <color name="configure_label">@color/configure_body</color>
+    <color name="configure_supporting">#9CA3AF</color>
+    <color name="configure_placeholder">#6B7280</color>
+</resources>

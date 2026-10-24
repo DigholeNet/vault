@@ -1,23 +1,28 @@
-<?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<?xml version="1.0" ?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true">
-
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center"
         android:orientation="vertical"
         android:padding="32dp">
-
         <ImageView
-            android:layout_width="120dp"
-            android:layout_height="120dp"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
             android:src="@mipmap/ic_launcher"
             android:layout_marginBottom="16dp"
-            android:contentDescription="@string/app_icon_description" />
-
+            android:contentDescription="@string/app_icon_description"/>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/app_name"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp"/>
         <TextView
             android:id="@+id/tvVersion"
             android:layout_width="wrap_content"
@@ -25,8 +30,7 @@
             android:text="@string/version_unknown"
             android:textSize="16sp"
             android:textColor="?android:attr/textColorSecondary"
-            android:layout_marginBottom="32dp" />
-
+            android:layout_marginBottom="32dp"/>
         <TextView
             android:id="@+id/tvWebsite"
             android:layout_width="wrap_content"
@@ -34,38 +38,19 @@
             android:text="@string/website"
             android:textSize="14sp"
             android:textColor="?attr/colorPrimary"
-            android:layout_marginBottom="16dp" />
-
+            android:layout_marginBottom="16dp"/>
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/about_description"
             android:textSize="14sp"
             android:gravity="center"
-            android:layout_marginBottom="16dp" />
-
+            android:layout_marginBottom="16dp"/>
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/copyright"
             android:textSize="12sp"
-            android:textColor="?android:attr/textColorSecondary" />
-
-        <!-- Language Selection -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="32dp"
-            android:layout_marginBottom="8dp"
-            android:text="@string/language"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-
-        <Spinner
-            android:id="@+id/languageSpinner"
-            android:layout_width="200dp"
-            android:layout_height="wrap_content" />
-
+            android:textColor="?android:attr/textColorSecondary"/>
     </LinearLayout>
-
 </ScrollView>

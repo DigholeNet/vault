@@ -82,7 +82,7 @@ class VaultConfigStoreTest {
         }
     }
     private val first = VaultConfig("first.example", 1001, "first-password", "1.1.1.1")
-    private val second = VaultConfig("second.example", 1002, "second-password", "8.8.8.8")
+    private val second = VaultConfig("second.example", 1002, "second-password", "8.8.8.8", "1380", "github.com,t.co")
 
     @Test(timeout = 15000)
     fun concurrentAccessKeepsWholeConfigs() = runBlocking {

@@ -17,6 +17,8 @@ sealed class VpnStatusEvent {
         val bytesSent: Long,
         val bytesReceived: Long,
         val sendSpeed: Long,
-        val receiveSpeed: Long
+        val receiveSpeed: Long,
+        val packetsSent: Long = 0,
+        val packetsReceived: Long = 0
     ) : VpnStatusEvent()
 }

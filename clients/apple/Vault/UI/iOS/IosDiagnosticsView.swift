@@ -159,13 +159,28 @@ struct IosDiagnosticsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             if let message = model.logMessage { Text(tr(message)).font(.caption).foregroundStyle(.secondary) }
-            HStack {
+            HStack(spacing: 6) {
                 Spacer()
-                Button(tr(model.clearingLogs ? "Clearing…" : "Clear")) {
+                Button {
                     Task { await model.clearLogs(using: vpnManager) }
-                }.disabled(model.clearingLogs)
-                Button(tr("Copy")) { UIPasteboard.general.string = model.logText }.disabled(model.logText.isEmpty)
+                } label: {
+                    Label(tr(model.clearingLogs ? "Clearing…" : "Clear"), systemImage: "trash")
+                        .frame(minHeight: 20)
+                }
+                .disabled(model.clearingLogs || model.loadingLogs || model.logText.isEmpty)
+                Button {
+                    UIPasteboard.general.string = model.logText
+                } label: {
+                    Label(tr("Copy"), systemImage: "doc.on.doc")
+                        .frame(minHeight: 20)
+                }
+                .disabled(model.clearingLogs || model.loadingLogs || model.logText.isEmpty)
             }
+            .font(.caption.weight(.medium))
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.roundedRectangle(radius: 8))
+            .controlSize(.small)
+            .tint(.accentColor)
         }.padding(.horizontal).padding(.bottom, 12)
     }
 }

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Widget.Vault.Configure.TextInput" parent="Widget.Material3.TextInputLayout.OutlinedBox">
+        <item name="android:textColorHint">@color/configure_label_text</item>
+        <item name="hintTextColor">@color/configure_label_text</item>
+        <item name="helperTextTextColor">@color/configure_supporting</item>
+        <item name="hintTextAppearance">@style/TextAppearance.Vault.Configure.Label</item>
+        <item name="helperTextTextAppearance">@style/TextAppearance.Vault.Configure.Supporting</item>
+        <item name="errorTextAppearance">@style/TextAppearance.Vault.Configure.Supporting</item>
+        <item name="errorTextColor">?attr/colorError</item>
+    </style>
+    <style name="Widget.Vault.Configure.EditText" parent="Widget.Material3.TextInputEditText.OutlinedBox">
+        <item name="android:textAppearance">@style/TextAppearance.Vault.Body</item>
+        <item name="android:textColor">@color/configure_input_text</item>
+        <item name="android:textColorHint">@color/configure_placeholder</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+    </style>
+    <style name="TextAppearance.Vault.Configure.Label" parent="TextAppearance.Vault.Body" />
+    <style name="TextAppearance.Vault.Configure.Supporting" parent="TextAppearance.Vault.Supporting" />
+</resources>

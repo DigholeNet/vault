@@ -61,7 +61,25 @@ class VaultApplication : Application() {
      * TrafficStats events are not cached so they do not overwrite
      * the connection state (Connected/Disconnected/Error).
      */
+    private val connectionClock = ConnectionClock()
+    val connectedAt: Long? get() = connectionClock.startedAt
+
+    @Volatile var latestTrafficStats: VpnStatusEvent.TrafficStats? = null
+        private set
+
+    fun ensureConnectionStarted(): Long = connectionClock.connected(android.os.SystemClock.elapsedRealtime())
+
+    @Synchronized
     fun emitVpnStatusEvent(event: VpnStatusEvent) {
+        when (event) {
+            is VpnStatusEvent.Connected -> ensureConnectionStarted()
+            is VpnStatusEvent.Disconnected, is VpnStatusEvent.Error -> {
+                connectionClock.disconnected()
+                latestTrafficStats = null
+            }
+            is VpnStatusEvent.TrafficStats -> latestTrafficStats = event
+            else -> Unit
+        }
         if (event !is VpnStatusEvent.TrafficStats) {
             currentVpnStatus = event
         }
