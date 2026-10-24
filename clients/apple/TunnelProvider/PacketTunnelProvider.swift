@@ -1121,12 +1121,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             let dnsServers = self.dns
             let domains = self.probeDomains
             let ipv4Mask = self.assignedIPv4Mask
+            let tunnelIPv6 = self.assignedIp.split(separator: "/").dropFirst().first.map(String.init)
             let mtu = self.appliedMtu
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 var result = TunnelDiagnostics.run(
                     dnsServers: dnsServers, tunnelIPv4: tunnelIPv4, tunnelIPv4Mask: ipv4Mask,
                     domains: domains,
-                    tunnelMtu: mtu, cancellation: cancellation,
+                    tunnelMtu: mtu, tunnelIPv6: tunnelIPv6, cancellation: cancellation,
                     onProgress: { [weak self] progress in
                         DispatchQueue.main.async {
                             guard self?.diagnosticsCancellation === cancellation else { return }

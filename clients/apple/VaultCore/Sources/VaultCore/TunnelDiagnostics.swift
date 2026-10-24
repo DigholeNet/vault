@@ -53,6 +53,15 @@ public struct DiagnosticsCheck: Codable, Sendable, Identifiable {
         self.sampleCount = sampleCount
     }
 
+    public static func ping(id: String, probes: [DiagnosticsProbe]) -> DiagnosticsCheck {
+        let samples = probes.filter { $0.stage == id }
+        let replies = samples.filter(\.succeeded)
+        let average = replies.isEmpty ? 0 : Int((replies.reduce(0.0) { $0 + Double($1.durationMs) } / Double(replies.count)).rounded())
+        return DiagnosticsCheck(id: id, passed: replies.count, attempted: samples.count,
+            state: samples.count == 2 && replies.count == 2 ? .passed : .incomplete,
+            durationMs: average, sampleCount: replies.count)
+    }
+
     public static func measured(id: String, passed: Int, attempted: Int, state: State, probes: [DiagnosticsProbe]) -> DiagnosticsCheck {
         let samples = probes.filter { $0.stage == id }
         let average = samples.isEmpty ? 0 : Int((samples.reduce(0.0) { $0 + Double($1.durationMs) } / Double(samples.count)).rounded())
@@ -145,9 +154,11 @@ public enum TunnelDiagnostics {
         var stageSummaries: [String] = []
         var failures = 0
         var remaining: TimeInterval {
-            max(0, totalBudget - (ProcessInfo.processInfo.systemUptime - startedAt))
+            let now = ProcessInfo.processInfo.systemUptime
+            return max(0, min(startedAt + totalBudget, phaseDeadline ?? (startedAt + totalBudget)) - now)
         }
         var overBudget: Bool { remaining <= 0 || cancellation.isCancelled }
+        var phaseDeadline: TimeInterval?
         var incomplete = false
         var httpsCompleted = 0
         func timeout(_ limit: TimeInterval) -> TimeInterval { max(0.001, min(limit, remaining)) }
@@ -157,7 +168,7 @@ public enum TunnelDiagnostics {
     /// assigned to the utun interface (used to locate the interface).
     public static func run(
         dnsServers: [String], tunnelIPv4: String, tunnelIPv4Mask: String?, domains: [String],
-        tunnelMtu: Int? = nil,
+        tunnelMtu: Int? = nil, tunnelIPv6: String? = nil,
         cancellation: DiagnosticsCancellation = DiagnosticsCancellation(),
         onProgress: ((DiagnosticsResult) -> Void)? = nil
     ) -> DiagnosticsResult {
@@ -185,15 +196,37 @@ public enum TunnelDiagnostics {
         log(&ctx, "[probe] targets: \(targets.joined(separator: ", ")); resolver \(resolver)")
 
         let gateway = tunnelIPv4Mask.flatMap { gatewayAddress(ip: tunnelIPv4, mask: $0) }
-        // Business traffic gets the budget first. ICMP is optional evidence.
+        // Reserve a separate window for each family so broken IPv4 cannot
+        // consume the IPv6 budget. Optional MTU observations run afterwards.
+        ctx.phaseDeadline = start + 25
         let answers = dnsSweep(
             &ctx, resolvers: dnsServers.isEmpty ? [resolver] : dnsServers, domains: targets)
-        onProgress?(DiagnosticsResult(summary: "RUNNING", lines: ctx.lines, domains: targets, checks: ctx.checks, durationMs: elapsedMs(since: start), activeCheck: "tcp", probes: ctx.probes))
+        onProgress?(progress(ctx, domains: targets, active: "tcp"))
         let tcpTargets = tcpSweep(&ctx, domains: targets, answers: answers)
-        onProgress?(DiagnosticsResult(summary: "RUNNING", lines: ctx.lines, domains: targets, checks: ctx.checks, durationMs: elapsedMs(since: start), activeCheck: "https", probes: ctx.probes))
+        onProgress?(progress(ctx, domains: targets, active: "https"))
         httpsSweep(&ctx, domains: targets, targets: tcpTargets)
-        onProgress?(DiagnosticsResult(summary: "RUNNING", lines: ctx.lines, domains: targets, checks: ctx.checks, durationMs: elapsedMs(since: start), activeCheck: "icmp", probes: ctx.probes))
         if ctx.httpsCompleted != tcpTargets.count { ctx.incomplete = true }
+
+        ctx.phaseDeadline = start + 50
+        onProgress?(progress(ctx, domains: targets, active: "dns6"))
+        if let tunnelIPv6, !tunnelIPv6.isEmpty {
+            log(&ctx, "[probe] IPv6 tunnel address: \(tunnelIPv6)")
+            let answers6 = dnsSweep(&ctx, resolvers: dnsServers.isEmpty ? [resolver] : dnsServers,
+                domains: targets, type: .aaaa)
+            onProgress?(progress(ctx, domains: targets, active: "tcp6"))
+            let tcpTargets6 = tcpSweep(&ctx, domains: targets, answers: answers6, stage: "tcp6")
+            onProgress?(progress(ctx, domains: targets, active: "https6"))
+            httpsSweep(&ctx, domains: targets, targets: tcpTargets6, stage: "https6")
+        } else {
+            ctx.incomplete = true
+            log(&ctx, "[probe] IPv6 checks not measured: no server-assigned IPv6 address")
+            for id in ["dns6", "tcp6", "https6"] {
+                ctx.checks.append(DiagnosticsCheck.measured(id: id, passed: 0, attempted: 0,
+                    state: .incomplete, probes: ctx.probes))
+            }
+        }
+        ctx.phaseDeadline = nil
+        onProgress?(progress(ctx, domains: targets, active: "icmp"))
         // Optional observations must not invalidate completed required checks.
         var summary = summarize(ctx: ctx)
         if !ctx.overBudget { icmpSweep(&ctx, gateway: gateway) }
@@ -205,6 +238,11 @@ public enum TunnelDiagnostics {
         return DiagnosticsResult(summary: summary, lines: ctx.lines + [footer], domains: targets, checks: ctx.checks, durationMs: elapsedMs(since: start), probes: ctx.probes)
     }
 
+    private static func progress(_ ctx: Context, domains: [String], active: String) -> DiagnosticsResult {
+        DiagnosticsResult(summary: "RUNNING", lines: ctx.lines, domains: domains, checks: ctx.checks,
+            durationMs: elapsedMs(since: ctx.startedAt), activeCheck: active, probes: ctx.probes)
+    }
+
     private static func elapsedMs(since start: TimeInterval) -> Int {
         max(0, Int(((ProcessInfo.processInfo.systemUptime - start) * 1000).rounded()))
     }
@@ -212,14 +250,15 @@ public enum TunnelDiagnostics {
     /// Call from the app process on a background queue. Unbound connections
     /// exercise the system resolver and the route actually used by apps.
     /// This is separate from the provider's fixed-IP IPv4 checks.
-    public static func runApplicationChecks(domains: [String], cancellation: DiagnosticsCancellation = DiagnosticsCancellation()) -> DiagnosticsResult {
+    public static func runApplicationChecks(domains: [String], cancellation: DiagnosticsCancellation = DiagnosticsCancellation(),
+        onProgress: ((DiagnosticsResult) -> Void)? = nil) -> DiagnosticsResult {
         let start = ProcessInfo.processInfo.systemUptime
         var lines: [String] = []
         var probes: [DiagnosticsProbe] = []
         var failures = 0
         var attempted = 0
         for domain in domains {
-            let remaining = 20 - (ProcessInfo.processInfo.systemUptime - start)
+            let remaining = 16 - (ProcessInfo.processInfo.systemUptime - start)
             if remaining <= 0 || cancellation.isCancelled { break }
             attempted += 1
             let probeStart = ProcessInfo.processInfo.systemUptime
@@ -255,12 +294,44 @@ public enum TunnelDiagnostics {
         } else {
             summary = "OK - app system-DNS/default-route HTTPS \(attempted)/\(attempted) passed"
         }
-        let elapsed = elapsedMs(since: start)
         let state: DiagnosticsCheck.State = cancellation.isCancelled || attempted != domains.count || domains.isEmpty
             ? .incomplete : (failures > 0 ? .failed : .passed)
-        return DiagnosticsResult(summary: summary, lines: lines, checks: [
-            DiagnosticsCheck.measured(id: "application", passed: attempted - failures, attempted: attempted, state: state, probes: probes)
-        ], durationMs: elapsed, probes: probes)
+        var checks = [DiagnosticsCheck.measured(id: "application", passed: attempted - failures,
+            attempted: attempted, state: state, probes: probes)]
+        // Ping runs in the app process so unbound ICMP follows application
+        // routes, rather than the provider's default tunnel bypass.
+        for (stage, host) in [("ping", "1.1.1.1"), ("ping6", "2606:4700:4700::1111")] {
+            onProgress?(DiagnosticsResult(summary: "RUNNING", lines: lines, checks: checks,
+                durationMs: elapsedMs(since: start), activeCheck: stage, probes: probes))
+            for sequence in 0..<2 {
+                let remaining = 24 - (ProcessInfo.processInfo.systemUptime - start)
+                guard remaining > 0, !cancellation.isCancelled else { break }
+                let probeStart = ProcessInfo.processInfo.systemUptime
+                let outcome = icmpPing(host: host, ifIndex: 0, totalSize: 64,
+                    sequence: UInt16(sequence), timeout: min(icmpTimeout, remaining))
+                let detail: String
+                let succeeded: Bool
+                switch outcome {
+                case .success(let rtt):
+                    succeeded = true
+                    detail = "\(host) seq=\(sequence) reply rtt=\(Int((rtt * 1000).rounded()))ms"
+                case .failure(let error):
+                    succeeded = false
+                    detail = "\(host) seq=\(sequence) no reply: \(error)"
+                }
+                let line = "[probe] app \(stage) default-route: \(detail)"
+                lines.append(line)
+                log(line)
+                probes.append(DiagnosticsProbe(stage: stage, domain: host, durationMs: elapsedMs(since: probeStart),
+                    succeeded: succeeded, detail: detail))
+            }
+            checks.append(DiagnosticsCheck.ping(id: stage, probes: probes))
+        }
+        let note = "[probe] Ping is informational: ICMP may be filtered; no reply alone does not establish a VPN failure."
+        lines.append(note)
+        log(note)
+        return DiagnosticsResult(summary: cancellation.isCancelled ? "INCOMPLETE - tunnel session changed" : summary,
+            lines: lines, checks: checks, durationMs: elapsedMs(since: start), probes: probes)
     }
 
     // MARK: - Suite steps
@@ -341,9 +412,10 @@ public enum TunnelDiagnostics {
 
     /// Resolves through the tunnel, falling back across configured resolvers.
     /// Answer equality is never evidence of leakage or poisoning.
-    private static func dnsSweep(_ ctx: inout Context, resolvers: [String], domains: [String])
+    private static func dnsSweep(_ ctx: inout Context, resolvers: [String], domains: [String], type: DNSPacket.RecordType = .a)
         -> [String: [String]]
     {
+        let stage = type == .aaaa ? "dns6" : "dns"
         var answers: [String: [String]] = [:]
         var attempted = 0
         for domain in domains {
@@ -360,37 +432,37 @@ public enum TunnelDiagnostics {
                 let probeStart = ProcessInfo.processInfo.systemUptime
                 let result = dnsQuery(
                     server: resolver, domain: domain, ifIndex: ctx.tunnelIndex,
-                    timeout: ctx.timeout(dnsTimeout))
-                log(&ctx, "[probe] dns \(domain) server=\(resolver): \(describe(result)) duration=\(elapsedMs(since: probeStart))ms")
+                    timeout: ctx.timeout(dnsTimeout), type: type)
+                log(&ctx, "[probe] \(stage) \(domain) server=\(resolver): \(describe(result, type: type)) duration=\(elapsedMs(since: probeStart))ms")
                 let succeeded: Bool
-                if case .success(let ips) = result { succeeded = !ips.isEmpty } else { succeeded = false }
-                ctx.probes.append(DiagnosticsProbe(stage: "dns", domain: domain, durationMs: elapsedMs(since: probeStart), succeeded: succeeded, detail: "\(resolver): \(describe(result))"))
-                if case .success(let ips) = result, !ips.isEmpty {
+                if case .success(let ips) = result { succeeded = type == .aaaa || !ips.isEmpty } else { succeeded = false }
+                ctx.probes.append(DiagnosticsProbe(stage: stage, domain: domain, durationMs: elapsedMs(since: probeStart), succeeded: succeeded, detail: "\(resolver): \(describe(result, type: type))"))
+                if case .success(let ips) = result, type == .aaaa || !ips.isEmpty {
                     answers[domain] = ips
                     break
                 }
             }
             if answers[domain] == nil, !ctx.overBudget {
                 ctx.failures += 1
-                ctx.suspects.append("DNS A lookup failed for \(domain); see resolver results")
+                ctx.suspects.append("DNS \(type == .aaaa ? "AAAA" : "A") lookup failed for \(domain); see resolver results")
             }
         }
-        ctx.checks.append(DiagnosticsCheck.measured(id: "dns", passed: answers.count, attempted: attempted,
+        ctx.checks.append(DiagnosticsCheck.measured(id: stage, passed: answers.count, attempted: attempted,
             state: attempted != domains.count || ctx.overBudget ? .incomplete : (answers.count == attempted ? .passed : .failed),
             probes: ctx.probes))
-        ctx.stageSummaries.append("dns \(answers.count)/\(attempted) resolved")
+        ctx.stageSummaries.append("\(stage) \(answers.count)/\(attempted) resolved")
         return answers
     }
 
-    /// TCP connect to port 443 of tunnel-resolved IPv4 addresses.
-    private static func tcpSweep(_ ctx: inout Context, domains: [String], answers: [String: [String]])
+    /// TCP connect to port 443 of tunnel-resolved addresses for one family.
+    private static func tcpSweep(_ ctx: inout Context, domains: [String], answers: [String: [String]], stage: String = "tcp")
         -> [String: String]
     {
         var selected: [String: String] = [:]
         var failedDomains = 0
         for domain in domains {
             guard let ips = answers[domain], !ips.isEmpty else {
-                log(&ctx, "[probe] tcp \(domain): skipped (no tunnel DNS answer)")
+                log(&ctx, "[probe] \(stage) \(domain): skipped (no tunnel DNS answer)")
                 continue
             }
             for ip in ips.prefix(2) {
@@ -404,11 +476,11 @@ public enum TunnelDiagnostics {
                 {
                 case .success(let t):
                     selected[domain] = ip
-                    ctx.probes.append(DiagnosticsProbe(stage: "tcp", domain: domain, durationMs: Int((t * 1000).rounded()), succeeded: true, detail: "\(ip):443"))
-                    log(&ctx, "[probe] tcp \(domain)(\(ip):443) via tunnel: ok \(Int(t * 1000))ms")
+                    ctx.probes.append(DiagnosticsProbe(stage: stage, domain: domain, durationMs: Int((t * 1000).rounded()), succeeded: true, detail: "\(ip):443"))
+                    log(&ctx, "[probe] \(stage) \(domain)(\(ip):443) via tunnel: ok \(Int(t * 1000))ms")
                 case .failure(let why):
-                    ctx.probes.append(DiagnosticsProbe(stage: "tcp", domain: domain, durationMs: elapsedMs(since: probeStart), succeeded: false, detail: "\(ip):443 · \(why)"))
-                    log(&ctx, "[probe] tcp \(domain)(\(ip):443) via tunnel: fail \(why) duration=\(elapsedMs(since: probeStart))ms")
+                    ctx.probes.append(DiagnosticsProbe(stage: stage, domain: domain, durationMs: elapsedMs(since: probeStart), succeeded: false, detail: "\(ip):443 · \(why)"))
+                    log(&ctx, "[probe] \(stage) \(domain)(\(ip):443) via tunnel: fail \(why) duration=\(elapsedMs(since: probeStart))ms")
                 }
                 if selected[domain] != nil { break }
             }
@@ -417,10 +489,10 @@ public enum TunnelDiagnostics {
                 ctx.suspects.append("TCP candidates failed for \(domain)")
             }
         }
-        ctx.checks.append(DiagnosticsCheck.measured(id: "tcp", passed: selected.count, attempted: selected.count + failedDomains,
-            state: ctx.overBudget || answers.isEmpty ? .incomplete : (failedDomains > 0 ? .failed : .passed),
+        ctx.checks.append(DiagnosticsCheck.measured(id: stage, passed: selected.count, attempted: selected.count + failedDomains,
+            state: ctx.overBudget || selected.count + failedDomains == 0 ? .incomplete : (failedDomains > 0 ? .failed : .passed),
             probes: ctx.probes))
-        ctx.stageSummaries.append("tcp \(selected.count)/\(selected.count + failedDomains) domains ok")
+        ctx.stageSummaries.append("\(stage) \(selected.count)/\(selected.count + failedDomains) domains ok")
         ctx.failures += failedDomains
         return selected
     }
@@ -428,11 +500,11 @@ public enum TunnelDiagnostics {
     /// Full TLS handshake + HTTP/1.1 request through the tunnel: this is the
     /// exact exchange that fails when "the page does not load". The peer
     /// certificate subject is logged to expose interception.
-    private static func httpsSweep(_ ctx: inout Context, domains: [String], targets: [String: String])
+    private static func httpsSweep(_ ctx: inout Context, domains: [String], targets: [String: String], stage: String = "https")
     {
         guard let iface = ctx.tunnelNWInterface else {
-            ctx.checks.append(DiagnosticsCheck.measured(id: "https", passed: 0, attempted: 0, state: .incomplete, probes: ctx.probes))
-            log(&ctx, "[probe] https: skipped (no tunnel NWInterface)")
+            ctx.checks.append(DiagnosticsCheck.measured(id: stage, passed: 0, attempted: 0, state: .incomplete, probes: ctx.probes))
+            log(&ctx, "[probe] \(stage): skipped (no tunnel NWInterface)")
             ctx.incomplete = true
             return
         }
@@ -440,11 +512,11 @@ public enum TunnelDiagnostics {
         var fail = 0
         for domain in domains {
             guard let ip = targets[domain] else {
-                log(&ctx, "[probe] https \(domain): skipped (no successful TCP target)")
+                log(&ctx, "[probe] \(stage) \(domain): skipped (no successful TCP target)")
                 continue
             }
             if ctx.overBudget {
-                log(&ctx, "[probe] https: skipped remaining (time budget)")
+                log(&ctx, "[probe] \(stage): skipped remaining (time budget)")
                 break
             }
             ctx.httpsCompleted += 1
@@ -453,27 +525,28 @@ public enum TunnelDiagnostics {
             case .success(let r):
                 ok += 1
                 ctx.probes.append(DiagnosticsProbe(
-                    stage: "https", domain: domain, durationMs: elapsedMs(since: probeStart),
+                    stage: stage, domain: domain, durationMs: elapsedMs(since: probeStart),
                     succeeded: true, detail: "\(r.http) · \(r.cert)",
                     tlsDurationMs: Int((r.tlsTime * 1000).rounded())))
                 log(
                     &ctx,
-                    "[probe] https \(domain)(\(ip):443) via tunnel: ok \(r.http)"
+                    "[probe] \(stage) \(domain)(\(ip):443) via tunnel: ok \(r.http)"
                         + " duration=\(elapsedMs(since: probeStart))ms tls=\(Int((r.tlsTime * 1000).rounded()))ms cert=\"\(r.cert)\""
                 )
             case .failure(let why):
                 fail += 1
-                ctx.probes.append(DiagnosticsProbe(stage: "https", domain: domain, durationMs: elapsedMs(since: probeStart), succeeded: false, detail: why.description))
-                log(&ctx, "[probe] https \(domain) via tunnel: fail \(why) duration=\(elapsedMs(since: probeStart))ms")
+                ctx.probes.append(DiagnosticsProbe(stage: stage, domain: domain, durationMs: elapsedMs(since: probeStart), succeeded: false, detail: why.description))
+                log(&ctx, "[probe] \(stage) \(domain) via tunnel: fail \(why) duration=\(elapsedMs(since: probeStart))ms")
             }
         }
         if fail > 0, ok == 0 {
             ctx.suspects.append("HTTPS sample failed on tested tunnel targets; see per-domain errors")
         }
-        ctx.checks.append(DiagnosticsCheck.measured(id: "https", passed: ok, attempted: ok + fail,
+        ctx.checks.append(DiagnosticsCheck.measured(id: stage, passed: ok, attempted: ok + fail,
             state: ctx.overBudget || targets.isEmpty || ok + fail != targets.count ? .incomplete : (fail > 0 ? .failed : .passed),
             probes: ctx.probes))
-        ctx.stageSummaries.append("https \(ok)/\(ok + fail) ok")
+        if targets.isEmpty || ok + fail != targets.count { ctx.incomplete = true }
+        ctx.stageSummaries.append("\(stage) \(ok)/\(ok + fail) ok")
         ctx.failures += fail
     }
 
@@ -486,7 +559,7 @@ public enum TunnelDiagnostics {
                 + ctx.suspects.joined(separator: "; ")
         }
         if ctx.failures == 0, ctx.suspects.isEmpty {
-            return "OK - required IPv4 checks passed (\(stages))"
+            return "OK - required IPv4/IPv6 checks passed (\(stages))"
         }
         var parts = ["PROBLEMS FOUND (\(stages))"]
         parts.append(contentsOf: ctx.suspects.map { "suspect: \($0)" })
@@ -565,10 +638,10 @@ extension TunnelDiagnostics {
     // MARK: - DNS probe
 
     private static func dnsQuery(
-        server: String, domain: String, ifIndex: UInt32, timeout: TimeInterval
+        server: String, domain: String, ifIndex: UInt32, timeout: TimeInterval, type: DNSPacket.RecordType = .a
     ) -> Result<[String], ProbeError> {
         let id = UInt16.random(in: 0...UInt16.max)
-        guard let query = DNSPacket.buildQuery(domain: domain, id: id) else {
+        guard let query = DNSPacket.buildQuery(domain: domain, id: id, type: type) else {
             return .failure(ProbeError("bad domain"))
         }
         let exchange = udpExchange(
@@ -584,17 +657,17 @@ extension TunnelDiagnostics {
                     return .failure(ProbeError("DNS response truncated; TCP fallback unavailable"))
                 }
             }
-            guard let answers = DNSPacket.parseAnswers(data, expectedID: id) else {
+            guard let answers = DNSPacket.parseAnswers(data, expectedID: id, type: type) else {
                 return .failure(ProbeError("unparseable response"))
             }
             return .success(answers)
         }
     }
 
-    private static func describe(_ result: Result<[String], ProbeError>) -> String {
+    private static func describe(_ result: Result<[String], ProbeError>, type: DNSPacket.RecordType = .a) -> String {
         switch result {
         case .success(let ips):
-            return ips.isEmpty ? "[] (no A records)" : "[\(ips.joined(separator: ", "))]"
+            return ips.isEmpty ? "[] (no \(type == .aaaa ? "AAAA" : "A") records)" : "[\(ips.joined(separator: ", "))]"
         case .failure(let why): return why.description
         }
     }
@@ -655,7 +728,7 @@ extension TunnelDiagnostics {
 
     // MARK: - ICMP probe
 
-    private static func icmpPing(
+    static func icmpPing(
         host: String, ifIndex: UInt32, totalSize: Int, sequence: UInt16, timeout: TimeInterval
     ) -> Result<TimeInterval, ProbeError> {
         let isV6 = host.contains(":")
@@ -738,7 +811,6 @@ extension TunnelDiagnostics {
         }
         guard sent == message.count else { return .failure(ProbeError("sendto: \(errnoString())")) }
 
-        let replyType: UInt8 = isV6 ? 129 : 0
         var buffer = [UInt8](repeating: 0, count: 4096)
         while true {
             let remaining = timeout - (ProcessInfo.processInfo.systemUptime - start)
@@ -752,13 +824,25 @@ extension TunnelDiagnostics {
                     ProbeError(errno == EAGAIN || errno == EWOULDBLOCK ? "timeout" : "recv: \(errnoString())")
                 )
             }
-            if n >= 8, buffer[0] == replyType,
-                buffer[6] == UInt8(sequence >> 8), buffer[7] == UInt8(sequence & 0xff)
-            {
+            if matchesEchoReply(buffer, length: n, isIPv6: isV6, sequence: sequence) {
                 return .success((ProcessInfo.processInfo.systemUptime - start))
             }
             if (ProcessInfo.processInfo.systemUptime - start) > timeout { return .failure(ProbeError("timeout")) }
         }
+    }
+
+    static func matchesEchoReply(_ bytes: [UInt8], length: Int, isIPv6: Bool, sequence: UInt16) -> Bool {
+        guard length <= bytes.count, length >= 8 else { return false }
+        var offset = 0
+        // Darwin may include an IP header on an ICMP datagram receive.
+        if !isIPv6, bytes[0] >> 4 == 4 {
+            offset = Int(bytes[0] & 0x0f) * 4
+            guard offset >= 20 else { return false }
+        } else if isIPv6, bytes[0] >> 4 == 6 { offset = 40 }
+        guard length >= offset + 8 else { return false }
+        return bytes[offset] == (isIPv6 ? 129 : 0) && bytes[offset + 1] == 0
+            && bytes[offset + 6] == UInt8(sequence >> 8)
+            && bytes[offset + 7] == UInt8(sequence & 0xff)
     }
 
     static func icmpChecksum(_ data: [UInt8]) -> UInt16 {
@@ -1007,12 +1091,14 @@ struct ProbeError: Error, CustomStringConvertible {
     init(_ description: String) { self.description = description }
 }
 
-/// Minimal DNS wire codec: builds a single-question A query and extracts the
-/// A records from a response, following compression pointers when skipping
+/// Minimal DNS wire codec: builds an A or AAAA query and extracts matching
+/// address records from a response, following compression pointers when skipping
 /// names. Unknown record types are skipped via their rdlength.
 struct DNSPacket {
 
-    static func buildQuery(domain: String, id: UInt16) -> Data? {
+    enum RecordType: UInt16 { case a = 1, aaaa = 28 }
+
+    static func buildQuery(domain: String, id: UInt16, type: RecordType = .a) -> Data? {
         var data = Data()
         data.append(contentsOf: [UInt8(id >> 8), UInt8(id & 0xff)])
         data.append(contentsOf: [0x01, 0x00])  // RD
@@ -1035,15 +1121,15 @@ struct DNSPacket {
             data.append(contentsOf: label.utf8)
         }
         data.append(0)
-        data.append(contentsOf: [0x00, 0x01])  // QTYPE A
+        data.append(contentsOf: [UInt8(type.rawValue >> 8), UInt8(type.rawValue & 0xff)])  // QTYPE
         data.append(contentsOf: [0x00, 0x01])  // QCLASS IN
         return data
     }
 
-    /// Returns the A records in the response; an empty array when the answer
-    /// is valid but holds no A records (e.g. CNAME-only chains we did not
+    /// Returns matching address records; an empty array when the answer
+    /// is valid but holds no matching records (e.g. CNAME-only chains we did not
     /// follow); nil when the packet is malformed or carries an error rcode.
-    static func parseAnswers(_ data: Data, expectedID: UInt16) -> [String]? {
+    static func parseAnswers(_ data: Data, expectedID: UInt16, type expectedType: RecordType = .a) -> [String]? {
         guard data.count >= 12 else { return nil }
         func u16(_ offset: Int) -> UInt16 {
             UInt16(data[offset]) << 8 | UInt16(data[offset + 1])
@@ -1062,7 +1148,7 @@ struct DNSPacket {
         for _ in 0..<qdcount {
             guard let next = skipName(data, offset) else { return nil }
             offset = next + 4  // qtype + qclass
-            guard offset <= data.count else { return nil }
+            guard offset <= data.count, u16(next) == expectedType.rawValue, u16(next + 2) == 1 else { return nil }
         }
 
         var answers: [String] = []
@@ -1073,8 +1159,16 @@ struct DNSPacket {
             let rdlength = Int(u16(nameEnd + 8))
             let rdata = nameEnd + 10
             guard rdata + rdlength <= data.count else { return nil }
-            if type == 1, u16(nameEnd + 2) == 1, rdlength == 4 {
+            if type == expectedType.rawValue, u16(nameEnd + 2) == 1 {
+                guard rdlength == (expectedType == .aaaa ? 16 : 4) else { return nil }
+            }
+            if type == expectedType.rawValue, type == 1, u16(nameEnd + 2) == 1, rdlength == 4 {
                 answers.append("\(data[rdata]).\(data[rdata + 1]).\(data[rdata + 2]).\(data[rdata + 3])")
+            }
+            if type == expectedType.rawValue, type == 28, u16(nameEnd + 2) == 1, rdlength == 16 {
+                let bytes = Data(data[rdata..<(rdata + 16)])
+                guard let address = IPv6Address(bytes) else { return nil }
+                answers.append(address.debugDescription)
             }
             offset = rdata + rdlength
         }

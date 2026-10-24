@@ -77,6 +77,17 @@ struct MacosStatusView: View {
                     resultHeader
                     sessionAddresses
                     checkTable
+                    Text(languageManager.tr(DiagnosticsPresentation.pingNote))
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !DiagnosticsPresentation.pingProbes(result).isEmpty {
+                        DisclosureGroup(languageManager.tr("Ping samples")) {
+                            ForEach(DiagnosticsPresentation.pingProbes(result)) { probe in
+                                Text(probe.detail).font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(probe.succeeded ? Color.primary : .secondary)
+                                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
                     if running {
                         Text(languageManager.tr(result?.activeCheck == "icmp" ? "Completing optional tunnel observations…" : "Results update as each check completes."))
                             .font(.body).foregroundStyle(.secondary)
@@ -93,7 +104,7 @@ struct MacosStatusView: View {
                                                     Image(systemName: probe.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
                                                         .foregroundStyle(probe.succeeded ? Color.green : .red)
                                                     VStack(alignment: .leading, spacing: 4) {
-                                                        Text(probe.stage == "application" ? languageManager.tr("Application access") : probe.stage.uppercased())
+                                                        Text(languageManager.tr(DiagnosticsPresentation.label(for: probe.stage)))
                                                             .font(.body.weight(.medium))
                                                         Text(probe.detail).font(.system(.body, design: .monospaced))
                                                             .foregroundStyle(.secondary).textSelection(.enabled)
@@ -151,7 +162,7 @@ struct MacosStatusView: View {
                         Text(languageManager.tr("Elapsed") + "  \(max(0, Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))) ms")
                             .font(.body).monospacedDigit().foregroundStyle(.secondary)
                     }
-                    ProgressView(value: Double(result?.checks?.count ?? 0), total: 4).frame(maxWidth: 300)
+                    ProgressView(value: Double(result?.checks?.count ?? 0), total: Double(DiagnosticsPresentation.checkIDs.count)).frame(maxWidth: 300)
                 } else {
                     HStack(spacing: 10) {
                         if let completedAt { Text(completedAt, style: .time) }
@@ -199,7 +210,8 @@ struct MacosStatusView: View {
                     if let check {
                         Text(check.sampleCount == 0 || check.attempted == 0 ? "—" : "\(check.durationMs) ms")
                             .font(.system(.body, design: .monospaced)).frame(width: 100, alignment: .trailing)
-                            .help(languageManager.tr("Mean request time, including failures and retries."))
+                            .help(languageManager.tr(DiagnosticsPresentation.pingCheckIDs.contains(id)
+                                ? "Mean round-trip time of received replies." : "Mean request time, including failures and retries."))
                     } else if active {
                         TimelineView(.periodic(from: .now, by: 0.1)) { context in
                             Text("\(max(0, Int((ProcessInfo.processInfo.systemUptime - progressReceived) * 1000))) ms")
@@ -207,7 +219,7 @@ struct MacosStatusView: View {
                         }.frame(width: 100, alignment: .trailing)
                     } else { Text("—").foregroundStyle(.secondary).frame(width: 100, alignment: .trailing) }
                 }.padding(12)
-                if id != "application" { Divider() }
+                if id != DiagnosticsPresentation.checkIDs.last { Divider() }
             }
         }.clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))

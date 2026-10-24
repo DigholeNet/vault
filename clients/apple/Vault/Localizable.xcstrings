@@ -1101,6 +1101,96 @@
         }
       }
     },
+    "Tunnel DNS · AAAA" : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隧道 DNS · AAAA"
+          }
+        }
+      }
+    },
+    "Tunnel TCP · IPv6" : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隧道 TCP · IPv6"
+          }
+        }
+      }
+    },
+    "Tunnel HTTPS · IPv6" : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隧道 HTTPS · IPv6"
+          }
+        }
+      }
+    },
+    "Ping · IPv4" : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ping · IPv4"
+          }
+        }
+      }
+    },
+    "Ping · IPv6" : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ping · IPv6"
+          }
+        }
+      }
+    },
+    "Ping samples" : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ping 明细"
+          }
+        }
+      }
+    },
+    "Ping is informational. ICMP may be filtered; no reply alone does not mean the VPN is broken. RTT averages replies only." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ping 仅供参考。ICMP 可能被过滤，无回复不代表 VPN 故障。RTT 仅统计收到的回复。"
+          }
+        }
+      }
+    },
+    "Mean round-trip time of received replies." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已收到回复的平均往返时间。"
+          }
+        }
+      }
+    },
+    "Request durations include failures and retries; Ping RTT includes replies only." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请求耗时包含失败和重试，Ping RTT 仅统计收到的回复。"
+          }
+        }
+      }
+    },
     "Copy" : {
       "localizations" : {
         "zh-Hans" : {

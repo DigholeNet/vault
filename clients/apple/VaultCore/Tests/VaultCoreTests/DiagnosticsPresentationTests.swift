@@ -60,3 +60,44 @@ import Testing
         == "[rust] handshake failed")
     #expect(DiagnosticsPresentation.filteredLogs(text, source: "app", search: "") == "[app] ready")
 }
+
+@Test func failedOrMissingIPv6CannotBeHiddenByIPv4Success() {
+    let checks = DiagnosticsPresentation.requiredCheckIDs.map {
+        DiagnosticsCheck(id: $0, passed: 1, attempted: 1, state: .passed, durationMs: 1)
+    }
+    var result = DiagnosticsResult(summary: "OK", lines: [], checks: checks)
+    #expect(DiagnosticsPresentation.passed(result))
+    result.checks?.removeAll { $0.id == "https6" }
+    #expect(!DiagnosticsPresentation.passed(result))
+    #expect(DiagnosticsPresentation.incomplete(result))
+    result.checks = checks
+    result.checks?[4].state = .failed
+    #expect(!DiagnosticsPresentation.passed(result))
+}
+
+@Test func blockedPingIsInformationalAndRTTUsesOnlyReplies() {
+    let probes = [
+        DiagnosticsProbe(stage: "ping", domain: "1.1.1.1", durationMs: 200, succeeded: true, detail: "reply"),
+        DiagnosticsProbe(stage: "ping", domain: "1.1.1.1", durationMs: 2000, succeeded: false, detail: "timeout")
+    ]
+    let ping = DiagnosticsCheck.ping(id: "ping", probes: probes)
+    #expect(ping.attempted == 2 && ping.passed == 1)
+    #expect(ping.sampleCount == 1 && ping.durationMs == 200)
+    #expect(ping.state == .incomplete)
+    let checks = DiagnosticsPresentation.requiredCheckIDs.map {
+        DiagnosticsCheck(id: $0, passed: 1, attempted: 1, state: .passed, durationMs: 1)
+    }
+    let result = DiagnosticsResult(summary: "OK", lines: [], checks: checks + [ping])
+    #expect(DiagnosticsPresentation.passed(result))
+    #expect(!DiagnosticsPresentation.incomplete(result))
+}
+
+@Test func domainsWithoutAAAAAreNotReportedAsIPv6TransportFailures() {
+    var probes = ["dns", "tcp", "https", "application"].map {
+        DiagnosticsProbe(stage: $0, domain: "example.com", durationMs: 1, succeeded: true, detail: "ok")
+    }
+    probes.append(DiagnosticsProbe(stage: "dns6", domain: "example.com", durationMs: 1,
+        succeeded: true, detail: "[] (no AAAA records)"))
+    #expect(DiagnosticsPresentation.domainState(DiagnosticsResult(summary: "OK", lines: [], probes: probes),
+        domain: "example.com") == .passed)
+}

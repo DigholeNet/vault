@@ -59,8 +59,15 @@ struct IosDiagnosticsView: View {
             } header: {
                 HStack { Text(tr("Check")); Spacer(); Text(tr(DiagnosticsPresentation.durationHeading(model.result))) }
             } footer: {
-                Text(tr("Mean request time, including failures and retries."))
+                Text(tr("Request durations include failures and retries; Ping RTT includes replies only."))
                     .font(.footnote)
+            }
+            Section(tr("Ping samples")) {
+                Text(tr(DiagnosticsPresentation.pingNote)).font(.caption).foregroundStyle(.secondary)
+                ForEach(DiagnosticsPresentation.pingProbes(model.result)) { probe in
+                    Text(probe.detail).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        .foregroundStyle(probe.succeeded ? Color.primary : .secondary)
+                }
             }
             if let result = model.result, !model.running {
                 if !model.passed {
@@ -108,7 +115,7 @@ struct IosDiagnosticsView: View {
                         Text(tr("Elapsed") + "  \(max(0, Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))) ms")
                             .monospacedDigit().foregroundStyle(.secondary)
                     }
-                    ProgressView(value: Double(model.result?.checks?.count ?? 0), total: 4)
+                    ProgressView(value: Double(model.result?.checks?.count ?? 0), total: Double(DiagnosticsPresentation.checkIDs.count))
                 } else if let duration = model.result?.durationMs {
                     Text(tr("Total duration") + "  \(duration) ms").monospacedDigit().foregroundStyle(.secondary)
                 }
@@ -177,7 +184,7 @@ private struct IosDiagnosticsDetailView: View {
                             .foregroundStyle(probe.succeeded ? Color.green : .orange)
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(alignment: .top) {
-                                Text(probe.stage == "application" ? languageManager.tr("Application access") : probe.stage.uppercased())
+                                Text(languageManager.tr(DiagnosticsPresentation.label(for: probe.stage)))
                                 Spacer(minLength: 4)
                                 Text("\(probe.durationMs) ms").monospacedDigit().fixedSize()
                             }

@@ -27,7 +27,7 @@ struct MacosMenuView: View {
     @EnvironmentObject var languageManager: LanguageManager
     @Environment(\.dismiss) private var dismiss
     @State private var hoveringConnection = false
-    private enum Action: CaseIterable { case connection, diagnostics, settings, quit }
+    private enum Action: CaseIterable { case connection, settings, diagnostics, quit }
     @State private var focusedAction: Action?
 
     var body: some View {
@@ -66,15 +66,15 @@ struct MacosMenuView: View {
             }
             Divider()
             HStack(spacing: 0) {
-                Button { open("status") } label: {
-                    footerLabel("Diagnostics", symbol: "stethoscope")
-                }
-                .macosKeyboardAction(focus: $focusedAction, id: .diagnostics) { open("status") }
-                Divider().frame(height: 16)
                 Button { open("configure") } label: {
                     footerLabel("Settings", symbol: "gearshape")
                 }.keyboardShortcut(",")
                 .macosKeyboardAction(focus: $focusedAction, id: .settings) { open("configure") }
+                Divider().frame(height: 16)
+                Button { open("status") } label: {
+                    footerLabel("Diagnostics", symbol: "stethoscope")
+                }
+                .macosKeyboardAction(focus: $focusedAction, id: .diagnostics) { open("status") }
                 Divider().frame(height: 16)
                 Button {
                     dismiss()

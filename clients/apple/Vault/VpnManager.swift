@@ -746,7 +746,7 @@ extension VpnManager {
     }
 
     /// Ask the running provider to execute the connectivity probe suite.
-    /// Provider checks (60s) then app checks (20s), with a 95s reply backstop.
+    /// Provider checks (60s) then app checks (24s), with a 95s reply backstop.
     /// nil means the message channel itself failed.
     func requestDiagnostics(onProgress: ((DiagnosticsResult) -> Void)? = nil, completion: @escaping (DiagnosticsResult?) -> Void) {
         // The extension's own sockets bypass the tunnel, so only the app can
@@ -852,7 +852,19 @@ extension VpnManager {
                             return
                         }
                         if let domains = result.domains, !result.summary.hasPrefix("INCOMPLETE - tunnel session changed") {
-                            result.appendApplicationResult(TunnelDiagnostics.runApplicationChecks(domains: domains, cancellation: cancellation))
+                            let application = TunnelDiagnostics.runApplicationChecks(domains: domains, cancellation: cancellation,
+                                onProgress: { progress in
+                                    var combined = providerProgress
+                                    combined.lines += progress.lines
+                                    combined.checks = (combined.checks ?? []) + (progress.checks ?? [])
+                                    combined.probes = (combined.probes ?? []) + (progress.probes ?? [])
+                                    combined.activeCheck = progress.activeCheck
+                                    let snapshot = combined
+                                    DispatchQueue.main.async {
+                                        if !cancellation.isCancelled { onProgress?(snapshot) }
+                                    }
+                                })
+                            result.appendApplicationResult(application)
                         }
                         DispatchQueue.main.async {
                             self.queryProviderStatus { finalStatus in

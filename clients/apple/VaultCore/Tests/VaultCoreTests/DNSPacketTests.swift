@@ -111,3 +111,56 @@ private func response(id: UInt16, rcode: UInt8 = 0, ips: [String]) -> Data {
     #expect(TunnelDiagnostics.gatewayAddress(ip: "not-an-ip", mask: "255.255.255.0") == nil)
     #expect(TunnelDiagnostics.gatewayAddress(ip: "192.168.10.2", mask: "0.0.0.0") == nil)
 }
+
+@Test func aaaaQueryAndReplyRemainSeparateFromIPv4() throws {
+    var packet = try #require(DNSPacket.buildQuery(domain: "example.com", id: 77, type: .aaaa))
+    #expect(Array(packet.suffix(4)) == [0, 28, 0, 1])
+    packet[2] = 0x81
+    packet[3] = 0x80
+    packet[7] = 1
+    packet.append(contentsOf: [0xc0, 0x0c, 0, 28, 0, 1, 0, 0, 0, 60, 0, 16])
+    packet.append(contentsOf: [0x26, 0x06, 0x47, 0, 0x47, 0] + Array(repeating: 0, count: 8) + [0x11, 0x11])
+    let answers = try #require(DNSPacket.parseAnswers(packet, expectedID: 77, type: .aaaa))
+    #expect(answers.count == 1)
+    #expect(RouteCheck.sameAddress(answers.first, "2606:4700:4700::1111"))
+    #expect(DNSPacket.parseAnswers(packet, expectedID: 77) == nil)
+    #expect(DNSPacket.parseAnswers(packet, expectedID: 78, type: .aaaa) == nil)
+    packet.removeLast()
+    #expect(DNSPacket.parseAnswers(packet, expectedID: 77, type: .aaaa) == nil)
+}
+
+@Test func missingAAAAIsAValidEmptyAnswerAndMalformedAAAAIsRejected() throws {
+    var packet = try #require(DNSPacket.buildQuery(domain: "example.com", id: 77, type: .aaaa))
+    packet[2] = 0x81
+    packet[3] = 0x80
+    #expect(DNSPacket.parseAnswers(packet, expectedID: 77, type: .aaaa) == [])
+    packet[7] = 1
+    packet.append(contentsOf: [0xc0, 0x0c, 0, 28, 0, 1, 0, 0, 0, 60, 0, 4, 1, 2, 3, 4])
+    #expect(DNSPacket.parseAnswers(packet, expectedID: 77, type: .aaaa) == nil)
+}
+
+@Test func echoRepliesAcceptDarwinHeadersAndRejectWrongSequences() {
+    let v4: [UInt8] = [0, 0, 0, 0, 0, 0, 0x12, 0x34]
+    let v6: [UInt8] = [129, 0, 0, 0, 0, 0, 0x12, 0x34]
+    var v4Header = Array(repeating: UInt8(0), count: 20)
+    v4Header[0] = 0x45
+    var v6Header = Array(repeating: UInt8(0), count: 40)
+    v6Header[0] = 0x60
+    #expect(TunnelDiagnostics.matchesEchoReply(v4, length: 8, isIPv6: false, sequence: 0x1234))
+    #expect(TunnelDiagnostics.matchesEchoReply(v4Header + v4, length: 28, isIPv6: false, sequence: 0x1234))
+    #expect(TunnelDiagnostics.matchesEchoReply(v6, length: 8, isIPv6: true, sequence: 0x1234))
+    #expect(TunnelDiagnostics.matchesEchoReply(v6Header + v6, length: 48, isIPv6: true, sequence: 0x1234))
+    #expect(!TunnelDiagnostics.matchesEchoReply(v6, length: 8, isIPv6: true, sequence: 9))
+    #expect(!TunnelDiagnostics.matchesEchoReply(v4Header + v4, length: 23, isIPv6: false, sequence: 0x1234))
+    #expect(!TunnelDiagnostics.matchesEchoReply(v4, length: 100, isIPv6: false, sequence: 0x1234))
+}
+
+@Test func pingLoopbackWorksForBothIPFamilies() {
+    for host in ["127.0.0.1", "::1"] {
+        let result = TunnelDiagnostics.icmpPing(host: host, ifIndex: 0, totalSize: 64, sequence: 47, timeout: 1)
+        switch result {
+        case .success(let rtt): #expect(rtt >= 0 && rtt < 1)
+        case .failure(let error): Issue.record("Loopback Ping to \(host) failed: \(error)")
+        }
+    }
+}

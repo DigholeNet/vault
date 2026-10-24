@@ -42,8 +42,14 @@ the tunnel is down. Preferences writes always settle before another operation.
 Connect the VPN, then start diagnostics manually. Both platforms share the
 request/progress model and result interpretation:
 
-- Tunnel-bound IPv4 DNS, TCP and HTTPS checks, plus app-process HTTPS using the
-  system resolver and default routes. HTTPS reads a bounded sample (64 KiB).
+- Tunnel-bound DNS A/AAAA, TCP and HTTPS checks with separate IPv4/IPv6 results,
+  plus app-process HTTPS using the system resolver and default routes. AAAA
+  queries use the configured resolver; their DNS transport may be IPv4.
+- App-process Ping sends two 64-byte echo requests each to `1.1.1.1` and
+  `2606:4700:4700::1111`, with reply counts, per-request details, and average RTT
+  over received replies. ICMP is informational and does not change the required
+  connectivity verdict. Missing tunnel IPv6 addresses remain unmeasured; domains
+  without AAAA records are excluded from IPv6 transport targets. HTTPS reads a bounded sample (64 KiB).
 - Per-check times are request averages, including retries and failures; total
   time is wall-clock elapsed time. All times use milliseconds.
 - Route checks use current provider addresses, not the persisted display cache.
@@ -76,7 +82,7 @@ Logs are under Diagnostics → Runtime Logs. iOS follows new entries automatical
 macOS also offers search, source filters, optional auto-scroll and Copy. macOS
 fetches the system extension's log over provider messages and caches it for
 viewing after disconnecting. Diagnostic time budgets are 60 seconds in the
-provider, 20 seconds for app HTTPS, and 95 seconds overall.
+provider, 24 seconds for app HTTPS and Ping, and 95 seconds overall.
 
 Probe domains are configurable under macOS Settings → Advanced or iOS Configure.
 Empty uses `www.google.com, github.com, t.co`.

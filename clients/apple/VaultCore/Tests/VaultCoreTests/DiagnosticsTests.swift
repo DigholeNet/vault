@@ -171,3 +171,16 @@ import Testing
     let skipped = DiagnosticsCheck.measured(id: "https", passed: 0, attempted: 0, state: .incomplete, probes: probes)
     #expect(skipped.sampleCount == 0)
 }
+
+@Test func ipv4BudgetCannotConsumeIPv6Window() {
+    let now = ProcessInfo.processInfo.systemUptime
+    var context = TunnelDiagnostics.Context(startedAt: now - 26,
+        cancellation: DiagnosticsCancellation(), tunnelName: "utun-test", tunnelIndex: 1, tunnelNWInterface: nil)
+    context.phaseDeadline = context.startedAt + 25
+    #expect(context.overBudget)
+    context.phaseDeadline = context.startedAt + 50
+    #expect(!context.overBudget)
+    #expect(context.remaining <= 24)
+    context.cancellation.cancel()
+    #expect(context.overBudget)
+}
