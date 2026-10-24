@@ -17,6 +17,11 @@ class VpnManager {
     private var observers: [NSObjectProtocol]
     private var observationGeneration: UInt64 = 0
     private var connectionFailurePending = false
+    private var connectionRequestedAt: TimeInterval?
+    private var tunnelStartIssuedAt: TimeInterval?
+    private var logReadGeneration: UInt64 = 0
+    private var clearingLogFiles = false
+    var logPreferences = UserDefaults.standard
     private var stopCompletions: [(Bool) -> Void] = []
     var tunnelStopTimeout: TimeInterval = 15
     private var tunnelStopTimeoutWorkItem: DispatchWorkItem?
@@ -73,6 +78,13 @@ class VpnManager {
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
+    }
+
+    private func logStage(_ stage: String, operation: UInt64, since started: TimeInterval, error: Error? = nil) {
+        let elapsed = Int(((ProcessInfo.processInfo.systemUptime - started) * 1000).rounded())
+        let message = "[operation:\(operation)] \(stage) durationMs=\(elapsed)"
+        if let error { Logger.network.errorAndFile("\(message) error=\(error.localizedDescription)") }
+        else { Logger.network.noticeAndFile(message) }
     }
 
     /// Pick this app's configuration from the list returned by
@@ -165,6 +177,14 @@ class VpnManager {
                 "VPN status: \(oldStatus) -> \(self.vpnStatus) (NEVPNStatus rawValue \(manager.connection.status.rawValue))"
             )
             if self.vpnStatus == .connected {
+                if let started = connectionRequestedAt {
+                    logStage("Connection ready", operation: connectionLifecycle.generation, since: started)
+                    connectionRequestedAt = nil
+                }
+                if let issued = tunnelStartIssuedAt {
+                    logStage("System tunnel startup completed", operation: connectionLifecycle.generation, since: issued)
+                    tunnelStartIssuedAt = nil
+                }
                 self.appData.startStatsMonitoring()
                 self.queryProviderStatus { status in
                     if let ip = status?.ip, !ip.isEmpty { self.config.ip = ip }
@@ -279,10 +299,14 @@ class VpnManager {
         _ complete: @escaping (NETunnelProviderManager?, _ loaded: Bool) -> Void
     ) {
         removeVpnStatusObservers()
+        let operation = connectionLifecycle.generation
+        let loadStarted = ProcessInfo.processInfo.systemUptime
+        Logger.network.noticeAndFile("[operation:\(operation)] Loading VPN configurations")
 
         NETunnelProviderManager.loadAllFromPreferences {
             [self] (managers, error) in
             DispatchQueue.main.async {
+                self.logStage("VPN configurations loaded", operation: operation, since: loadStarted, error: error)
                 guard let managers = managers else {
                     Logger.network.errorAndFile(
                         "loadAllFromPreferences failed: \(error?.localizedDescription ?? "unknown")"
@@ -326,6 +350,9 @@ class VpnManager {
                 conf["dns"] = self.config.dns as AnyObject
                 conf["probeDomains"] = self.config.probeDomains as AnyObject
                 conf["mtu"] = self.config.mtu as AnyObject
+                if let token = self.logPreferences.string(forKey: "clearLogsToken") {
+                    conf["clearLogsToken"] = token as AnyObject
+                }
 
                 conf["id"] = id as AnyObject
                 // The password is persisted in the OS VPN providerConfiguration: on macOS the
@@ -355,7 +382,10 @@ class VpnManager {
                 manager.onDemandRules = [NEOnDemandRuleConnect()]
                 manager.isOnDemandEnabled = true
 
+                let saveStarted = ProcessInfo.processInfo.systemUptime
+                Logger.network.noticeAndFile("[operation:\(operation)] Saving VPN configuration onDemand=true")
                 manager.saveToPreferences { error in
+                    self.logStage("VPN configuration save completed", operation: operation, since: saveStarted, error: error)
                     if let error = error {
                         if let neError = error as? NEVPNError,
                             neError.code == .configurationReadWriteFailed {
@@ -370,11 +400,11 @@ class VpnManager {
                         complete(nil, false)
                         return
                     }
-                    manager.loadFromPreferences {
-                        if $0 != nil {
-                            Logger.network.error(
-                                "loadFromPreferences \($0.debugDescription)"
-                            )
+                    let reloadStarted = ProcessInfo.processInfo.systemUptime
+                    Logger.network.noticeAndFile("[operation:\(operation)] Reloading VPN configuration")
+                    manager.loadFromPreferences { error in
+                        self.logStage("VPN configuration reload completed", operation: operation, since: reloadStarted, error: error)
+                        if error != nil {
                             // The saved on-demand profile still needs cleanup.
                             complete(manager, false)
                             return
@@ -408,11 +438,19 @@ extension VpnManager {
         appData.isRecovering = false
         #endif
         vpnStatus = .connecting
-        Logger.network.noticeAndFile("connect() operation \(token)")
+        connectionRequestedAt = ProcessInfo.processInfo.systemUptime
+        tunnelStartIssuedAt = nil
+        Logger.network.noticeAndFile("[operation:\(token)] Connection requested")
         #if os(macOS)
+        let activationStarted = ProcessInfo.processInfo.systemUptime
+        Logger.network.noticeAndFile("[operation:\(token)] Activating system extension")
         systemExtensionManager.ensureActivated { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
+                let activationError: Error?
+                if case .failure(let error) = result { activationError = error } else { activationError = nil }
+                self.logStage("System extension activation completed", operation: token,
+                    since: activationStarted, error: activationError)
                 guard self.connectionLifecycle.canStart(token) else {
                     self.connectionLifecycle.finishPreparation(token)
                     self.advanceConnection()
@@ -455,8 +493,15 @@ extension VpnManager {
                 do {
                     // Saving an on-demand profile may already have started it.
                     if manager.connection.status == .disconnected || manager.connection.status == .invalid {
+                        let issued = ProcessInfo.processInfo.systemUptime
+                        self.tunnelStartIssuedAt = issued
+                        Logger.network.noticeAndFile("[operation:\(token)] Calling startVPNTunnel status=\(manager.connection.status.rawValue)")
                         try manager.connection.startVPNTunnel()
-                    } else { self.updateVPNStatus(manager) }
+                        self.logStage("startVPNTunnel returned; waiting for system status", operation: token, since: issued)
+                    } else {
+                        Logger.network.noticeAndFile("[operation:\(token)] Adopting on-demand tunnel status=\(manager.connection.status.rawValue)")
+                        self.updateVPNStatus(manager)
+                    }
                 } catch {
                     Logger.network.errorAndFile("startVPNTunnel failed: \(error.localizedDescription)")
                     self.connectionFailurePending = true
@@ -477,7 +522,9 @@ extension VpnManager {
         systemExtensionManager.cancelActivationWait()
         #endif
         vpnStatus = .disconnecting
-        Logger.network.noticeAndFile("disconnect() operation \(token)")
+        connectionRequestedAt = nil
+        tunnelStartIssuedAt = nil
+        Logger.network.noticeAndFile("[operation:\(token)] Disconnection requested")
         // A pending save may still create an enabled profile. Wait for its
         // callback before loading or disabling anything.
         advanceConnection()
@@ -485,6 +532,8 @@ extension VpnManager {
 
     private func failConnect(_ token: UInt64) {
         guard connectionLifecycle.failConnect(token) else { return }
+        connectionRequestedAt = nil
+        tunnelStartIssuedAt = nil
         publishIdle()
         appData.connectionError = "Unable to connect. Check your network and server configuration."
     }
@@ -572,7 +621,10 @@ extension VpnManager {
                 }
                 if manager.isOnDemandEnabled {
                     manager.isOnDemandEnabled = false
+                    let disableStarted = ProcessInfo.processInfo.systemUptime
+                    Logger.network.noticeAndFile("[operation:\(token)] Disabling on-demand VPN configuration")
                     manager.saveToPreferences { error in
+                        self.logStage("On-demand disable completed", operation: token, since: disableStarted, error: error)
                         if let error {
                             DispatchQueue.main.async {
                                 guard self.connectionLifecycle.acceptsStop(token) else { return }
@@ -624,6 +676,7 @@ extension VpnManager {
     private func finishTunnelStop(_ token: UInt64, manager: NETunnelProviderManager) {
         guard connectionLifecycle.acceptsStop(token) else { return }
         if manager.connection.status != .disconnected && manager.connection.status != .invalid {
+            Logger.network.noticeAndFile("[operation:\(token)] Calling stopVPNTunnel status=\(manager.connection.status.rawValue)")
             manager.connection.stopVPNTunnel()
         }
         connectionLifecycle.finishTeardown(token)
@@ -843,6 +896,45 @@ extension VpnManager {
         return RouteCheck.assess(routes: routes, assignedIP: assignedIP)
     }
 
+    /// Returns false when the root provider is unavailable and its clear is
+    /// persisted for the next startup. Local files are still truncated now.
+    @MainActor
+    func clearLogs() async throws -> Bool {
+        logReadGeneration &+= 1
+        clearingLogFiles = true
+        defer { clearingLogFiles = false }
+        #if os(macOS)
+        let token = UUID().uuidString
+        logPreferences.set(token, forKey: "clearLogsToken")
+        logPreferences.set(true, forKey: "providerLogClearPending")
+        if let cache = extensionLogCacheURL, FileManager.default.fileExists(atPath: cache.path) {
+            try FileManager.default.removeItem(at: cache)
+        }
+        #endif
+        try FileLogger.shared.clearLogs()
+        #if os(macOS)
+        let cleared = await clearProviderLogs(token: token)
+        if cleared { logPreferences.set(false, forKey: "providerLogClearPending") }
+        return cleared
+        #else
+        return true
+        #endif
+    }
+
+    #if os(macOS)
+    @MainActor
+    private func clearProviderLogs(token: String) async -> Bool {
+        guard let status = activeVPN?.connection.status, status == .connected || status == .reasserting else { return false }
+        struct Command: Encodable { let command = "clearLogs"; let token: String }
+        guard let payload = try? JSONEncoder().encode(Command(token: token)) else { return false }
+        return await withCheckedContinuation { continuation in
+            sendProviderCommand("clearLogs", timeout: 3, payload: payload) { data in
+                continuation.resume(returning: data == Data([1]))
+            }
+        }
+    }
+    #endif
+
     #if os(macOS)
     /// The extension's log is trapped inside a sandboxed root daemon's
     /// container; the app can only obtain it over the provider-message
@@ -858,7 +950,19 @@ extension VpnManager {
 
     /// App log merged chronologically with the extension log (or its most
     /// recent cached copy when the provider is unreachable).
+    @MainActor
     func collectLogs() async -> String {
+        guard !clearingLogFiles else { return "" }
+        let generation = logReadGeneration
+        if logPreferences.bool(forKey: "providerLogClearPending") {
+            if let token = logPreferences.string(forKey: "clearLogsToken"), await clearProviderLogs(token: token) {
+                guard generation == logReadGeneration, !clearingLogFiles else { return "" }
+                logPreferences.set(false, forKey: "providerLogClearPending")
+            } else {
+                let local = await FileLogger.shared.readLogAsync() ?? ""
+                return generation == logReadGeneration && !clearingLogFiles ? local : ""
+            }
+        }
         async let appLog = FileLogger.shared.readLogAsync()
         let extensionLog: String? = await withCheckedContinuation { continuation in
             sendProviderCommand("logs") { data in
@@ -866,6 +970,7 @@ extension VpnManager {
             }
         }
         var parts = [await appLog ?? ""]
+        guard generation == logReadGeneration, !clearingLogFiles else { return "" }
         if let extensionLog, !extensionLog.isEmpty {
             if let cache = extensionLogCacheURL {
                 try? extensionLog.write(to: cache, atomically: true, encoding: .utf8)
@@ -880,8 +985,12 @@ extension VpnManager {
     }
     #else
     /// iOS app and extension already share the same log file.
+    @MainActor
     func collectLogs() async -> String {
-        await FileLogger.shared.readLogAsync() ?? ""
+        guard !clearingLogFiles else { return "" }
+        let generation = logReadGeneration
+        let text = await FileLogger.shared.readLogAsync() ?? ""
+        return generation == logReadGeneration && !clearingLogFiles ? text : ""
     }
     #endif
 

@@ -28,7 +28,7 @@ struct MacosMenuView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var hoveringConnection = false
     private enum Action: CaseIterable { case connection, diagnostics, settings, quit }
-    @State private var focusedAction: Action? = .connection
+    @State private var focusedAction: Action?
 
     var body: some View {
         VStack(alignment: .leading, spacing: appData.vpnStatus == .disconnected ? 8 : 12) {
@@ -115,6 +115,7 @@ struct MacosMenuView: View {
             return true
         }
         .onExitCommand { dismiss() }
+        .onAppear { focusedAction = nil }
         .onChange(of: appData.showConfigureGuide) { _, show in
             if show {
                 appData.showConfigureGuide = false

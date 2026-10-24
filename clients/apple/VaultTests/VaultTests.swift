@@ -762,3 +762,57 @@ extension VaultTests {
     }
 }
 #endif
+
+@MainActor
+private final class LogControlTestManager: RuntimeLogStore {
+    var logReply: CheckedContinuation<String, Never>?
+    var onLogRead: (() -> Void)?
+    var clearComplete = true
+    var clearError: Error?
+    func collectLogs() async -> String {
+        await withCheckedContinuation { continuation in
+            logReply = continuation
+            onLogRead?()
+        }
+    }
+    func clearLogs() async throws -> Bool {
+        if let clearError { throw clearError }
+        return clearComplete
+    }
+}
+
+extension VaultTests {
+    @MainActor
+    func testClearLogsDiscardsInFlightRefresh() async throws {
+        let controller = LogControlTestManager()
+        let model = DiagnosticsViewModel()
+        let reading = expectation(description: "old logs reading")
+        controller.onLogRead = { reading.fulfill() }
+        let refresh = Task { await model.refreshLogs(using: controller) }
+        await fulfillment(of: [reading], timeout: 2)
+        await model.clearLogs(using: controller)
+        controller.logReply?.resume(returning: "old file contents")
+        controller.logReply = nil
+        let resumed = expectation(description: "old refresh resumed after clear")
+        DispatchQueue.main.async { resumed.fulfill() }
+        await fulfillment(of: [resumed], timeout: 2)
+        XCTAssertEqual(model.logText, "")
+        refresh.cancel()
+        await refresh.value
+        XCTAssertFalse(model.clearingLogs)
+        XCTAssertNil(model.logMessage)
+    }
+
+    @MainActor
+    func testClearLogsReportsDeferredProviderAndErrors() async throws {
+        let controller = LogControlTestManager()
+        let model = DiagnosticsViewModel()
+        controller.clearComplete = false
+        await model.clearLogs(using: controller)
+        XCTAssertEqual(model.logMessage, "Local logs cleared. Provider logs will be cleared on the next connection.")
+        controller.clearError = CocoaError(.fileWriteNoPermission)
+        await model.clearLogs(using: controller)
+        XCTAssertEqual(model.logMessage, "Unable to clear all log files. Please try again.")
+        XCTAssertFalse(model.clearingLogs)
+    }
+}

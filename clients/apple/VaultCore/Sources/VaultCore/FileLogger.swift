@@ -29,7 +29,20 @@ public final class FileLogger: @unchecked Sendable {
 
     /// Short tag identifying the process that wrote a line ("app", "ne").
     /// Set as early as possible in each process.
-    public var processTag = "app"
+    private var tag = ["appex", "systemextension"].contains(Bundle.main.bundleURL.pathExtension) ? "ne" : "app"
+    private let tagLock = NSLock()
+    public var processTag: String {
+        get {
+            tagLock.lock()
+            defer { tagLock.unlock() }
+            return tag
+        }
+        set {
+            tagLock.lock()
+            tag = newValue
+            tagLock.unlock()
+        }
+    }
 
     private init() {
         let start = Date()
@@ -63,10 +76,33 @@ public final class FileLogger: @unchecked Sendable {
         )
     }
 
+    init(logDirectory: URL) throws {
+        try FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
+        logFileURL = logDirectory.appendingPathComponent("vault.log")
+        prevLogFileURL = logDirectory.appendingPathComponent("vault.prev.log")
+    }
+
+    /// Drain queued Swift writes, then truncate both generations in place.
+    /// O_APPEND writers can keep logging new events after the clear finishes.
+    public func clearLogs() throws {
+        try queue.sync {
+            guard let current = logFileURL, let previous = prevLogFileURL else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            for url in [current, previous] {
+                let fd = url.path.withCString { open($0, O_WRONLY | O_CREAT | O_TRUNC, 0o644) }
+                guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+                close(fd)
+            }
+        }
+    }
+
     /// Append a single line to the shared log file. Thread-safe.
     public func log(_ message: String, level: String = "INFO") {
+        let timestamp = Date()
+        let source = processTag
         queue.async { [weak self] in
-            self?.writeLine(message, level: level)
+            self?.writeLine(message, level: level, source: source, timestamp: timestamp)
         }
     }
 
@@ -75,25 +111,33 @@ public final class FileLogger: @unchecked Sendable {
     /// returns — an async write would lose exactly the lines that explain
     /// why the tunnel went away.
     public func logSync(_ message: String, level: String = "INFO") {
+        let timestamp = Date()
+        let source = processTag
         queue.sync {
-            self.writeLine(message, level: level)
+            self.writeLine(message, level: level, source: source, timestamp: timestamp)
         }
     }
 
-    private func writeLine(_ message: String, level: String) {
+    private func writeLine(_ message: String, level: String, source: String, timestamp: Date) {
         guard let url = self.logFileURL else { return }
 
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS'Z'"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        let timestamp = formatter.string(from: Date())
-
-        let line = "[\(timestamp)] [\(level)] [\(self.processTag)] \(message)\n"
+        let line = Self.formattedRecord(message, level: level, source: source, timestamp: timestamp)
         guard let data = line.data(using: .utf8) else { return }
 
         self.rotateIfNeeded(url: url)
         self.append(data: data, to: url)
+    }
+
+    static func formattedRecord(_ message: String, level: String, source: String, timestamp: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS'Z'"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        let time = formatter.string(from: timestamp)
+        let severity = level == "WARN" ? "WARNING" : level
+        return message.components(separatedBy: "\n").map {
+            "[\(time)] [\(severity)] [\(source)] \($0)\n"
+        }.joined()
     }
 
     /// Path of the current log file, or nil if the App Group is unavailable.
@@ -107,7 +151,7 @@ public final class FileLogger: @unchecked Sendable {
         let parts = [prevLogFileURL, logFileURL].compactMap {
             $0.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
         }
-        return parts.isEmpty ? nil : parts.joined()
+        return parts.isEmpty ? nil : Self.mergeChronologically(parts)
     }
 
     /// Read the entire log on a background thread so large files do not
@@ -173,7 +217,27 @@ public final class FileLogger: @unchecked Sendable {
             converted[value] = key
             return key
         }
-        let lines = parts.flatMap { $0.split(separator: "\n", omittingEmptySubsequences: true) }
+        let lines = parts.flatMap { $0.split(separator: "\n", omittingEmptySubsequences: true) }.map { raw in
+            var line = raw
+            if line.hasPrefix("[[") {
+                while line.hasPrefix("[[") { line = line.dropFirst() }
+                guard let end = line.firstIndex(of: "]") else { return raw }
+                let value = line[line.index(after: line.startIndex)..<end]
+                guard utc.date(from: String(value.hasSuffix("Z") ? value.dropLast() : value)) != nil else { return raw }
+            }
+            // Older Rust logs put the source before an unbracketed severity.
+            if let end = line.firstIndex(of: "]") {
+                let tail = line[line.index(after: end)...].trimmingCharacters(in: .whitespaces)
+                if tail.hasPrefix("[rust] ") {
+                    let fields = tail.dropFirst(7).split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
+                    if fields.count == 2, ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"].contains(String(fields[0])) {
+                        let level = fields[0] == "WARN" ? "WARNING" : String(fields[0])
+                        return Substring("\(line[...end]) [\(level)] [rust] \(fields[1])")
+                    }
+                }
+            }
+            return line
+        }
         struct Entry {
             let index: Int
             let line: Substring

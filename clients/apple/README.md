@@ -51,6 +51,27 @@ request/progress model and result interpretation:
 - ICMP is informational. Missing replies do not establish packet loss or an MTU
   fault. These checks are not a comprehensive IPv6 or DNS-leak audit.
 
+File records use `[YYYY-MM-DD HH:mm:ss.SSSZ] [LEVEL] [SOURCE] message`:
+UTC timestamps, bracketed severity, and `app`, `ne`, or `rust` as the source.
+Runtime Logs also normalize older Rust severity fields and repair duplicated
+opening timestamp brackets before chronological merging.
+
+The Clear Logs button truncates the current and previous log files, clears the
+macOS provider-log cache, and invalidates in-flight UI refreshes. On macOS, an
+unavailable root provider is marked for clearing on the next connection; the UI
+reports this explicitly and excludes its old cache until clearing is confirmed.
+New events can appear after clearing while the VPN remains active.
+
+Connection logs include an app operation ID and provider session ID. Timings in
+`durationMs` cover system-extension activation, profile load/save/reload,
+`startVPNTunnel`, DNS resolution, Edge initialization, and network settings.
+The provider logs its process ID, the system-extension main entry,
+`startSystemExtensionMode`, provider instance creation, callback arrival, and the
+delay to its main queue. Exit logs identify the process. A quick `exit(0)` followed
+by a restart can trigger launchd's respawn throttle; confirm this in launchd's
+system log (`service spawn deferred ... due to throttle`) rather than attributing
+the entire pre-callback gap to process initialization.
+
 Logs are under Diagnostics → Runtime Logs. iOS follows new entries automatically;
 macOS also offers search, source filters, optional auto-scroll and Copy. macOS
 fetches the system extension's log over provider messages and caches it for

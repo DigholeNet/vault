@@ -1061,6 +1061,46 @@
         }
       }
     },
+    "Clear" : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空"
+          }
+        }
+      }
+    },
+    "Clearing…" : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在清空…"
+          }
+        }
+      }
+    },
+    "Local logs cleared. Provider logs will be cleared on the next connection." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地日志已清空，扩展日志将在下次连接时清空。"
+          }
+        }
+      }
+    },
+    "Unable to clear all log files. Please try again." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能清空全部日志文件，请重试。"
+          }
+        }
+      }
+    },
     "Copy" : {
       "localizations" : {
         "zh-Hans" : {

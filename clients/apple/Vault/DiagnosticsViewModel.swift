@@ -2,6 +2,13 @@ import Foundation
 import Combine
 import VaultCore
 
+protocol RuntimeLogStore {
+    @MainActor func collectLogs() async -> String
+    @MainActor func clearLogs() async throws -> Bool
+}
+
+extension VpnManager: RuntimeLogStore {}
+
 /// Both apps use the same request, progress and log refresh lifecycle.
 @MainActor
 final class DiagnosticsViewModel: ObservableObject {
@@ -14,6 +21,9 @@ final class DiagnosticsViewModel: ObservableObject {
     @Published private(set) var logText = ""
     @Published private(set) var loadingLogs = false
 
+    @Published private(set) var clearingLogs = false
+    @Published private(set) var logMessage: String?
+    private var logGeneration: UInt64 = 0
     private var generation: UInt64 = 0
 
     var passed: Bool { DiagnosticsPresentation.passed(result) }
@@ -55,14 +65,35 @@ final class DiagnosticsViewModel: ObservableObject {
         manager.cancelDiagnostics()
     }
 
-    func refreshLogs(using manager: VpnManager) async {
+    func clearLogs(using manager: any RuntimeLogStore) async {
+        guard !clearingLogs else { return }
+        clearingLogs = true
+        logGeneration &+= 1
+        logText = ""
+        loadingLogs = false
+        logMessage = nil
+        defer { clearingLogs = false }
+        do {
+            let complete = try await manager.clearLogs()
+            if !complete { logMessage = "Local logs cleared. Provider logs will be cleared on the next connection." }
+        } catch {
+            logMessage = "Unable to clear all log files. Please try again."
+        }
+    }
+
+    func refreshLogs(using manager: any RuntimeLogStore) async {
         loadingLogs = logText.isEmpty
         defer { loadingLogs = false }
         while !Task.isCancelled {
-            let text = await manager.collectLogs()
-            guard !Task.isCancelled else { return }
-            logText = text
-            loadingLogs = false
+            let token = logGeneration
+            if !clearingLogs {
+                let text = await manager.collectLogs()
+                guard !Task.isCancelled else { return }
+                if token == logGeneration, !clearingLogs {
+                    logText = text
+                    loadingLogs = false
+                }
+            }
             do { try await Task.sleep(for: .seconds(2)) }
             catch { return }
         }

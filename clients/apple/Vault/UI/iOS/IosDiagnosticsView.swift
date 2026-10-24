@@ -151,6 +151,14 @@ struct IosDiagnosticsView: View {
                 LogTextView(text: model.logText)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
+            if let message = model.logMessage { Text(tr(message)).font(.caption).foregroundStyle(.secondary) }
+            HStack {
+                Spacer()
+                Button(tr(model.clearingLogs ? "Clearing…" : "Clear")) {
+                    Task { await model.clearLogs(using: vpnManager) }
+                }.disabled(model.clearingLogs)
+                Button(tr("Copy")) { UIPasteboard.general.string = model.logText }.disabled(model.logText.isEmpty)
+            }
         }.padding(.horizontal).padding(.bottom, 12)
     }
 }

@@ -67,6 +67,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var stopRequested = false
     /// The server watchdog only applies once startTunnel succeeded.
     private var startFinished = false
+    private var startupBeganAt: TimeInterval?
     /// Diagnostic: counts startTunnel invocations per extension process.
     private static var startTunnelCallCount = 0
     private var superNodeIp: String = ""
@@ -93,11 +94,34 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// lines can be matched to the same session.
     private let sessionID = String(UUID().uuidString.prefix(8))
 
+    override init() {
+        super.init()
+        FileLogger.shared.logSync("[session:\(sessionID)] Provider instance initialized pid=\(ProcessInfo.processInfo.processIdentifier)", level: "NOTICE")
+    }
+
+    private func clearLogsIfNeeded(_ token: String?) throws {
+        guard let token, !token.isEmpty,
+            UserDefaults.standard.string(forKey: "lastClearedLogToken") != token else { return }
+        try FileLogger.shared.clearLogs()
+        UserDefaults.standard.set(token, forKey: "lastClearedLogToken")
+    }
+
     override func startTunnel(
         options: [String: NSObject]?,
         completionHandler: @escaping (Error?) -> Void
     ) {
+        let received = ProcessInfo.processInfo.systemUptime
+        if let proto = protocolConfiguration as? NETunnelProviderProtocol {
+            do { try clearLogsIfNeeded(proto.providerConfiguration?["clearLogsToken"] as? String) }
+            catch { FileLogger.shared.logSync("Deferred log clear failed: \(error)", level: "ERROR") }
+        }
+        FileLogger.shared.logSync(
+            "[session:\(sessionID)] startTunnel callback received pid=\(ProcessInfo.processInfo.processIdentifier)",
+            level: "NOTICE"
+        )
         DispatchQueue.main.async {
+            let delayMs = Int(((ProcessInfo.processInfo.systemUptime - received) * 1000).rounded())
+            Logger.network.noticeAndFile("[session:\(self.sessionID)] startTunnel main queue entered callbackToMainMs=\(delayMs)")
             self.startTunnelOnMain(options: options, completionHandler: completionHandler)
         }
     }
@@ -118,6 +142,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             completionHandler(ConfigurationError.invalidConfiguration("start in progress"))
             return
         }
+        startupBeganAt = ProcessInfo.processInfo.systemUptime
         let pending = PendingStart(completion: completionHandler)
         pendingStart = pending
         FileLogger.shared.processTag = "ne"
@@ -246,7 +271,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
                 return
             }
+            let resolveStarted = ProcessInfo.processInfo.systemUptime
+            Logger.network.noticeAndFile("[session:\(self.sessionID)] Resolving supernode hostname")
             let candidates = self.resolveAllAddresses(host)
+            let resolveMs = Int(((ProcessInfo.processInfo.systemUptime - resolveStarted) * 1000).rounded())
+            Logger.network.noticeAndFile("[session:\(self.sessionID)] Hostname resolution completed durationMs=\(resolveMs) candidates=\(candidates.count)")
             DispatchQueue.main.async {
                 guard !self.stopRequested, self.pendingStart === pending,
                     pending.isPending else { return }
@@ -302,6 +331,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// A superseded instance must never terminate its replacement's process.
     private func exitIfUnowned() {
         guard Self.activeProvider == nil, Self.startOwner == nil else { return }
+        FileLogger.shared.logSync(
+            "[session:\(sessionID)] Exiting extension process pid=\(ProcessInfo.processInfo.processIdentifier); rapid restart may be throttled by launchd",
+            level: "NOTICE"
+        )
         exit(0)
     }
 
@@ -343,6 +376,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 host: host,
                 port: port
             )
+            let edgeStarted = ProcessInfo.processInfo.systemUptime
             let edge = try Edge(
                 config: config,
                 id: id,
@@ -374,7 +408,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
             )
             self.edge = edge
-            Logger.network.noticeAndFile("[session:\(self.sessionID)] Init edge successfully")
+            let edgeMs = Int(((ProcessInfo.processInfo.systemUptime - edgeStarted) * 1000).rounded())
+            Logger.network.noticeAndFile("[session:\(self.sessionID)] Edge initialized durationMs=\(edgeMs); awaiting IP assignment")
         } catch {
             Logger.network.errorAndFile(
                 "[session:\(self.sessionID)] Edge init failed: \(error.localizedDescription)"
@@ -431,7 +466,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             Self.activeProvider = self
             self.startNetworkMonitoring()
             UserDefaults.standard.set(0, forKey: Self.startFailCountKey)
-            Logger.network.noticeAndFile("[session:\(self.sessionID)] startTunnel completed")
+            let now = ProcessInfo.processInfo.systemUptime
+            let startupMs = Int(((now - (startupBeganAt ?? now)) * 1000).rounded())
+            Logger.network.noticeAndFile("[session:\(self.sessionID)] startTunnel completed durationMs=\(startupMs)")
         }
         // On failure, tear down the Edge immediately instead of leaving the
         // core reconnecting with exponential backoff (1s up to 60s) until
@@ -948,12 +985,17 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             excludedV6Addresses.isEmpty ? nil : excludedV6Addresses
         )
 
+        let settingsStarted = ProcessInfo.processInfo.systemUptime
+        Logger.network.noticeAndFile("[session:\(self.sessionID)] Applying tunnel network settings sequence=\(configurationSequence)")
         setTunnelNetworkSettings(settings) { [weak self] error in
             // Serialize with the handshake-timeout work item on the main
             // queue so finishStart cannot race with it.
             DispatchQueue.main.async {
                 guard let self = self, !self.stopRequested,
                     self.networkConfigurationSequence == configurationSequence else { return }
+
+                let settingsMs = Int(((ProcessInfo.processInfo.systemUptime - settingsStarted) * 1000).rounded())
+                Logger.network.noticeAndFile("[session:\(self.sessionID)] Network settings completed durationMs=\(settingsMs) sequence=\(configurationSequence) success=\(error == nil)")
 
                 // Reconnect path: apply possibly-changed settings to the
                 // live tunnel instead of leaving it routed at the old IP.
@@ -995,9 +1037,17 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         _ messageData: Data,
         completionHandler: ((Data?) -> Void)? = nil
     ) {
-        struct Command: Codable { var command: String }
+        struct Command: Codable { var command: String; var token: String? }
         if let command = try? JSONDecoder().decode(Command.self, from: messageData) {
             switch command.command {
+            case "clearLogs":
+                DispatchQueue.main.async {
+                    guard let token = command.token, !token.isEmpty else { completionHandler?(Data([0])); return }
+                    do {
+                        try self.clearLogsIfNeeded(token)
+                        completionHandler?(Data([1]))
+                    } catch { completionHandler?(Data([0])) }
+                }
             case "startupStatus":
                 DispatchQueue.main.async {
                     let started = !self.stopRequested && (self.pendingStart != nil || self.startFinished)

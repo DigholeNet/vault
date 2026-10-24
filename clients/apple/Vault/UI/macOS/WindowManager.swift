@@ -20,8 +20,8 @@ final class WindowManager {
                     .environmentObject(appData).environmentObject(LanguageManager.shared))
         }
         factories["status"] = { [unowned self] in
-            makeWindow(id: "status", title: "Diagnostics & Logs", size: NSSize(width: 760, height: 600),
-                minimum: NSSize(width: 620, height: 480), content:
+            makeWindow(id: "status", title: "Diagnostics & Logs", size: NSSize(width: 960, height: 720),
+                minimum: NSSize(width: 960, height: 720), content:
                     MacosStatusView(vpnManager: vpnManager)
                     .environmentObject(appData).environmentObject(config).environmentObject(LanguageManager.shared))
         }
@@ -46,8 +46,9 @@ final class WindowManager {
         window.minSize = minimum
         window.isReleasedWhenClosed = false
         window.contentViewController = NSHostingController(rootView: content)
-        if !window.setFrameUsingName("vault-\(id)-v2") { window.center() }
-        window.setFrameAutosaveName("vault-\(id)-v2")
+        let frameName = "vault-\(id)-\(id == "status" ? "v3" : "v2")"
+        if !window.setFrameUsingName(frameName) { window.center() }
+        window.setFrameAutosaveName(frameName)
         return NSWindowController(window: window)
     }
 

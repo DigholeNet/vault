@@ -51,6 +51,14 @@ struct MacosStatusView: View {
                     Toggle(languageManager.tr("Auto-scroll"), isOn: $followsTail).toggleStyle(.switch).controlSize(.small)
                 }
                 Spacer()
+                if tab == 1 {
+                    if let message = model.logMessage {
+                        Text(languageManager.tr(message)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Button(languageManager.tr(model.clearingLogs ? "Clearing…" : "Clear")) {
+                        Task { await model.clearLogs(using: vpnManager) }
+                    }.disabled(model.clearingLogs)
+                }
                 Button(languageManager.tr("Copy")) { copy(tab == 0 ? diagnosticText : filteredLogs) }
                     .disabled(tab == 0 ? result == nil : filteredLogs.isEmpty)
             }.padding(16)

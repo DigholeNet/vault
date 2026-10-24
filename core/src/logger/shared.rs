@@ -40,11 +40,29 @@ pub fn append(line: &str) {
         return;
     };
     use std::io::Write;
-    let _ = writeln!(file, "[{}] [rust] {line}", utc_timestamp());
+    // Format first: writeln! can issue separate writes for the timestamp,
+    // prefix and message, allowing Swift appends to split a Rust record.
+    let record = format_record(&utc_timestamp(), line);
+    let _ = file.write_all(record.as_bytes());
 }
 
-/// UTC timestamp matching the platform file loggers' line format (which use
-/// local time); the trailing Z marks these lines as UTC.
+fn format_record(timestamp: &str, line: &str) -> String {
+    let line = line.trim();
+    let (level, message) = match line.split_once(char::is_whitespace) {
+        Some(("WARN", message)) => ("WARNING", message.trim_start()),
+        Some((level @ ("TRACE" | "DEBUG" | "INFO" | "ERROR"), message)) => {
+            (level, message.trim_start())
+        }
+        Some(("[PANIC]", message)) => ("ERROR", message.trim_start()),
+        _ => ("INFO", line),
+    };
+    message
+        .lines()
+        .map(|message| format!("[{timestamp}] [{level}] [rust] {message}\n"))
+        .collect()
+}
+
+/// UTC timestamp matching the Apple file logger's format.
 fn utc_timestamp() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -103,25 +121,42 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for TraceLogWriter {
     type Writer = TraceLineWriter;
 
     fn make_writer(&'a self) -> Self::Writer {
-        TraceLineWriter
+        TraceLineWriter::default()
     }
 }
 
-/// Line-oriented so partially written records do not produce half lines.
-pub struct TraceLineWriter;
+/// Buffer fragmented formatter writes until a complete record is available.
+#[derive(Default)]
+pub struct TraceLineWriter {
+    buffer: Vec<u8>,
+}
 
 impl std::io::Write for TraceLineWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let line = String::from_utf8_lossy(buf);
-        let line = line.trim_end();
-        if !line.is_empty() {
-            append(line);
+        self.buffer.extend_from_slice(buf);
+        while let Some(end) = self.buffer.iter().position(|byte| *byte == b'\n') {
+            let bytes: Vec<u8> = self.buffer.drain(..=end).collect();
+            let line = String::from_utf8_lossy(&bytes);
+            if !line.trim().is_empty() {
+                append(line.trim_end());
+            }
         }
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+impl Drop for TraceLineWriter {
+    fn drop(&mut self) {
+        if !self.buffer.is_empty() {
+            let line = String::from_utf8_lossy(&self.buffer);
+            if !line.trim().is_empty() {
+                append(line.trim_end());
+            }
+        }
     }
 }
 
@@ -139,10 +174,56 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         set_path(path.to_str().unwrap());
         append("hello from test");
+        use std::io::Write;
+        let mut writer = TraceLineWriter::default();
+        writer.write_all(b" WA").unwrap();
+        writer.write_all(b"RN fragmented ").unwrap();
+        writer.write_all(b"record\n").unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("[rust] hello from test"));
-        assert!(content.contains("Z] [rust]"));
+        assert_eq!(content.lines().count(), 2);
+        assert!(content.contains("[WARNING] [rust] fragmented record"));
+        assert!(content.contains("[INFO] [rust] hello from test"));
+        assert!(content.contains("Z] [INFO] [rust]"));
+        // Model the Swift writer appending whole records while Rust logs.
+        let swift_path = path.clone();
+        let swift = std::thread::spawn(move || {
+            let mut file = OpenOptions::new().append(true).open(swift_path).unwrap();
+            for _ in 0..200 {
+                file.write_all(b"[2026-10-24 11:07:49.001Z] [NOTICE] [ne] Swift record\n")
+                    .unwrap();
+            }
+        });
+        for _ in 0..200 {
+            append("INFO Rust record");
+        }
+        swift.join().unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content.lines().count(), 402);
+        for line in content.lines().skip(2) {
+            assert!(
+                line.ends_with("[NOTICE] [ne] Swift record")
+                    || line.ends_with("[INFO] [rust] Rust record")
+            );
+            assert!(!line.starts_with("[["));
+            assert_eq!(line.matches("Z]").count(), 1);
+        }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn record_format_matches_platform_and_prefixes_multiline_messages() {
+        let timestamp = "2026-10-24 11:07:49.001Z";
+        assert_eq!(
+            format_record(timestamp, " INFO Heartbeat ping sent"),
+            "[2026-10-24 11:07:49.001Z] [INFO] [rust] Heartbeat ping sent\n"
+        );
+        assert_eq!(
+            format_record(timestamp, "WARN failed\ndetails"),
+            "[2026-10-24 11:07:49.001Z] [WARNING] [rust] failed\n[2026-10-24 11:07:49.001Z] [WARNING] [rust] details\n"
+        );
+        assert!(
+            format_record(timestamp, "[PANIC] test panic").contains("[ERROR] [rust] test panic")
+        );
     }
 
     #[test]

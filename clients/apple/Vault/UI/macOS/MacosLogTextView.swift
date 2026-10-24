@@ -10,7 +10,7 @@ struct LogTextView: NSViewRepresentable {
         let scroll = NSTextView.scrollableTextView()
         if let view = scroll.documentView as? NSTextView {
             view.isEditable = false; view.isSelectable = true
-            view.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            view.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             view.textContainerInset = NSSize(width: 12, height: 12)
             view.backgroundColor = .textBackgroundColor
         }
