@@ -244,13 +244,7 @@ struct MacosMenuView: View {
             vpnManager.disconnect()
         } else {
             if config.host.isEmpty || config.password.isEmpty { open("configure"); return }
-            vpnManager.connect {
-                DispatchQueue.main.async {
-                    appData.vpnOn = false
-                    appData.vpnStatus = .off
-                    if appData.connectionError == nil { appData.connectionError = "Unable to connect. Check your network and server configuration." }
-                }
-            }
+            vpnManager.connect()
         }
     }
     private func open(_ id: String) { dismiss(); WindowManager.shared.showWindow(withIdentifier: id) }

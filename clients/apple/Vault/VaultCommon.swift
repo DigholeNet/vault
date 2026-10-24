@@ -25,7 +25,7 @@ enum VpnStatusUtil {
 }
 
 class AppData: ObservableObject {
-    @Published var vpnOn: Bool = false
+    var vpnOn: Bool { vpnStatus == .on || vpnStatus == .connecting }
     @Published var vpnStatus: VpnStatus = VpnStatus.off
     /// Set when the user tries to connect without server configuration;
     /// the UI should guide them to the configure page.
@@ -33,8 +33,9 @@ class AppData: ObservableObject {
 
     @Published var connectedSince: Date?
 
-    #if os(macOS)
     @Published var connectionError: String?
+
+    #if os(macOS)
     @Published var isRecovering = false
     #endif
 
@@ -44,9 +45,7 @@ class AppData: ObservableObject {
     @Published var bytesSent: UInt64 = 0
     @Published var bytesReceived: UInt64 = 0
 
-    // Packet rates (per second)
-    @Published var packetsSentPerSecond: UInt64 = 0
-    @Published var packetsReceivedPerSecond: UInt64 = 0
+    // Byte rates (per second)
     @Published var bytesSentPerSecond: UInt64 = 0
     @Published var bytesReceivedPerSecond: UInt64 = 0
 
@@ -102,8 +101,6 @@ class AppData: ObservableObject {
         packetsReceived = 0
         bytesSent = 0
         bytesReceived = 0
-        packetsSentPerSecond = 0
-        packetsReceivedPerSecond = 0
         bytesSentPerSecond = 0
         bytesReceivedPerSecond = 0
     }
@@ -127,17 +124,6 @@ class AppData: ObservableObject {
     }
 
     private func applyStats(_ stats: PacketStats.Stats) {
-        // Packet rates: the core does not track per-second packet rates, so
-        // keep diffing snapshots for these (totals only are shown in the UI).
-        // The counters go backwards when the network extension restarts and
-        // resets them per session — plain UInt64 subtraction would trap.
-        // Treat a regression as a new session: report 0 and reseed.
-        packetsSentPerSecond =
-            stats.packetsSent >= previousStats.packetsSent
-            ? stats.packetsSent - previousStats.packetsSent : 0
-        packetsReceivedPerSecond =
-            stats.packetsReceived >= previousStats.packetsReceived
-            ? stats.packetsReceived - previousStats.packetsReceived : 0
         // Byte rates come straight from the Rust core's own speed calculation.
         bytesSentPerSecond = stats.bytesSentPerSecond
         bytesReceivedPerSecond = stats.bytesReceivedPerSecond
@@ -195,6 +181,7 @@ class VaultConfig: ObservableObject {
     /// The extension reads that saved profile, not this app's Keychain item.
     @Published var password: String = "" {
         didSet {
+            guard !updatingSavedPassword else { return }
             passwordNeedsReload = false
             persistPassword()
         }
@@ -202,6 +189,7 @@ class VaultConfig: ObservableObject {
     @Published var passwordStorageError: String?
     private let passwords: PasswordPersistence
     private var passwordNeedsReload = false
+    private var updatingSavedPassword = false
 
     init() {
         passwords = PasswordPersistence(
@@ -239,6 +227,28 @@ class VaultConfig: ObservableObject {
         } catch {
             Logger.network.error("Password reload failed: \(error.localizedDescription)")
         }
+    }
+
+    @discardableResult
+    func saveConnection(host: String, port: Int, password: String) -> Bool {
+        if password != self.password {
+            do {
+                try passwords.save(password)
+            } catch {
+                passwordStorageError = "Password could not be saved or loaded. Please try again."
+                Logger.network.error("Password storage failed: \(error.localizedDescription)")
+                return false
+            }
+            // The credential is already saved; avoid a second Keychain write.
+            updatingSavedPassword = true
+            self.password = password
+            updatingSavedPassword = false
+            passwordNeedsReload = false
+            passwordStorageError = nil
+        } else if passwordStorageError != nil { return false }
+        self.host = host
+        self.port = port
+        return true
     }
 
     func persistPassword() {

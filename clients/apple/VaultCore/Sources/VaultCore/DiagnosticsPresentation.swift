@@ -37,7 +37,8 @@ public enum DiagnosticsPresentation {
 
     public static func filteredLogs(_ text: String, source: String, search: String) -> String {
         text.components(separatedBy: "\n").filter {
-            (source == "all" || $0.contains("[\(source)]"))
+            // Rust core records are written by the tunnel provider.
+            (source == "all" || $0.contains("[\(source)]") || (source == "ne" && $0.contains("[rust]")))
                 && (search.isEmpty || $0.localizedCaseInsensitiveContains(search))
         }.joined(separator: "\n")
     }

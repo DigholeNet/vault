@@ -84,8 +84,9 @@ public final class FileLogger: @unchecked Sendable {
         guard let url = self.logFileURL else { return }
 
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-        formatter.timeZone = TimeZone.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS'Z'"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
         let timestamp = formatter.string(from: Date())
 
         let line = "[\(timestamp)] [\(level)] [\(self.processTag)] \(message)\n"
@@ -151,16 +152,43 @@ public final class FileLogger: @unchecked Sendable {
         }
     }
 
-    /// Merge log parts written by different processes into one chronological
-    /// text. Every line starts with "[yyyy-MM-dd HH:mm:ss.SSS]", which sorts
-    /// lexicographically; the sort is stable, so same-millisecond lines keep
-    /// their per-process order.
-    public static func mergeChronologically(_ parts: [String]) -> String {
-        parts
-            .flatMap { $0.split(separator: "\n", omittingEmptySubsequences: true) }
-            .sorted()
-            .joined(separator: "\n")
+    /// Compare UTC timestamps, converting older Swift logs from local time.
+    /// Equal timestamps retain input order, including each process's own order.
+    public static func mergeChronologically(_ parts: [String], legacyTimeZone: TimeZone = .current) -> String {
+        let local = DateFormatter()
+        local.locale = Locale(identifier: "en_US_POSIX")
+        local.timeZone = legacyTimeZone
+        local.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+        let utc = DateFormatter()
+        utc.locale = local.locale
+        utc.timeZone = TimeZone(secondsFromGMT: 0)
+        utc.dateFormat = local.dateFormat
+        var converted: [String: String] = [:]
+        func timestamp(_ line: Substring) -> String {
+            guard line.first == "[", let end = line.firstIndex(of: "]") else { return "" }
+            let value = String(line[line.index(after: line.startIndex)..<end])
+            if value.hasSuffix("Z") { return String(value.dropLast()) }
+            if let cached = converted[value] { return cached }
+            let key = local.date(from: value).map { utc.string(from: $0) } ?? value
+            converted[value] = key
+            return key
+        }
+        let lines = parts.flatMap { $0.split(separator: "\n", omittingEmptySubsequences: true) }
+        struct Entry {
+            let index: Int
+            let line: Substring
+            let time: String
+        }
+        var entries: [Entry] = []
+        for (index, line) in lines.enumerated() {
+            entries.append(Entry(index: index, line: line, time: timestamp(line)))
+        }
+        entries.sort { lhs, rhs in
+            lhs.time == rhs.time ? lhs.index < rhs.index : lhs.time < rhs.time
+        }
+        return entries.map { String($0.line) }.joined(separator: "\n")
     }
+
 }
 
 public extension Logger {

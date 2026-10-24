@@ -209,8 +209,8 @@ struct MacosConfigureView: View {
             if let error = config.passwordStorageError {
                 Section {
                     Text(languageManager.tr(error)).foregroundStyle(.red)
-                    Button(languageManager.tr("Retry")) { config.retryPasswordStorage() }
-                        .macosKeyboardAction(focus: $keyboardControl, id: .retryPassword) { config.retryPasswordStorage() }
+                    Button(languageManager.tr("Retry"), action: retryPasswordStorage)
+                        .macosKeyboardAction(focus: $keyboardControl, id: .retryPassword) { retryPasswordStorage() }
                 }
             }
         }
@@ -340,7 +340,7 @@ struct MacosConfigureView: View {
         case .copyV4: if let ip = config.ip.parsedIPv4AndIPv6().ipv4 { copy(ip) }
         case .copyV6: if let ip = config.ip.parsedIPv4AndIPv6().ipv6 { copy(ip) }
         case .copyID: copy(config.id)
-        case .retryPassword: config.retryPasswordStorage()
+        case .retryPassword: retryPasswordStorage()
         case .restore: confirmReset = true
         case .save: save()
         default: break
@@ -363,6 +363,14 @@ struct MacosConfigureView: View {
     private func copy(_ text: String) {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
     }
+    private func retryPasswordStorage() {
+        let unchanged = password == config.password
+        config.retryPasswordStorage()
+        if unchanged, config.passwordStorageError == nil {
+            password = config.password
+        }
+    }
+
     private func save() {
         feedback = nil; isError = true
         switch page {
@@ -376,10 +384,10 @@ struct MacosConfigureView: View {
                 feedback = "Port must be a number between 1 and 65535."; return
             }
             guard !password.isEmpty else { feedback = "Enter the server password."; return }
-            config.host = cleanHost; config.port = number
-            // Avoid overwriting an unreadable Keychain item with an unchanged draft.
-            if password != config.password { config.password = password }
-            if let error = config.passwordStorageError { feedback = error; return }
+            guard config.saveConnection(host: cleanHost, port: number, password: password) else {
+                feedback = config.passwordStorageError
+                return
+            }
             host = cleanHost
         case .network:
             guard SettingsValidation.isValidDNSList(dns) else {

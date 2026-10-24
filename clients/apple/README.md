@@ -15,8 +15,9 @@ Rust and `protoc`.
   Settings groups General, Connection, Network and Advanced; connection/network/
   advanced edits require Save and apply on the next connection. General changes
   apply immediately. About is at the bottom of the Settings sidebar.
-- Closing a macOS window leaves the VPN running; Quit disconnects it. Login-item
-  registration may require approval in System Settings.
+- Closing a macOS window leaves the VPN running; Quit waits for the VPN profile
+  cleanup and tunnel shutdown. If cleanup fails, Vault stays open so you can retry.
+  Login-item registration may require approval in System Settings.
 
 macOS keyboard shortcuts: `⌘,` Settings, `⌘1`–`⌘4` Settings sections, `⌘S` Save,
 `⌘W` Close, `⌘Return` Connect/Disconnect, `⌘⇧D` Diagnostics, `⌘Q` Quit.

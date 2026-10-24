@@ -321,6 +321,16 @@
         }
       }
     },
+    "Unable to disconnect. Please try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法断开连接，请重试。"
+          }
+        }
+      }
+    },
     "Unable to connect. Check your network and server configuration." : {
       "localizations" : {
         "zh-Hans" : {

@@ -12,19 +12,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Self.onLaunch?()
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let manager = Self.vpnManager, manager.vpnStatus != .off else { return .terminateNow }
+        guard let manager = Self.vpnManager else { return .terminateNow }
         guard !terminating else { return .terminateLater }
         terminating = true
-        manager.disconnect()
-        finishTermination(manager, remaining: 30)
-        return .terminateLater
-    }
-    private func finishTermination(_ manager: VpnManager, remaining: Int) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if manager.vpnStatus == .off || remaining <= 0 {
-                NSApp.reply(toApplicationShouldTerminate: true)
-            } else { self.finishTermination(manager, remaining: remaining - 1) }
+        // Even an idle profile may still have an on-demand rule after a failure.
+        manager.disconnect { succeeded in
+            self.terminating = false
+            NSApp.reply(toApplicationShouldTerminate: succeeded)
+            if !succeeded {
+                let alert = NSAlert()
+                alert.messageText = LanguageManager.shared.tr("Unable to disconnect. Please try again.")
+                alert.runModal()
+            }
         }
+        return .terminateLater
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { WindowManager.shared.showWindow(withIdentifier: "configure") }
@@ -54,7 +55,7 @@ struct MacosAppCommands: Commands {
                 } else if config.host.isEmpty || config.password.isEmpty {
                     WindowManager.shared.showWindow(withIdentifier: "configure")
                 } else {
-                    vpnManager.connect {}
+                    vpnManager.connect()
                 }
             }
             .keyboardShortcut(.return, modifiers: .command)
@@ -95,12 +96,7 @@ struct VaultApp: App {
                         WindowManager.shared.showWindow(withIdentifier: "welcome")
                     }
                 } else if MacosPreferences.shared.autoConnect && manager.vpnStatus == .off {
-                    manager.connect {
-                        DispatchQueue.main.async {
-                            data.vpnStatus = .off
-                            data.connectionError = "Unable to connect. Check your network and server configuration."
-                        }
-                    }
+                    manager.connect()
                 }
             }
         }

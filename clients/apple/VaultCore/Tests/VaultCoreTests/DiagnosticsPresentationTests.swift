@@ -51,3 +51,12 @@ import Testing
     ])
     #expect(DiagnosticsPresentation.durationHeading(measured) == "Average duration")
 }
+
+@Test func tunnelLogFilterIncludesCoreFailures() {
+    let text = "[app] ready\n[ne] start\n[rust] handshake failed\n[rust] PANIC"
+    #expect(DiagnosticsPresentation.filteredLogs(text, source: "ne", search: "")
+        == "[ne] start\n[rust] handshake failed\n[rust] PANIC")
+    #expect(DiagnosticsPresentation.filteredLogs(text, source: "ne", search: "HANDSHAKE")
+        == "[rust] handshake failed")
+    #expect(DiagnosticsPresentation.filteredLogs(text, source: "app", search: "") == "[app] ready")
+}

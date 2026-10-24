@@ -14,10 +14,6 @@ import VaultCore
         @EnvironmentObject var config: VaultConfig
         @EnvironmentObject var languageManager: LanguageManager
 
-        func onError() {
-            appData.vpnOn = false
-        }
-
         var parsedIPs: (ipv4: String?, ipv6: String?) {
             config.ip.parsedIPv4AndIPv6()
         }
@@ -37,31 +33,21 @@ import VaultCore
 
                             Spacer().frame(height: 40)
 
-                            Toggle("", isOn: $appData.vpnOn)
-                                .onChange(of: appData.vpnOn) {
-                                    // appData.vpnOn is also written by
-                                    // updateVPNStatus() to sync with the system
-                                    // status. Only treat it as user intent when
-                                    // it diverges from the actual status,
-                                    // otherwise a status sync would re-trigger
-                                    // connect()/disconnect().
-                                    if appData.vpnOn {
-                                        guard appData.vpnStatus == VpnStatus.off
-                                        else { return }
-                                        vpnManager.connect(onError: onError)
-                                    } else {
-                                        guard
-                                            appData.vpnStatus == VpnStatus.on
-                                                || appData.vpnStatus
-                                                    == VpnStatus.connecting
-                                        else { return }
-                                        vpnManager.disconnect()
-                                    }
+                            Toggle("", isOn: Binding(
+                                get: { appData.vpnOn },
+                                set: { enabled in
+                                    if enabled { vpnManager.connect() }
+                                    else { vpnManager.disconnect() }
                                 }
+                            ))
                                 .toggleStyle(CustomToggleStyle())
                                 .disabled(
                                     appData.vpnStatus == VpnStatus.disconnecting
                                 )
+
+                            if let error = appData.connectionError {
+                                Text(languageManager.tr(error)).foregroundStyle(.red)
+                            }
 
                             if appData.vpnStatus == .on, appData.vpnOn, let since = appData.connectedSince {
                                 ConnectionDurationView(since: since)

@@ -71,3 +71,41 @@ import Testing
     #expect({ state.canStart(second) }())
     #expect({ state.isPreparing }())
 }
+
+@Test func failedDisconnectRestoresRetryAfterAllCleanupJobsFinish() throws {
+    var state = VPNConnectionLifecycle()
+    let connect = try #require({ state.beginConnect() }())
+    let stop = try #require({ state.beginDisconnect() }())
+    #expect({ state.beginStopJob(stop) }())
+    state.finishStopJob(stop, succeeded: false)
+    // A failed save must not release the gate while preparation can still save a profile.
+    #expect({ !state.completeStopIfReady(tunnelDown: true) }())
+    state.finishPreparation(connect)
+    #expect({ state.beginStopJob(stop) }())
+    #expect({ !state.completeStopIfReady(tunnelDown: false) }())
+    state.finishStopJob(stop)
+    #expect(state.stopFailed)
+    #expect({ state.completeStopIfReady(tunnelDown: false) }())
+    #expect(!state.isStopping)
+    state.observedConnected()
+    let retry = try #require({ state.beginDisconnect() }())
+    #expect(!state.stopFailed)
+    #expect({ state.beginStopJob(retry) }())
+    // Late errors from the failed attempt must not poison the retry.
+    state.finishStopJob(stop, succeeded: false)
+    #expect(!state.stopFailed)
+    state.finishStopJob(retry)
+    #expect({ !state.completeStopIfReady(tunnelDown: false) }())
+    #expect({ state.completeStopIfReady(tunnelDown: true) }())
+}
+
+@Test func failedDisconnectOfIdleProfileAllowsAnotherAttempt() throws {
+    var state = VPNConnectionLifecycle()
+    let stop = try #require({ state.beginDisconnect() }())
+    #expect({ state.beginStopJob(stop) }())
+    state.finishStopJob(stop, succeeded: false)
+    #expect({ state.completeStopIfReady(tunnelDown: true) }())
+    let retry = try #require({ state.beginDisconnect() }())
+    #expect(!state.stopFailed)
+    #expect(state.acceptsStop(retry))
+}
