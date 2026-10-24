@@ -1421,12 +1421,12 @@
         }
       }
     },
-    "Domains probed by Run Diagnostics, separated by comma. Empty uses defaults." : {
+    "Diagnostic probe domains, separated by commas. Leave empty to use defaults." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "「运行诊断」探测的域名，用逗号分隔。留空则使用默认值。"
+            "value" : "诊断探测域名，用逗号分隔。留空则使用默认值。"
           }
         }
       }

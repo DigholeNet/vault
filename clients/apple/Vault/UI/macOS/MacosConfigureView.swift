@@ -248,7 +248,7 @@ struct MacosConfigureView: View {
                     .font(.body).foregroundStyle(.secondary)
                 TextField(languageManager.tr("Probe Domains"), text: $domains, prompt: Text("www.google.com, github.com, t.co"))
                     .autocorrectionDisabled().focused($focusedControl, equals: .domains).onSubmit(save)
-                Text(languageManager.tr("Domains probed by Run Diagnostics, separated by comma. Empty uses defaults."))
+                Text(languageManager.tr("Diagnostic probe domains, separated by commas. Leave empty to use defaults."))
                     .font(.body).foregroundStyle(.secondary)
             }
             Section(languageManager.tr("Client Identifier")) {

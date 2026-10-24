@@ -78,11 +78,6 @@ import VaultCore
                             .keyboardType(.numberPad)
                             .autocorrectionDisabled()
                         }
-                        if let error = validationError {
-                            Text(languageManager.tr(error))
-                                .foregroundColor(.red)
-                                .font(.footnote)
-                        }
                         HStack {
                             Group {
                                 if isSecured {
@@ -155,7 +150,7 @@ import VaultCore
                             .textInputAutocapitalization(.never)
                         }
                     } footer: {
-                        Text(languageManager.tr("Domains probed by Run Diagnostics, separated by comma. Empty uses defaults."))
+                        Text(languageManager.tr("Diagnostic probe domains, separated by commas. Leave empty to use defaults."))
                     }
 
                     Section {
@@ -166,18 +161,23 @@ import VaultCore
                         }
                     }
 
-                    Section {
-                        Button(languageManager.tr("Save")) { save() }
-                            .disabled(validationError != nil)
-                        if savedDraft == draft {
-                            Text(languageManager.tr("Saved. Changes apply the next time you connect."))
-                                .font(.footnote)
-                        }
-                        if let error = config.passwordStorageError {
-                            Text(languageManager.tr(error))
-                                .foregroundColor(.red)
-                                .font(.footnote)
-                            Button(languageManager.tr("Retry")) { config.retryPasswordStorage() }
+                    if savedDraft == draft || validationError != nil || config.passwordStorageError != nil {
+                        Section {
+                            if savedDraft == draft {
+                                Text(languageManager.tr("Saved. Changes apply the next time you connect."))
+                                    .font(.footnote)
+                            }
+                            if let error = validationError {
+                                Text(languageManager.tr(error))
+                                    .foregroundColor(.red)
+                                    .font(.footnote)
+                            }
+                            if let error = config.passwordStorageError {
+                                Text(languageManager.tr(error))
+                                    .foregroundColor(.red)
+                                    .font(.footnote)
+                                Button(languageManager.tr("Retry")) { config.retryPasswordStorage() }
+                            }
                         }
                     }
 
@@ -196,6 +196,10 @@ import VaultCore
                     savedDraft = nil
                 }
                 .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(languageManager.tr("Save")) { save() }
+                            .disabled(validationError != nil)
+                    }
                     ToolbarItem(placement: .navigationBarLeading) {
                         Button(action: {
                             selectedTab = 0
