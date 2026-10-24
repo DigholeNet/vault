@@ -29,8 +29,8 @@ struct IosDiagnosticsView: View {
                     if model.running { ProgressView().accessibilityLabel(tr("Running Diagnostics...")) }
                     else {
                         Button(tr(model.result == nil ? "Start" : "Run Again")) {
-                            model.run(using: vpnManager, connected: appData.vpnStatus == .on)
-                        }.disabled(appData.vpnStatus != .on)
+                            model.run(using: vpnManager, connected: appData.vpnStatus == .connected)
+                        }.disabled(appData.vpnStatus != .connected)
                     }
                 }
             }
@@ -47,7 +47,7 @@ struct IosDiagnosticsView: View {
                 else {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Check your connection")).font(.headline)
-                        Text(tr(appData.vpnStatus == .on
+                        Text(tr(appData.vpnStatus == .connected
                             ? "Test tunnel DNS, TCP, HTTPS, and application access. Durations are measured in milliseconds."
                             : "Connect the VPN before running diagnostics. Logs are available while disconnected."))
                             .foregroundStyle(.secondary)

@@ -223,7 +223,7 @@ struct MacosConfigureView: View {
                 Text(languageManager.tr("DNS server address separated by comma.")).font(.body).foregroundStyle(.secondary)
             }
             Section(languageManager.tr("Tunnel Addresses")) {
-                if appData.vpnStatus == .on || appData.isRecovering {
+                if appData.vpnStatus == .connected || appData.isRecovering {
                     let addresses = config.ip.parsedIPv4AndIPv6()
                     if let ipv4 = addresses.ipv4 { addressRow("IPv4", ipv4) }
                     if let ipv6 = addresses.ipv6 { addressRow("IPv6", ipv6) }
@@ -293,7 +293,7 @@ struct MacosConfigureView: View {
             order.append(.save)
         case .network:
             order.append(.dns)
-            if appData.vpnStatus == .on || appData.isRecovering {
+            if appData.vpnStatus == .connected || appData.isRecovering {
                 let ip = config.ip.parsedIPv4AndIPv6()
                 if ip.ipv4 != nil { order.append(.copyV4) }
                 if ip.ipv6 != nil { order.append(.copyV6) }

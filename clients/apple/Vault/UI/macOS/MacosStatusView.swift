@@ -38,7 +38,7 @@ struct MacosStatusView: View {
                     } else {
                         Button(action: diagnose) {
                             Label(languageManager.tr(result == nil ? "Run Diagnostics" : "Run Again"), systemImage: "arrow.clockwise")
-                        }.disabled(appData.vpnStatus != .on)
+                        }.disabled(appData.vpnStatus != .connected)
                     }
                 }
             }.padding(20)
@@ -117,12 +117,12 @@ struct MacosStatusView: View {
                     VStack(spacing: 16) {
                         Image(systemName: "stethoscope").font(.system(size: 42)).foregroundStyle(.blue)
                         Text(languageManager.tr("Check your connection")).font(.system(size: 15, weight: .semibold))
-                        Text(languageManager.tr(appData.vpnStatus == .on
+                        Text(languageManager.tr(appData.vpnStatus == .connected
                             ? "Test tunnel DNS, TCP, HTTPS, and application access. Durations are measured in milliseconds."
                             : "Connect the VPN before running diagnostics. Logs are available while disconnected."))
                             .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 450)
                         Button(languageManager.tr("Run Diagnostics"), action: diagnose)
-                            .buttonStyle(.borderedProminent).disabled(appData.vpnStatus != .on)
+                            .buttonStyle(.borderedProminent).disabled(appData.vpnStatus != .connected)
                     }.frame(maxWidth: .infinity).padding(.vertical, 70)
                 }
             }.padding(24)
@@ -157,7 +157,7 @@ struct MacosStatusView: View {
     private var sessionAddresses: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "network").foregroundStyle(.secondary)
-            Text(appData.vpnStatus == .on || appData.isRecovering
+            Text(appData.vpnStatus == .connected || appData.isRecovering
                 ? (config.ip.isEmpty ? languageManager.tr("Waiting for server-assigned addresses…") : config.ip.replacingOccurrences(of: "/", with: "  ·  "))
                 : languageManager.tr("Disconnected"))
                 .font(.system(.body, design: .monospaced)).textSelection(.enabled)
@@ -228,7 +228,7 @@ struct MacosStatusView: View {
     private var incomplete: Bool { model.incomplete }
     private var diagnosticText: String { model.diagnosticText }
     private func checkLabel(_ id: String) -> String { DiagnosticsPresentation.label(for: id) }
-    private func diagnose() { model.run(using: vpnManager, connected: appData.vpnStatus == .on) }
+    private func diagnose() { model.run(using: vpnManager, connected: appData.vpnStatus == .connected) }
 
     private func copy(_ text: String) {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)

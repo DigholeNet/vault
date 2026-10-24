@@ -63,8 +63,8 @@ struct MacosAppCommands: Commands {
                 .keyboardShortcut("w")
         }
         CommandGroup(after: .appSettings) {
-            Button(languageManager.tr(appData.vpnStatus == .on || appData.vpnStatus == .connecting ? "Disconnect" : "Connect")) {
-                if appData.vpnStatus == .on || appData.vpnStatus == .connecting {
+            Button(languageManager.tr(appData.vpnStatus != .disconnected ? "Disconnect" : "Connect")) {
+                if appData.vpnStatus == .connected || appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
                     vpnManager.disconnect()
                 } else if config.host.isEmpty || config.password.isEmpty {
                     WindowManager.shared.showWindow(withIdentifier: "configure")
@@ -73,7 +73,7 @@ struct MacosAppCommands: Commands {
                 }
             }
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(appData.vpnStatus == .disconnecting)
+            .disabled(!appData.canToggleConnection)
             Button(languageManager.tr("Diagnostics & Logs")) { WindowManager.shared.showWindow(withIdentifier: "status") }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
         }
@@ -109,7 +109,7 @@ struct VaultApp: App {
                         UserDefaults.standard.set(true, forKey: "macWelcomeShown")
                         WindowManager.shared.showWindow(withIdentifier: "welcome")
                     }
-                } else if MacosPreferences.shared.autoConnect && manager.vpnStatus == .off {
+                } else if MacosPreferences.shared.autoConnect && manager.vpnStatus == .disconnected {
                     manager.connect()
                 }
             }

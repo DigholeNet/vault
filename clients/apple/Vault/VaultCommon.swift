@@ -12,9 +12,9 @@ import os.log
 enum VpnStatusUtil {
     static func titleKey(for status: VpnStatus) -> String {
         switch status {
-        case .off: return "Disconnected"
+        case .disconnected: return "Disconnected"
         case .connecting: return "Connecting"
-        case .on: return "Connected"
+        case .connected: return "Connected"
         case .disconnecting: return "Disconnecting…"
         }
     }
@@ -25,8 +25,9 @@ enum VpnStatusUtil {
 }
 
 class AppData: ObservableObject {
-    var vpnOn: Bool { vpnStatus == .on || vpnStatus == .connecting }
-    @Published var vpnStatus: VpnStatus = VpnStatus.off
+    var canToggleConnection: Bool { vpnStatus != .disconnecting || connectionError != nil }
+    var vpnOn: Bool { vpnStatus == .connected || vpnStatus == .connecting }
+    @Published var vpnStatus: VpnStatus = VpnStatus.disconnected
     /// Set when the user tries to connect without server configuration;
     /// the UI should guide them to the configure page.
     @Published var showConfigureGuide: Bool = false

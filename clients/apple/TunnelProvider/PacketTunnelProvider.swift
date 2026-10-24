@@ -114,7 +114,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             completionHandler(nil)
             return
         }
-        guard Self.claimStart() else {
+        guard claimStart() else {
             completionHandler(ConfigurationError.invalidConfiguration("start in progress"))
             return
         }
@@ -224,11 +224,23 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             )
             previous.abandonSession()
         }
+        // Bound DNS resolution, handshake and settings application together.
+        self.startTimeoutWorkItem?.cancel()
+        let timeoutWorkItem = DispatchWorkItem { [weak self] in
+            guard let self = self, !self.stopRequested,
+                self.pendingStart?.isPending == true else { return }
+            Logger.network.errorAndFile("[session:\(self.sessionID)] Tunnel start timed out")
+            self.startFailed(reason: "start timed out")
+        }
+        self.startTimeoutWorkItem = timeoutWorkItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + TunnelConstants.startTimeout,
+            execute: timeoutWorkItem
+        )
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else {
                 DispatchQueue.main.async {
                     if let completion = pending.takeCompletion() {
-                        Self.releaseStart()
                         completion(EdgeError.connectionFailed)
                     }
                 }
@@ -236,15 +248,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             let candidates = self.resolveAllAddresses(host)
             DispatchQueue.main.async {
-                guard !self.stopRequested else {
-                    self.finishStart(with: EdgeError.connectionFailed)
-                    return
-                }
+                guard !self.stopRequested, self.pendingStart === pending,
+                    pending.isPending else { return }
                 guard !candidates.isEmpty else {
                     Logger.network.error("Failed to resolve hostname: \(host)")
-                    self.finishStart(with: EdgeError.connectionFailed)
+                    self.startFailed(reason: "hostname resolution failed")
                     return
                 }
+                self.excludedV4Addresses = candidates.filter { !$0.contains(":") }
+                self.excludedV6Addresses = candidates.filter { $0.contains(":") }
                 self.superNodeIp = candidates.first ?? host
                 self.startEdge(
                     candidates: candidates,
@@ -268,26 +280,29 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// exactly one Edge and a shared set of completion handlers. Process-wide so it
     /// also protects against the system creating multiple provider
     /// instances in the same extension process.
-    private static let startLock = NSLock()
-    private static var processStartInFlight = false
+    private static weak var startOwner: PacketTunnelProvider?
     /// The provider instance owning the live tunnel session. The system may
     /// create a second provider instance in this process for the same
     /// tunnel; two live sessions share one peer id, so the supernode evicts
     /// the older one and the two would fight over the session forever.
     private static var activeProvider: PacketTunnelProvider?
 
-    private static func claimStart() -> Bool {
-        startLock.lock()
-        defer { startLock.unlock() }
-        if processStartInFlight { return false }
-        processStartInFlight = true
+    private func claimStart() -> Bool {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard Self.startOwner == nil else { return false }
+        Self.startOwner = self
         return true
     }
 
-    private static func releaseStart() {
-        startLock.lock()
-        processStartInFlight = false
-        startLock.unlock()
+    private func releaseStart() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        if Self.startOwner === self { Self.startOwner = nil }
+    }
+
+    /// A superseded instance must never terminate its replacement's process.
+    private func exitIfUnowned() {
+        guard Self.activeProvider == nil, Self.startOwner == nil else { return }
+        exit(0)
     }
 
     /// Start Edge with every resolved supernode address. The Rust core
@@ -367,20 +382,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             self.startFailed(reason: "edge init failed")
             return
         }
-        // Backstop so the system VPN state can never get stuck in
-        // .connecting, even if the core hangs without reporting.
-        self.startTimeoutWorkItem?.cancel()
-        let timeoutWorkItem = DispatchWorkItem { [weak self] in
-            guard let self = self, !self.stopRequested,
-                self.pendingStart?.isPending == true else { return }
-            Logger.network.errorAndFile("[session:\(self.sessionID)] Tunnel start timed out")
-            self.startFailed(reason: "start timed out")
-        }
-        self.startTimeoutWorkItem = timeoutWorkItem
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + TunnelConstants.startTimeout,
-            execute: timeoutWorkItem
-        )
     }
 
     /// The start failed (all candidates lost the race, network
@@ -416,8 +417,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         self.startTimeoutWorkItem = nil
         self.startBackoffWorkItem?.cancel()
         self.startBackoffWorkItem = nil
-        Self.releaseStart()
+        self.releaseStart()
         if let error = error {
+            self.stopRequested = true
+            self.networkConfigurationSequence &+= 1
+            self.aliveTimer?.cancel()
+            self.aliveTimer = nil
             Logger.network.errorAndFile(
                 "[session:\(self.sessionID)] startTunnel failed: \(error.localizedDescription)"
             )
@@ -472,7 +477,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             self.pendingStart = nil
             completion(NEVPNError(.connectionFailed))
         }
-        Self.releaseStart()
+        self.releaseStart()
         if Self.activeProvider === self {
             Self.activeProvider = nil
         }
@@ -487,7 +492,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             // The extension process otherwise lingers with stale
             // process-wide state (claimed starts, timers, statics). The
             // system relaunches it on the next startTunnel.
-            exit(0)
+            exitIfUnowned()
+            return
         }
         do {
             try edge.close()
@@ -506,7 +512,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         completionHandler()
         // Terminate the extension process so the next startTunnel gets a
         // clean process; the system relaunches it on demand.
-        exit(0)
+        exitIfUnowned()
 
     }
 
@@ -1142,7 +1148,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// to the main app. vault-core owns the counters; per-packet counting
     /// on the Swift side would be redundant.
     private func startStatsPolling() {
-        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        dispatchPrecondition(condition: .onQueue(.main))
+        let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1))
         timer.setEventHandler { [weak self] in
             guard let self = self, let edge = self.edge else { return }
@@ -1163,7 +1170,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func readPacketFromTunnel() {
-
+        dispatchPrecondition(condition: .onQueue(.main))
         guard let edge = self.edge else {
             return
         }
@@ -1172,7 +1179,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             for packet in packets {
                 self.handlePacket(packet, edge)
             }
-            self.readPacketFromTunnel()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.stopRequested, self.edge === edge else { return }
+                self.readPacketFromTunnel()
+            }
         }
     }
 
@@ -1201,8 +1211,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     /// Resolve all addresses for the supernode host, IPv6 first. Returns an
-    /// empty array on failure. As a side effect, records every resolved
-    /// address in excludedV4/V6Addresses for route exclusion.
+    /// empty array on failure. The caller installs exclusions on main.
     private func resolveAllAddresses(_ hostname: String) -> [String] {
         var hints = addrinfo(
             ai_flags: AI_ALL,
@@ -1250,8 +1259,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
         }
 
-        self.excludedV4Addresses = ipv4Addresses
-        self.excludedV6Addresses = ipv6Addresses
         // Prefer IPv6 and hand every resolved address to the core, which
         // races them Happy-Eyeballs style. Deduplicate — getaddrinfo may
         // return the same address multiple times.

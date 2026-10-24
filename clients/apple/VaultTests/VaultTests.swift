@@ -32,15 +32,15 @@ final class VaultTests: XCTestCase {
     }
 
     func testConnectionStatusKeysAreSharedAndIndependentOfLanguage() {
-        XCTAssertEqual(VpnStatusUtil.titleKey(for: .off), "Disconnected")
+        XCTAssertEqual(VpnStatusUtil.titleKey(for: .disconnected), "Disconnected")
         XCTAssertEqual(VpnStatusUtil.titleKey(for: .connecting), "Connecting")
-        XCTAssertEqual(VpnStatusUtil.titleKey(for: .on), "Connected")
+        XCTAssertEqual(VpnStatusUtil.titleKey(for: .connected), "Connected")
         XCTAssertEqual(VpnStatusUtil.titleKey(for: .disconnecting), "Disconnecting…")
     }
 
     func testConnectionToggleDerivesFromPublishedStatus() {
         let data = AppData()
-        for (status, enabled) in [(VpnStatus.off, false), (.connecting, true), (.on, true), (.disconnecting, false)] {
+        for (status, enabled) in [(VpnStatus.disconnected, false), (.connecting, true), (.connected, true), (.disconnecting, false)] {
             data.vpnStatus = status
             XCTAssertEqual(data.vpnOn, enabled)
         }
@@ -102,7 +102,7 @@ extension VaultTests {
             failed.fulfill()
         }
         await fulfillment(of: [failed], timeout: 2)
-        XCTAssertEqual(data.vpnStatus, .on)
+        XCTAssertEqual(data.vpnStatus, .connected)
         XCTAssertNotNil(data.connectionError)
         XCTAssertTrue(profile.isOnDemandEnabled)
         XCTAssertEqual(profile.testConnection.stopCalls, 0)
@@ -119,7 +119,7 @@ extension VaultTests {
         profile.testConnection.testStatus = .disconnected
         controller.updateVPNStatus(profile)
         await fulfillment(of: [completed], timeout: 2)
-        XCTAssertEqual(data.vpnStatus, .off)
+        XCTAssertEqual(data.vpnStatus, .disconnected)
         XCTAssertNil(data.connectionError)
     }
 
@@ -152,7 +152,7 @@ extension VaultTests {
         profile.testConnection.testStatus = .disconnected
         controller.updateVPNStatus(profile)
         await fulfillment(of: [completed], timeout: 2)
-        XCTAssertEqual(data.vpnStatus, .off)
+        XCTAssertEqual(data.vpnStatus, .disconnected)
     }
 }
 
@@ -231,17 +231,17 @@ extension VaultTests {
             let startupReply = try XCTUnwrap(controller.loaded)
             controller.connect()
             XCTAssertTrue(data.showConfigureGuide)
-            XCTAssertEqual(data.vpnStatus, .off)
+            XCTAssertEqual(data.vpnStatus, .disconnected)
             let profile = TestTunnelManager()
             startupReply(profile, nil)
             await drainMainQueue()
             XCTAssertTrue(controller.activeVPN === profile)
-            XCTAssertEqual(data.vpnStatus, .on)
+            XCTAssertEqual(data.vpnStatus, .connected)
             XCTAssertTrue(startupFinished)
             // The retained observer must continue following the real session.
             profile.testConnection.testStatus = .disconnected
             NotificationCenter.default.post(name: .NEVPNStatusDidChange, object: profile.testConnection)
-            XCTAssertEqual(data.vpnStatus, .off)
+            XCTAssertEqual(data.vpnStatus, .disconnected)
         }
     }
 
@@ -260,7 +260,7 @@ extension VaultTests {
         await drainMainQueue()
         controller.loaded?(nil, nil)
         await fulfillment(of: [stopped], timeout: 2)
-        XCTAssertEqual(controller.vpnStatus, .off)
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
         startupReply(TestTunnelManager(), nil)
         await drainMainQueue()
         XCTAssertNil(controller.activeVPN)
@@ -272,6 +272,112 @@ extension VaultTests {
         XCTAssertEqual(controller.activationRequests.count, 1)
         try await activate(controller)
         XCTAssertEqual(controller.preparationCalls, 1)
+    }
+
+    @MainActor
+    func testConnectDuringStopRunsOnlyAfterDisconnected() async throws {
+        let controller = try makeController()
+        let profile = TestTunnelManager()
+        profile.isOnDemandEnabled = false
+        controller.activeVPN = profile
+        controller.updateVPNStatus(profile)
+        let stopping = expectation(description: "stop issued")
+        profile.testConnection.onStop = { stopping.fulfill() }
+        controller.disconnect()
+        await fulfillment(of: [stopping], timeout: 2)
+        controller.connect()
+        controller.connect()
+        XCTAssertTrue(controller.activationRequests.isEmpty)
+        profile.testConnection.testStatus = .disconnected
+        controller.updateVPNStatus(profile)
+        await drainMainQueue()
+        XCTAssertEqual(controller.activationRequests.count, 1)
+        XCTAssertEqual(controller.vpnStatus, .connecting)
+    }
+
+    @MainActor
+    func testStopTimeoutAllowsRetryAndCompletesOnce() async throws {
+        let controller = try makeController()
+        controller.tunnelStopTimeout = 0
+        let profile = TestTunnelManager()
+        profile.isOnDemandEnabled = false
+        controller.activeVPN = profile
+        controller.updateVPNStatus(profile)
+        let failed = expectation(description: "system stop timed out")
+        var replies = 0
+        controller.disconnect { succeeded in
+            XCTAssertFalse(succeeded)
+            replies += 1
+            failed.fulfill()
+        }
+        await fulfillment(of: [failed], timeout: 2)
+        XCTAssertTrue(controller.appData.canToggleConnection)
+        XCTAssertNotNil(controller.appData.connectionError)
+        controller.tunnelStopTimeout = 2
+        let stopping = expectation(description: "retry issued")
+        profile.testConnection.onStop = { stopping.fulfill() }
+        let finished = expectation(description: "retry finished")
+        controller.disconnect { succeeded in XCTAssertTrue(succeeded); finished.fulfill() }
+        await fulfillment(of: [stopping], timeout: 2)
+        profile.testConnection.testStatus = .disconnected
+        controller.updateVPNStatus(profile)
+        await fulfillment(of: [finished], timeout: 2)
+        XCTAssertEqual(replies, 1)
+    }
+
+    @MainActor
+    func testOnDemandDisconnectDuringPreparationRestartsCurrentSession() async throws {
+        let controller = try makeController()
+        controller.connect()
+        try await activate(controller)
+        let profile = TestTunnelManager()
+        controller.updateVPNStatus(profile)
+        XCTAssertEqual(controller.vpnStatus, .connecting)
+        profile.testConnection.testStatus = .disconnected
+        controller.updateVPNStatus(profile)
+        controller.prepared?(profile, true)
+        await drainMainQueue()
+        XCTAssertEqual(controller.vpnStatus, .connecting)
+        XCTAssertEqual(profile.testConnection.startCalls, 1)
+        profile.testConnection.testStatus = .connected
+        controller.updateVPNStatus(profile)
+        XCTAssertEqual(controller.vpnStatus, .connected)
+    }
+
+    @MainActor
+    func testOnDemandConnectedAfterPreparationDoesNotStartTwice() async throws {
+        let controller = try makeController()
+        controller.connect()
+        try await activate(controller)
+        let profile = TestTunnelManager()
+        controller.updateVPNStatus(profile)
+        XCTAssertEqual(controller.vpnStatus, .connecting)
+        controller.prepared?(profile, true)
+        await drainMainQueue()
+        XCTAssertEqual(controller.vpnStatus, .connected)
+        XCTAssertEqual(profile.testConnection.startCalls, 0)
+        XCTAssertTrue(controller.activeVPN === profile)
+    }
+
+    @MainActor
+    func testOnDemandConnectedDuringFailedReloadStillCleansUp() async throws {
+        let controller = try makeController()
+        controller.connect()
+        try await activate(controller)
+        let profile = TestTunnelManager()
+        profile.isOnDemandEnabled = true
+        controller.updateVPNStatus(profile)
+        let stopped = expectation(description: "failed reload still stops on-demand session")
+        profile.onSave = { $0?(nil) }
+        profile.testConnection.onStop = { stopped.fulfill() }
+        controller.prepared?(profile, false)
+        await fulfillment(of: [stopped], timeout: 2)
+        XCTAssertFalse(profile.isOnDemandEnabled)
+        XCTAssertEqual(controller.vpnStatus, .disconnecting)
+        profile.testConnection.testStatus = .disconnected
+        controller.updateVPNStatus(profile)
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
+        XCTAssertNotNil(controller.appData.connectionError)
     }
 
     @MainActor
@@ -288,7 +394,7 @@ extension VaultTests {
             stopped.fulfill()
         }
         await drainMainQueue()
-        controller.loaded?(nil, nil)
+        XCTAssertNil(controller.loaded) // No teardown lookup may overlap preparation.
         await drainMainQueue()
         XCTAssertFalse(finished)
         XCTAssertEqual(controller.vpnStatus, .disconnecting)
@@ -332,12 +438,12 @@ extension VaultTests {
             await fulfillment(of: [saving], timeout: 2)
             XCTAssertEqual(profile.testConnection.startCalls, reloadSucceeded ? 1 : 0)
             XCTAssertEqual(controller.vpnStatus, .disconnecting)
-            controller.connect()
+            // No second request: failed startup must report its error after cleanup.
             XCTAssertEqual(controller.activationRequests.count, 1)
             saved?(nil)
             await drainMainQueue()
             XCTAssertEqual(profile.testConnection.stopCalls, 0)
-            XCTAssertEqual(controller.vpnStatus, .off)
+            XCTAssertEqual(controller.vpnStatus, .disconnected)
             XCTAssertNotNil(controller.appData.connectionError)
             XCTAssertFalse(profile.isOnDemandEnabled)
             controller.connect()
@@ -358,7 +464,7 @@ extension VaultTests {
         XCTAssertEqual(first.testConnection.startCalls, 1)
         first.testConnection.testStatus = .connected
         NotificationCenter.default.post(name: .NEVPNStatusDidChange, object: first.testConnection)
-        XCTAssertEqual(controller.vpnStatus, .on)
+        XCTAssertEqual(controller.vpnStatus, .connected)
         controller.connect()
         XCTAssertEqual(controller.activationRequests.count, 1)
         let stopping = expectation(description: "connected tunnel stopping")
@@ -368,7 +474,7 @@ extension VaultTests {
         await fulfillment(of: [stopping], timeout: 2)
         first.testConnection.testStatus = .disconnected
         NotificationCenter.default.post(name: .NEVPNStatusDidChange, object: first.testConnection)
-        XCTAssertEqual(controller.vpnStatus, .off)
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
         controller.connect()
         try await activate(controller)
         let second = TestTunnelManager() // On-demand has already connected this profile.
@@ -376,9 +482,9 @@ extension VaultTests {
         await drainMainQueue()
         XCTAssertEqual(second.testConnection.startCalls, 0)
         XCTAssertTrue(controller.activeVPN === second)
-        XCTAssertEqual(controller.vpnStatus, .on)
+        XCTAssertEqual(controller.vpnStatus, .connected)
         NotificationCenter.default.post(name: .NEVPNStatusDidChange, object: first.testConnection)
-        XCTAssertEqual(controller.vpnStatus, .on)
+        XCTAssertEqual(controller.vpnStatus, .connected)
         XCTAssertNil(controller.appData.connectionError)
     }
 
@@ -390,14 +496,14 @@ extension VaultTests {
             try XCTUnwrap(controller.activationRequests.first), didFailWithError: NEVPNError(.configurationInvalid)
         )
         await drainMainQueue()
-        XCTAssertEqual(controller.vpnStatus, .off)
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
         XCTAssertNotNil(controller.appData.connectionError)
         controller.connect()
         XCTAssertEqual(controller.activationRequests.count, 2)
         try await activate(controller)
         controller.prepared?(nil, false)
         await drainMainQueue()
-        XCTAssertEqual(controller.vpnStatus, .off)
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
         XCTAssertNotNil(controller.appData.connectionError)
         controller.connect()
         XCTAssertEqual(controller.activationRequests.count, 3)
@@ -411,13 +517,13 @@ extension VaultTests {
         await drainMainQueue()
         controller.loaded?(nil, NEVPNError(.configurationReadWriteFailed))
         await fulfillment(of: [failed], timeout: 2)
-        XCTAssertEqual(controller.vpnStatus, .off)
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
         let retried = expectation(description: "profile lookup retried")
         controller.disconnect { succeeded in XCTAssertTrue(succeeded); retried.fulfill() }
         await drainMainQueue()
         controller.loaded?(nil, nil)
         await fulfillment(of: [retried], timeout: 2)
-        XCTAssertEqual(controller.vpnStatus, .off)
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
     }
 
     @MainActor
@@ -453,7 +559,7 @@ extension VaultTests {
         controller.updateVPNStatus(profile)
         await fulfillment(of: [retried], timeout: 2)
         XCTAssertEqual(firstReplies, 1)
-        XCTAssertEqual(controller.vpnStatus, .off)
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
     }
 
     @MainActor
@@ -517,7 +623,7 @@ extension VaultTests {
                 controller.updateVPNStatus(profile)
             }
             await fulfillment(of: [completed], timeout: 2)
-            XCTAssertEqual(controller.vpnStatus, .off)
+            XCTAssertEqual(controller.vpnStatus, .disconnected)
             XCTAssertNil(controller.appData.connectionError)
         }
     }
@@ -590,7 +696,7 @@ extension VaultTests {
         DispatchQueue.main.async { drained.fulfill() }
         await fulfillment(of: [drained], timeout: 2)
         XCTAssertTrue(controller.activeVPN === current)
-        XCTAssertEqual(data.vpnStatus, .off)
+        XCTAssertEqual(data.vpnStatus, .disconnected)
         XCTAssertFalse(startupFinished)
     }
 

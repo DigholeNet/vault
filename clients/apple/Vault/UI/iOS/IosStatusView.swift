@@ -36,27 +36,28 @@ import VaultCore
                             Toggle("", isOn: Binding(
                                 get: { appData.vpnOn },
                                 set: { enabled in
-                                    if enabled { vpnManager.connect() }
+                                    if appData.vpnStatus == .disconnecting { vpnManager.disconnect() }
+                                    else if enabled { vpnManager.connect() }
                                     else { vpnManager.disconnect() }
                                 }
                             ))
                                 .toggleStyle(CustomToggleStyle())
                                 .disabled(
-                                    appData.vpnStatus == VpnStatus.disconnecting
+                                    !appData.canToggleConnection
                                 )
 
                             if let error = appData.connectionError {
                                 Text(languageManager.tr(error)).foregroundStyle(.red)
                             }
 
-                            if appData.vpnStatus == .on, appData.vpnOn, let since = appData.connectedSince {
+                            if appData.vpnStatus == .connected, appData.vpnOn, let since = appData.connectedSince {
                                 ConnectionDurationView(since: since)
                             }
 
                             Spacer().frame(height: 10)
 
                             // Connection Info & Statistics (combined, no background)
-                            if appData.vpnStatus == .on {
+                            if appData.vpnStatus == .connected {
                                 let ips = parsedIPs
 
                                 VStack(spacing: 16) {

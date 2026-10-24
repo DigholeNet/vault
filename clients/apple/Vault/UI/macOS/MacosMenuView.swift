@@ -31,7 +31,7 @@ struct MacosMenuView: View {
     @State private var focusedAction: Action? = .connection
 
     var body: some View {
-        VStack(alignment: .leading, spacing: appData.vpnStatus == .off ? 8 : 12) {
+        VStack(alignment: .leading, spacing: appData.vpnStatus == .disconnected ? 8 : 12) {
             HStack(spacing: 8) {
                 MacosAppIcon(size: 20)
                 Text("Vault").font(.body.weight(.semibold))
@@ -47,7 +47,7 @@ struct MacosMenuView: View {
             Divider()
             connectionButton
             if let since = appData.connectedSince,
-                appData.vpnStatus == .on || (appData.vpnStatus == .connecting && appData.isRecovering) {
+                appData.vpnStatus == .connected || (appData.vpnStatus == .connecting && appData.isRecovering) {
                 ConnectionDurationView(since: since)
             }
             if appData.isRecovering {
@@ -60,7 +60,7 @@ struct MacosMenuView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             // Never show stale counters while disconnected or establishing a new session.
-            if appData.vpnStatus == .on || appData.isRecovering {
+            if appData.vpnStatus == .connected || appData.isRecovering {
                 Divider()
                 traffic
             }
@@ -88,14 +88,14 @@ struct MacosMenuView: View {
         }
         .font(.body)
         .padding(.horizontal, 14)
-        .padding(.vertical, appData.vpnStatus == .off ? 12 : 14)
+        .padding(.vertical, appData.vpnStatus == .disconnected ? 12 : 14)
         .frame(width: 340)
         .fixedSize(horizontal: false, vertical: true)
         .macosKeyboardNavigation { [focus = $focusedAction] event in
             if event.type == .leftMouseDown { focus.wrappedValue = nil; return false }
             let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
             if event.keyCode == 48, modifiers.subtracting(.shift).isEmpty {
-                let order = Action.allCases.filter { $0 != .connection || appData.vpnStatus != .disconnecting }
+                let order = Action.allCases.filter { $0 != .connection || appData.canToggleConnection }
                 if let current = focus.wrappedValue, let index = order.firstIndex(of: current) {
                     focus.wrappedValue = order[(index + (modifiers.contains(.shift) ? order.count - 1 : 1)) % order.count]
                 } else { focus.wrappedValue = modifiers.contains(.shift) ? order.last : order.first }
@@ -107,7 +107,7 @@ struct MacosMenuView: View {
                 let selected = focus.wrappedValue else { return false }
             switch selected {
             case .connection:
-                if appData.vpnStatus != .disconnecting { toggleConnection() }
+                if appData.canToggleConnection { toggleConnection() }
             case .diagnostics: open("status")
             case .settings: open("configure")
             case .quit: dismiss(); NSApp.terminate(nil)
@@ -132,7 +132,7 @@ struct MacosMenuView: View {
                         .fill(connectionColor.opacity(hoveringConnection ? 0.1 : 0.04))
                         .overlay(Circle().strokeBorder(connectionColor.opacity(hoveringConnection ? 0.25 : 0.1)))
                         .shadow(color: Color.black.opacity(hoveringConnection ? 0.16 : 0), radius: 8, y: 4)
-                    Image(systemName: appData.vpnStatus == .off ? "personalhotspot.slash" : "personalhotspot")
+                    Image(systemName: appData.vpnStatus == .disconnected ? "personalhotspot.slash" : "personalhotspot")
                         .font(.system(size: 48, weight: .regular))
                         .foregroundStyle(connectionColor)
                     if appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
@@ -157,11 +157,11 @@ struct MacosMenuView: View {
                 }
             }
             .animation(.easeOut(duration: 0.15), value: hoveringConnection)
-            .disabled(appData.vpnStatus == .disconnecting)
+            .disabled(!appData.canToggleConnection)
             .help(languageManager.tr(actionTitle))
             .accessibilityLabel(languageManager.tr(actionTitle))
             .macosKeyboardAction(focus: $focusedAction, id: .connection,
-                enabled: appData.vpnStatus != .disconnecting, circular: true, action: toggleConnection)
+                enabled: appData.canToggleConnection, circular: true, action: toggleConnection)
             Spacer(minLength: 0)
         }
         .padding(.vertical, 8)
@@ -169,10 +169,10 @@ struct MacosMenuView: View {
     private var connectionColor: Color {
         if appData.isRecovering { return .orange }
         switch appData.vpnStatus {
-        case .on: return .green
+        case .connected: return .green
         case .connecting: return .accentColor
         case .disconnecting: return .secondary
-        case .off: return .red
+        case .disconnected: return .red
         }
     }
 
@@ -185,10 +185,10 @@ struct MacosMenuView: View {
 
     private var actionTitle: String {
         switch appData.vpnStatus {
-        case .on: return "Disconnect"
+        case .connected: return "Disconnect"
         case .connecting: return appData.isRecovering ? "Disconnect" : "Cancel Connection"
-        case .disconnecting: return "Disconnecting…"
-        case .off: return appData.connectionError == nil ? "Connect" : "Retry"
+        case .disconnecting: return appData.connectionError == nil ? "Disconnecting…" : "Disconnect"
+        case .disconnected: return appData.connectionError == nil ? "Connect" : "Retry"
         }
     }
     private var traffic: some View {
@@ -240,7 +240,7 @@ struct MacosMenuView: View {
             .frame(width: 100, height: 34, alignment: .trailing)
     }
     private func toggleConnection() {
-        if appData.vpnStatus == .on || appData.vpnStatus == .connecting {
+        if appData.vpnStatus == .connected || appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
             vpnManager.disconnect()
         } else {
             if config.host.isEmpty || config.password.isEmpty { open("configure"); return }
@@ -254,13 +254,13 @@ struct MacosMenuView: View {
 extension AppData {
     var macStatusTitle: String {
         if isRecovering { return "Reconnecting" }
-        if connectionError != nil && vpnStatus == .off { return "Connection failed" }
+        if connectionError != nil && vpnStatus == .disconnected { return "Connection failed" }
         return VpnStatusUtil.titleKey(for: vpnStatus)
     }
     var macStatusColor: Color {
         if isRecovering { return .orange }
-        if vpnStatus == .on { return .green }
-        if connectionError != nil && vpnStatus == .off { return .red }
+        if vpnStatus == .connected { return .green }
+        if connectionError != nil && vpnStatus == .disconnected { return .red }
         return .secondary
     }
 }

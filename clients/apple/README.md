@@ -23,6 +23,20 @@ macOS keyboard shortcuts: `⌘,` Settings, `⌘1`–`⌘4` Settings sections, `�
 `⌘W` Close, `⌘Return` Connect/Disconnect, `⌘⇧D` Diagnostics, `⌘Q` Quit.
 Tab / Shift-Tab moves between controls; Space / Return activates an action.
 
+## Connection lifecycle
+
+The app serializes preparation and teardown on the main queue. The four states
+are `connecting`, `connected`, `disconnected`, and `disconnecting`. Cancelling a
+connection waits for the current activation/profile operation to settle before
+cleanup begins. A connect request during teardown records the latest intent and
+starts only after the system confirms disconnection; another disconnect clears
+that intent. Failed cleanup requires an explicit retry.
+
+The provider startup watchdog covers DNS resolution, handshake, and network
+settings. After issuing a stop, the app waits up to 15 seconds for the system to
+confirm disconnection, then reports failure and enables retry without claiming
+the tunnel is down. Preferences writes always settle before another operation.
+
 ## Diagnostics & logs
 
 Connect the VPN, then start diagnostics manually. Both platforms share the
