@@ -82,11 +82,18 @@ final class DiagnosticsViewModel: ObservableObject {
     }
 
     func refreshLogs(using manager: any RuntimeLogStore) async {
+        let refreshID = String(UUID().uuidString.prefix(8))
+        var polls = 0
+        FileLogger.shared.log("[logRefresh:\(refreshID)] started appPID=\(ProcessInfo.processInfo.processIdentifier)", level: "NOTICE")
         loadingLogs = logText.isEmpty
-        defer { loadingLogs = false }
+        defer {
+            loadingLogs = false
+            FileLogger.shared.log("[logRefresh:\(refreshID)] ended cancelled=\(Task.isCancelled) polls=\(polls)", level: "NOTICE")
+        }
         while !Task.isCancelled {
             let token = logGeneration
             if !clearingLogs {
+                polls += 1
                 let text = await manager.collectLogs()
                 guard !Task.isCancelled else { return }
                 if token == logGeneration, !clearingLogs {

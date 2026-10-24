@@ -167,8 +167,19 @@ private final class DelayedLoadVpnManager: VpnManager {
     var approvalPrompts = 0
     var startupProbe: ((Bool) -> Void)?
     var onStartupProbe: (() -> Void)?
+    var usesRealStartupProbe = false
+    var sentProviderMessages: [Data] = []
+    var onProviderMessage: ((Data, @escaping (Data?) -> Void) -> Void)?
+
+    override func deliverProviderMessage(_ message: Data, manager: NETunnelProviderManager,
+        completion: @escaping (Data?) -> Void) throws {
+        sentProviderMessages.append(message)
+        if let onProviderMessage { onProviderMessage(message, completion) }
+        else { completion(nil) }
+    }
 
     override func queryProviderStarted(completion: @escaping (Bool) -> Void) {
+        if usesRealStartupProbe { super.queryProviderStarted(completion: completion); return }
         startupProbe = completion
         onStartupProbe?()
     }
@@ -188,11 +199,13 @@ private final class DelayedLoadVpnManager: VpnManager {
 extension VaultTests {
     @MainActor
     private func makeController() throws -> DelayedLoadVpnManager {
-        let config = try makeConfig().config
+        let storage = try makeConfig()
+        let config = storage.config
         XCTAssertTrue(config.saveConnection(host: "test.invalid", port: 9527, password: "test-password"))
         let data = AppData()
         addTeardownBlock { await MainActor.run { data.stopStatsMonitoring() } }
         let controller = DelayedLoadVpnManager(config: config, appData: data)
+        controller.logPreferences = storage.defaults
         controller.systemExtensionManager = SystemExtensionManager(
             submitRequest: { [weak controller] in controller?.activationRequests.append($0) },
             openApprovalSettings: { [weak controller] in controller?.approvalPrompts += 1 }
@@ -658,17 +671,88 @@ extension VaultTests {
     }
 
     @MainActor
-    func testLateLogLookupDoesNotReplaceActiveConnection() async throws {
-        let controller = DelayedLoadVpnManager(config: try makeConfig().config, appData: AppData())
-        let loading = expectation(description: "log profile lookup started")
-        controller.onLoad = { loading.fulfill() }
+    func testOfflineLogReadNeverLoadsProviderManager() async throws {
+        let controller = try makeController()
+        _ = await controller.collectLogs()
+        XCTAssertNil(controller.loaded)
+        XCTAssertTrue(controller.sentProviderMessages.isEmpty)
+        XCTAssertNil(controller.activeVPN)
+    }
+
+    @MainActor
+    func testLogReadDoesNotMessageInactiveRecoveringOrTerminatingProvider() async throws {
+        for status in [NEVPNStatus.invalid, .disconnected, .connecting, .disconnecting, .reasserting] {
+            let controller = try makeController()
+            let profile = TestTunnelManager()
+            profile.testConnection.testStatus = status
+            controller.activeVPN = profile
+            controller.appData.vpnStatus = .connected // Deliberately stale UI state.
+            _ = await controller.collectLogs()
+            XCTAssertTrue(controller.sentProviderMessages.isEmpty)
+            XCTAssertNil(controller.loaded)
+        }
+        let controller = try makeController()
+        controller.activeVPN = TestTunnelManager()
+        controller.appData.vpnStatus = .connected
+        controller.terminationInProgress = true
+        _ = await controller.collectLogs()
+        XCTAssertTrue(controller.sentProviderMessages.isEmpty)
+    }
+
+    @MainActor
+    func testActiveLogReadRechecksStateAfterAwaitAndRejectsLateData() async throws {
+        let controller = try makeController()
+        let profile = TestTunnelManager()
+        controller.activeVPN = profile
+        controller.appData.vpnStatus = .connected
+        let sent = expectation(description: "active provider log request sent")
+        var reply: ((Data?) -> Void)?
+        controller.onProviderMessage = { data, completion in
+            let message = try? JSONDecoder().decode(ProviderCommandEnvelope.self, from: data)
+            XCTAssertEqual(message?.command, "logs")
+            reply = completion
+            sent.fulfill()
+        }
         let reading = Task { await controller.collectLogs() }
-        await fulfillment(of: [loading], timeout: 2)
-        let current = TestTunnelManager()
-        controller.activeVPN = current
-        controller.loaded?(TestTunnelManager(), nil)
-        _ = await reading.value
-        XCTAssertTrue(controller.activeVPN === current)
+        await fulfillment(of: [sent], timeout: 2)
+        controller.terminationInProgress = true
+        profile.testConnection.testStatus = .disconnected
+        let stale = "stale-provider-log-\(UUID().uuidString)"
+        reply?(Data(stale.utf8))
+        let logs = await reading.value
+        XCTAssertFalse(logs.contains(stale))
+        _ = await controller.collectLogs()
+        XCTAssertEqual(controller.sentProviderMessages.count, 1)
+    }
+
+    @MainActor
+    func testQuitBlocksStatusMessagesButKeepsStartupAcknowledgement() async throws {
+        let controller = try makeController()
+        let profile = TestTunnelManager()
+        controller.activeVPN = profile
+        controller.terminationInProgress = true
+        controller.updateVPNStatus(profile)
+        await drainMainQueue()
+        XCTAssertTrue(controller.sentProviderMessages.isEmpty)
+
+        controller.appData.stopStatsMonitoring()
+        controller.usesRealStartupProbe = true
+        profile.isOnDemandEnabled = false
+        profile.testConnection.testStatus = .connecting
+        controller.onProviderMessage = { message, completion in
+            let envelope = try? JSONDecoder().decode(ProviderCommandEnvelope.self, from: message)
+            XCTAssertEqual(envelope?.command, "startupStatus")
+            completion(Data([1]))
+        }
+        let stopping = expectation(description: "quit safely stops initialized provider")
+        profile.testConnection.onStop = { stopping.fulfill() }
+        let completed = expectation(description: "quit stop completed")
+        controller.disconnect { succeeded in XCTAssertTrue(succeeded); completed.fulfill() }
+        await fulfillment(of: [stopping], timeout: 2)
+        XCTAssertEqual(controller.sentProviderMessages.count, 1)
+        profile.testConnection.testStatus = .disconnected
+        controller.updateVPNStatus(profile)
+        await fulfillment(of: [completed], timeout: 2)
     }
 
     @MainActor

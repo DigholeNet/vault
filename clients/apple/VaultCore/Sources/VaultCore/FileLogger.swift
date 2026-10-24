@@ -140,6 +140,19 @@ public final class FileLogger: @unchecked Sendable {
         }.joined()
     }
 
+    /// Observational snapshot only: does not open a provider-message channel.
+    public static func tunnelInterfaceSummary() -> String {
+        var list: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&list) == 0, let first = list else { return "unavailable" }
+        defer { freeifaddrs(list) }
+        var names = Set<String>()
+        for entry in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let name = String(cString: entry.pointee.ifa_name)
+            if name.hasPrefix("utun") { names.insert(name) }
+        }
+        return names.sorted().joined(separator: ",")
+    }
+
     /// Path of the current log file, or nil if the App Group is unavailable.
     public var currentLogPath: String? {
         logFileURL?.path

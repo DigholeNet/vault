@@ -21,6 +21,8 @@ class VpnManager {
     private var tunnelStartIssuedAt: TimeInterval?
     private var logReadGeneration: UInt64 = 0
     private var clearingLogFiles = false
+    var terminationInProgress = false
+    private var lastMessageTrace: [String: (signature: String, time: TimeInterval)] = [:]
     var logPreferences = UserDefaults.standard
     private var stopCompletions: [(Bool) -> Void] = []
     var tunnelStopTimeout: TimeInterval = 15
@@ -78,6 +80,31 @@ class VpnManager {
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
+    }
+
+    /// Called only after the main-queue send gate has checked live state.
+    func deliverProviderMessage(_ message: Data, manager: NETunnelProviderManager,
+        completion: @escaping (Data?) -> Void) throws {
+        guard let session = manager.connection as? NETunnelProviderSession else {
+            throw NEVPNError(.connectionFailed)
+        }
+        try session.sendProviderMessage(message, responseHandler: completion)
+    }
+
+    private var canReadLiveProviderLogs: Bool {
+        !terminationInProgress && !connectionLifecycle.isPreparing && !connectionLifecycle.isStopping
+            && vpnStatus == .connected && activeVPN?.connection.status == .connected
+    }
+
+    private func canSendProviderCommand(_ command: String, manager: NETunnelProviderManager) -> Bool {
+        let status = manager.connection.status
+        // Startup acknowledgement is part of safe cancellation, including Quit.
+        if command == "startupStatus" {
+            return status == .connecting || status == .connected || status == .reasserting
+        }
+        guard !terminationInProgress, !connectionLifecycle.isPreparing, !connectionLifecycle.isStopping else { return false }
+        if command == "logs" { return canReadLiveProviderLogs && manager === activeVPN }
+        return status == .connected || status == .reasserting
     }
 
     private func logStage(_ stage: String, operation: UInt64, since started: TimeInterval, error: Error? = nil) {
@@ -174,7 +201,7 @@ class VpnManager {
             // off transition the user did not initiate means the extension
             // died or the system stopped the tunnel.
             Logger.network.noticeAndFile(
-                "VPN status: \(oldStatus) -> \(self.vpnStatus) (NEVPNStatus rawValue \(manager.connection.status.rawValue))"
+                "VPN status: \(oldStatus) -> \(self.vpnStatus) (NEVPNStatus rawValue \(manager.connection.status.rawValue)) terminating=\(terminationInProgress) interfaces=\(FileLogger.tunnelInterfaceSummary())"
             )
             if self.vpnStatus == .connected {
                 if let started = connectionRequestedAt {
@@ -701,47 +728,80 @@ extension VpnManager {
             DispatchQueue.main.async { self.sendProviderCommand(command, timeout: timeout, payload: payload, completion: completion) }
             return
         }
+        let requestID = String(UUID().uuidString.prefix(8))
+        let requested = ProcessInfo.processInfo.systemUptime
+        let operation = connectionLifecycle.generation
+        let appPID = ProcessInfo.processInfo.processIdentifier
+        let prefix = "[request:\(requestID)] [operation:\(operation)] command=\(command) appPID=\(appPID)"
         let replyLock = NSLock()
         var replied = false
-        func reply(_ data: Data?) {
+        // Reply callbacks may arrive off-main. The trace decision shares the
+        // reply lock so timeout and send races cannot misreport a response.
+        var tracing = false
+        var sendContext = "managerLookup=pending"
+        func reply(_ data: Data?, reason: String = "response") {
             replyLock.lock()
             let first = !replied
-            replied = true
+            if first { replied = true }
+            let emit = tracing || reason != "response" || data == nil
+            let context = sendContext
             replyLock.unlock()
+            if emit {
+                let elapsed = Int((ProcessInfo.processInfo.systemUptime - requested) * 1000)
+                Logger.network.noticeAndFile("\(prefix) reply reason=\(reason) first=\(first) bytes=\(data?.count ?? 0) durationMs=\(elapsed) \(context)")
+            }
             if first { completion(data) }
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { reply(nil) }
-        struct Command: Codable { var command: String }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+            replyLock.lock()
+            let pending = !replied
+            replyLock.unlock()
+            if pending { reply(nil, reason: "timeout") }
+        }
         let send: (NETunnelProviderManager) -> Void = { manager in
-            guard let session = manager.connection as? NETunnelProviderSession else {
-                Logger.network.errorAndFile("Provider command '\(command)' failed: connection is not NETunnelProviderSession")
-                reply(nil)
+            let status = manager.connection.status
+            let now = ProcessInfo.processInfo.systemUptime
+            let context = "neStatus=\(status.rawValue) uiStatus=\(self.vpnStatus) preparing=\(self.connectionLifecycle.isPreparing) stopping=\(self.connectionLifecycle.isStopping) terminating=\(self.terminationInProgress) onDemand=\(manager.isOnDemandEnabled)"
+            let periodic = ["status", "logs", "diagnosticsProgress", "startupStatus"].contains(command)
+            let signature = "\(ObjectIdentifier(manager.connection))|\(context)"
+            let last = self.lastMessageTrace[command]
+            let emit = !periodic || self.terminationInProgress
+                || status == .disconnected || status == .invalid || status == .disconnecting
+                || last?.signature != signature || now - (last?.time ?? 0) >= 30
+            if emit { self.lastMessageTrace[command] = (signature, now) }
+            replyLock.lock()
+            tracing = emit
+            sendContext = context
+            let expired = replied
+            replyLock.unlock()
+            guard !expired else {
+                Logger.network.noticeAndFile("\(prefix) skipped reason=requestExpired \(context)")
                 return
             }
-            guard let message = payload ?? (try? JSONEncoder().encode(Command(command: command))) else {
-                reply(nil)
+            // This is the final gate immediately before the OS message API.
+            // Sending to an inactive provider can allocate a utun for IdleIPC.
+            guard self.canSendProviderCommand(command, manager: manager) else {
+                Logger.network.noticeAndFile("\(prefix) skipped reason=providerNotActive \(context)")
+                reply(nil, reason: "providerNotActive")
                 return
+            }
+            if emit {
+                Logger.network.noticeAndFile("\(prefix) send \(context) interfaces=\(FileLogger.tunnelInterfaceSummary())")
             }
             do {
-                try session.sendProviderMessage(message) { data in
-                    reply(data)
-                }
+                let message = try ProviderCommandEnvelope.tracedPayload(command: command,
+                    requestID: requestID, trace: emit, payload: payload)
+                try self.deliverProviderMessage(message, manager: manager) { data in reply(data) }
             } catch {
-                Logger.network.errorAndFile("Provider command '\(command)' failed: \(error.localizedDescription)")
-                reply(nil)
+                Logger.network.errorAndFile("\(prefix) send failed error=\(error.localizedDescription)")
+                reply(nil, reason: "sendError")
             }
         }
-        if let manager = self.activeVPN {
-            send(manager)
-        } else {
-            loadProviderManager { manager, _ in
-                guard let manager = manager else {
-                    Logger.network.errorAndFile("Provider command '\(command)' failed: no VPN manager")
-                    reply(nil)
-                    return
-                }
-                send(manager)
-            }
+        if let manager = self.activeVPN { send(manager) }
+        else {
+            // Loading a saved profile solely to send a message can wake an
+            // otherwise idle extension. Offline readers must use cached data.
+            reply(nil, reason: "noActiveManager")
         }
     }
 
@@ -976,14 +1036,20 @@ extension VpnManager {
             }
         }
         async let appLog = FileLogger.shared.readLogAsync()
-        let extensionLog: String? = await withCheckedContinuation { continuation in
-            sendProviderCommand("logs") { data in
-                continuation.resume(returning: data.flatMap { String(data: $0, encoding: .utf8) })
+        let sessionGeneration = diagnosticsSessionGeneration
+        let connection = activeVPN?.connection
+        let extensionLog: String?
+        if canReadLiveProviderLogs {
+            extensionLog = await withCheckedContinuation { continuation in
+                sendProviderCommand("logs") { data in
+                    continuation.resume(returning: data.flatMap { String(data: $0, encoding: .utf8) })
+                }
             }
-        }
+        } else { extensionLog = nil }
         var parts = [await appLog ?? ""]
         guard generation == logReadGeneration, !clearingLogFiles else { return "" }
-        if let extensionLog, !extensionLog.isEmpty {
+        if canReadLiveProviderLogs, sessionGeneration == diagnosticsSessionGeneration,
+            activeVPN?.connection === connection, let extensionLog, !extensionLog.isEmpty {
             if let cache = extensionLogCacheURL {
                 try? extensionLog.write(to: cache, atomically: true, encoding: .utf8)
             }

@@ -330,9 +330,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     /// A superseded instance must never terminate its replacement's process.
     private func exitIfUnowned() {
-        guard Self.activeProvider == nil, Self.startOwner == nil else { return }
+        guard Self.activeProvider == nil, Self.startOwner == nil else {
+            FileLogger.shared.logSync("[session:\(sessionID)] Skipping process exit activeProvider=\(Self.activeProvider?.sessionID ?? "none") startOwner=\(Self.startOwner?.sessionID ?? "none")", level: "NOTICE")
+            return
+        }
         FileLogger.shared.logSync(
-            "[session:\(sessionID)] Exiting extension process pid=\(ProcessInfo.processInfo.processIdentifier); rapid restart may be throttled by launchd",
+            "[session:\(sessionID)] Exiting extension process pid=\(ProcessInfo.processInfo.processIdentifier); interfaces=\(FileLogger.tunnelInterfaceSummary()); rapid restart may be throttled by launchd",
             level: "NOTICE"
         )
         exit(0)
@@ -494,7 +497,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         // after the completion handler runs; an async write could lose the
         // line that explains why the tunnel went away.
         FileLogger.shared.logSync(
-            "[session:\(self.sessionID)] stopTunnel called, reason: \(Self.describeStopReason(reason))(\(reason.rawValue))",
+            "[session:\(self.sessionID)] stopTunnel called, reason: \(Self.describeStopReason(reason))(\(reason.rawValue)) startFinished=\(startFinished) startPending=\(pendingStart != nil) edgePresent=\(edge != nil) interfaces=\(FileLogger.tunnelInterfaceSummary())",
             level: "NOTICE"
         )
         self.diagnosticsCancellation?.cancel()
@@ -694,7 +697,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     deinit {
         pathMonitor?.cancel()
         networkRecoveryWorkItem?.cancel()
-        Logger.network.noticeAndFile("[session:\(sessionID)] Provider deinit (process likely exiting)")
+        Logger.network.noticeAndFile("[session:\(sessionID)] Provider deinit interfaces=\(FileLogger.tunnelInterfaceSummary())")
     }
 
     /// MTU of the physical interface carrying the default route, or nil
@@ -1037,32 +1040,50 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         _ messageData: Data,
         completionHandler: ((Data?) -> Void)? = nil
     ) {
-        struct Command: Codable { var command: String; var token: String? }
-        if let command = try? JSONDecoder().decode(Command.self, from: messageData) {
+        let envelope = try? JSONDecoder().decode(ProviderCommandEnvelope.self, from: messageData)
+        let commandName = envelope?.command ?? (messageData.isEmpty ? "status" : "legacy-status")
+        let requestID = envelope?.requestID ?? "legacy"
+        let received = ProcessInfo.processInfo.systemUptime
+        let prefix = "[session:\(sessionID)] [request:\(requestID)] command=\(commandName) providerPID=\(ProcessInfo.processInfo.processIdentifier)"
+        DispatchQueue.main.async {
+            if envelope?.trace == true || !self.startFinished || self.stopRequested {
+                Logger.network.noticeAndFile("\(prefix) received startFinished=\(self.startFinished) startPending=\(self.pendingStart != nil) stopRequested=\(self.stopRequested) edgePresent=\(self.edge != nil) reasserting=\(self.reasserting) interfaces=\(FileLogger.tunnelInterfaceSummary())")
+            }
+        }
+        let tracedCompletion: ((Data?) -> Void)? = completionHandler.map { completion in
+            { data in
+                if envelope?.trace == true {
+                    let elapsed = Int((ProcessInfo.processInfo.systemUptime - received) * 1000)
+                    Logger.network.noticeAndFile("\(prefix) reply bytes=\(data?.count ?? 0) durationMs=\(elapsed)")
+                }
+                completion(data)
+            }
+        }
+        if let command = envelope {
             switch command.command {
             case "clearLogs":
                 DispatchQueue.main.async {
-                    guard let token = command.token, !token.isEmpty else { completionHandler?(Data([0])); return }
+                    guard let token = command.token, !token.isEmpty else { tracedCompletion?(Data([0])); return }
                     do {
                         try self.clearLogsIfNeeded(token)
-                        completionHandler?(Data([1]))
-                    } catch { completionHandler?(Data([0])) }
+                        tracedCompletion?(Data([1]))
+                    } catch { tracedCompletion?(Data([0])) }
                 }
             case "startupStatus":
                 DispatchQueue.main.async {
                     let started = !self.stopRequested && (self.pendingStart != nil || self.startFinished)
-                    completionHandler?(Data([started ? 1 : 0]))
+                    tracedCompletion?(Data([started ? 1 : 0]))
                 }
             case "diagnose":
-                runDiagnostics(completionHandler: completionHandler)
+                runDiagnostics(completionHandler: tracedCompletion)
             case "diagnosticsProgress":
                 DispatchQueue.main.async {
-                    completionHandler?(self.diagnosticsProgress.flatMap { try? JSONEncoder().encode($0) })
+                    tracedCompletion?(self.diagnosticsProgress.flatMap { try? JSONEncoder().encode($0) })
                 }
             case "cancelDiagnostics":
                 DispatchQueue.main.async {
                     self.diagnosticsCancellation?.cancel()
-                    completionHandler?(Data())
+                    tracedCompletion?(Data())
                 }
             case "logs":
                 // The macOS system extension is a sandboxed root daemon: its
@@ -1071,9 +1092,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 // this channel is the only way Runtime Logs can show it. Keep
                 // the reply bounded — the tail is what matters.
                 let log = FileLogger.shared.readLog() ?? ""
-                completionHandler?(String(log.suffix(512 * 1024)).data(using: .utf8))
+                tracedCompletion?(String(log.suffix(512 * 1024)).data(using: .utf8))
             default:
-                completionHandler?(nil)
+                tracedCompletion?(nil)
             }
             return
         }
@@ -1082,7 +1103,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 ip: self.assignedIp,
                 stats: PacketStats.shared.currentStats
             )
-            completionHandler?(try? JSONEncoder().encode(status))
+            tracedCompletion?(try? JSONEncoder().encode(status))
         }
     }
 

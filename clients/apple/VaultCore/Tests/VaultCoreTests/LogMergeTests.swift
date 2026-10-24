@@ -96,3 +96,27 @@ import Testing
     #expect(logger.readLog()?.contains("new event") == true)
     #expect(logger.readLog()?.contains("queued before clear") == false)
 }
+
+@Test func providerTraceMetadataPreservesCommandsAndLegacyStatus() throws {
+    let raw = Data(#"{"command":"clearLogs","token":"clear-test","futureOption":7}"#.utf8)
+    let traced = try ProviderCommandEnvelope.tracedPayload(command: "clearLogs", requestID: "request-test", trace: true, payload: raw)
+    let envelope = try JSONDecoder().decode(ProviderCommandEnvelope.self, from: traced)
+    #expect(envelope.command == "clearLogs")
+    #expect(envelope.token == "clear-test")
+    #expect(envelope.requestID == "request-test")
+    #expect(envelope.trace == true)
+    let fields = try #require(JSONSerialization.jsonObject(with: traced) as? [String: Any])
+    #expect(fields["futureOption"] as? Int == 7)
+    let status = try ProviderCommandEnvelope.tracedPayload(command: "status", requestID: "unused", trace: true, payload: Data())
+    #expect(status.isEmpty)
+    let opaque = Data([0xff, 0x00])
+    #expect(try ProviderCommandEnvelope.tracedPayload(command: "legacy", requestID: "unused", trace: false, payload: opaque) == opaque)
+}
+
+@Test func providerEnvelopeRemainsCompatibleWithOlderMessages() throws {
+    let old = try JSONDecoder().decode(ProviderCommandEnvelope.self, from: Data(#"{"command":"logs"}"#.utf8))
+    #expect(old.requestID == nil && old.trace == nil && old.token == nil)
+    let data = try ProviderCommandEnvelope.tracedPayload(command: "logs", requestID: "poll-test", trace: false, payload: nil)
+    let new = try JSONDecoder().decode(ProviderCommandEnvelope.self, from: data)
+    #expect(new.command == "logs" && new.trace == false && new.requestID == "poll-test")
+}

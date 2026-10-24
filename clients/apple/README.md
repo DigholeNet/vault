@@ -78,6 +78,18 @@ by a restart can trigger launchd's respawn throttle; confirm this in launchd's
 system log (`service spawn deferred ... due to throttle`) rather than attributing
 the entire pre-callback gap to process initialization.
 
+Provider IPC logs include command names, request IDs, app/provider PIDs, real
+NEVPNStatus values, preparation/stop/termination flags, reply duration, and a
+snapshot of utun names. Quit logs mark the request, cleanup result, timeout, and
+final termination. Healthy periodic messages are sampled every 30 seconds;
+state changes, inactive-session messages, and messages during quit are traced.
+Offline log reads use only local files and the extension cache. No provider
+manager is loaded solely for an IPC request. A final send gate blocks messages
+to inactive providers and during teardown/quit; the startup acknowledgement used
+for safe connection cancellation is the only exception.
+Empty legacy status requests retain their original wire format. Message payloads
+and log contents are never copied into trace records.
+
 Logs are under Diagnostics → Runtime Logs. iOS follows new entries automatically;
 macOS also offers search, source filters, optional auto-scroll and Copy. macOS
 fetches the system extension's log over provider messages and caches it for

@@ -24,3 +24,23 @@ public struct ProviderStatus: Codable, Sendable {
         self.stats = stats
     }
 }
+
+/// Optional trace metadata; empty legacy status requests retain their wire form.
+public struct ProviderCommandEnvelope: Codable {
+    public var command: String
+    public var requestID: String?
+    public var trace: Bool?
+    public var token: String?
+
+    public static func tracedPayload(command: String, requestID: String, trace: Bool, payload: Data?) throws -> Data {
+        if let payload, payload.isEmpty { return payload }
+        var fields: [String: Any] = ["command": command]
+        if let payload {
+            guard let decoded = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] else { return payload }
+            fields = decoded
+        }
+        fields["requestID"] = requestID
+        fields["trace"] = trace
+        return try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
+    }
+}

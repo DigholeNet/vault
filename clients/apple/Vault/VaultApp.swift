@@ -15,9 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let manager = Self.vpnManager else { return .terminateNow }
         guard !terminating else { return .terminateLater }
         terminating = true
+        FileLogger.shared.logSync("App termination requested pid=\(ProcessInfo.processInfo.processIdentifier) vpnStatus=\(manager.vpnStatus) interfaces=\(FileLogger.tunnelInterfaceSummary())", level: "NOTICE")
         // Even an idle profile may still have an on-demand rule after a failure.
         Self.disconnectBeforeTermination(manager) { succeeded in
             self.terminating = false
+            FileLogger.shared.logSync("App termination reply allowed=\(succeeded) vpnStatus=\(manager.vpnStatus) interfaces=\(FileLogger.tunnelInterfaceSummary())", level: "NOTICE")
             NSApp.reply(toApplicationShouldTerminate: succeeded)
             if !succeeded {
                 let alert = NSAlert()
@@ -31,15 +33,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static func disconnectBeforeTermination(
         _ manager: VpnManager, timeout: TimeInterval = 15, completion: @escaping (Bool) -> Void
     ) {
+        manager.terminationInProgress = true
+        let started = ProcessInfo.processInfo.systemUptime
         var replied = false
-        func finish(_ succeeded: Bool) {
+        func finish(_ succeeded: Bool, source: String) {
+            let elapsed = Int((ProcessInfo.processInfo.systemUptime - started) * 1000)
+            FileLogger.shared.logSync("Quit cleanup result source=\(source) succeeded=\(succeeded) late=\(replied) durationMs=\(elapsed) vpnStatus=\(manager.vpnStatus) interfaces=\(FileLogger.tunnelInterfaceSummary())", level: "NOTICE")
             guard !replied else { return }
             replied = true
+            if !succeeded { manager.terminationInProgress = false }
             completion(succeeded)
         }
         // Timeout cancels quitting; profile cleanup is still allowed to finish.
-        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish(false) }
-        manager.disconnect(completion: finish)
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish(false, source: "timeout") }
+        manager.disconnect { finish($0, source: "disconnect") }
+    }
+    func applicationWillTerminate(_ notification: Notification) {
+        FileLogger.shared.logSync("App will terminate pid=\(ProcessInfo.processInfo.processIdentifier) interfaces=\(FileLogger.tunnelInterfaceSummary())", level: "NOTICE")
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { WindowManager.shared.showWindow(withIdentifier: "configure") }
