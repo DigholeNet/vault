@@ -23,6 +23,9 @@ class VpnManager {
     private var observationGeneration: UInt64 = 0
     private var connectionFailurePending = false
     private var stopCompletions: [(Bool) -> Void] = []
+    #if os(macOS)
+    var systemExtensionManager = SystemExtensionManager.shared
+    #endif
     /// Serializes preparation, cancellation and teardown on both platforms.
     private var connectionLifecycle = VPNConnectionLifecycle()
     private var connectInFlight: Bool { connectionLifecycle.isPreparing }
@@ -256,9 +259,12 @@ class VpnManager {
     /// and sync the current status to the UI. Should be called once at app
     /// launch so the UI reflects the real VPN state.
     func startObservingStatus(completion: (() -> Void)? = nil) {
+        let generation = connectionLifecycle.generation
         loadProviderManager { [weak self] manager, _ in
             DispatchQueue.main.async {
-                if let self, let manager {
+                // A user action supersedes startup, including its auto-connect callback.
+                guard let self, self.connectionLifecycle.generation == generation else { return }
+                if let manager {
                     self.activeVPN = manager
                     self.observeVPNStatus(for: manager)
                     self.updateVPNStatus(manager)
@@ -268,7 +274,7 @@ class VpnManager {
         }
     }
 
-    fileprivate func loadAndCreateProviderManager(
+    func loadAndCreateProviderManager(
         _ complete: @escaping (NETunnelProviderManager?, _ loaded: Bool) -> Void
     ) {
         removeVpnStatusObservers()
@@ -387,13 +393,13 @@ extension VpnManager {
             DispatchQueue.main.async { self.connect() }
             return
         }
-        guard vpnStatus == .off, let token = connectionLifecycle.beginConnect() else {
-            Logger.network.noticeAndFile("Ignoring connect while a connection operation is still active")
+        guard vpnStatus == .off else { return }
+        guard !config.host.isEmpty, !config.password.isEmpty else {
+            appData.showConfigureGuide = true
             return
         }
-        guard !config.host.isEmpty, !config.password.isEmpty else {
-            _ = connectionLifecycle.failConnect(token)
-            appData.showConfigureGuide = true
+        guard let token = connectionLifecycle.beginConnect() else {
+            Logger.network.noticeAndFile("Ignoring connect while a connection operation is still active")
             return
         }
         appData.connectionError = nil
@@ -403,7 +409,7 @@ extension VpnManager {
         vpnStatus = .connecting
         Logger.network.noticeAndFile("connect() operation \(token)")
         #if os(macOS)
-        SystemExtensionManager.shared.ensureActivated { [weak self] result in
+        systemExtensionManager.ensureActivated { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard self.connectionLifecycle.canStart(token) else {
@@ -468,6 +474,8 @@ extension VpnManager {
         appData.connectionError = nil
         #if os(macOS)
         appData.isRecovering = false
+        // Release only the activation waiter; a profile save must still finish.
+        systemExtensionManager.cancelActivationWait()
         #endif
         vpnStatus = .disconnecting
         Logger.network.noticeAndFile("disconnect() operation \(token)")
@@ -567,6 +575,10 @@ extension VpnManager {
     /// arrives on an unspecified queue; nil means the message channel itself
     /// failed (no manager, not a provider session, no response).
     private func sendProviderCommand(_ command: String, timeout: TimeInterval = 8, payload: Data? = nil, completion: @escaping (Data?) -> Void) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { self.sendProviderCommand(command, timeout: timeout, payload: payload, completion: completion) }
+            return
+        }
         let replyLock = NSLock()
         var replied = false
         func reply(_ data: Data?) {
@@ -606,7 +618,6 @@ extension VpnManager {
                     reply(nil)
                     return
                 }
-                self.activeVPN = manager
                 send(manager)
             }
         }

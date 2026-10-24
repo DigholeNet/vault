@@ -49,28 +49,60 @@ final class SystemExtensionManager: NSObject {
     /// Posted when activation is blocked on user approval in System Settings.
     static let needsApprovalNotification = Notification.Name("VaultSystemExtensionNeedsApproval")
 
-    /// Non-nil while an activation request is in flight.
+    /// Current connection waiter; the OS request may outlive its cancellation.
     private var pendingCompletion: ((Result<Void, Error>) -> Void)?
+    private var activationInFlight = false
+    private var awaitingUserApproval = false
+    private let submitRequest: (OSSystemExtensionRequest) -> Void
+    private let openApprovalSettings: () -> Void
+
+    init(
+        submitRequest: @escaping (OSSystemExtensionRequest) -> Void = { OSSystemExtensionManager.shared.submitRequest($0) },
+        openApprovalSettings: @escaping () -> Void = {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    ) {
+        self.submitRequest = submitRequest
+        self.openApprovalSettings = openApprovalSettings
+        super.init()
+    }
 
     /// Submit an activation request. If the extension is already installed and
     /// current, the request completes immediately without user interaction.
-    /// While a request is in flight (e.g. awaiting user approval) further
-    /// calls are ignored — the original completion fires once resolved.
+    /// Calls are ignored while a connection is already waiting for activation.
+    /// After that wait is cancelled, a retry reuses any in-flight OS request
+    /// and reopens approval settings if user approval is still required.
     func ensureActivated(completion: @escaping (Result<Void, Error>) -> Void) {
         guard pendingCompletion == nil else {
             Logger.network.noticeAndFile("System extension activation already in progress, ignoring")
             return
         }
         pendingCompletion = completion
+        // The OS request may outlive a cancelled connection. Reuse it on retry.
+        guard !activationInFlight else {
+            if awaitingUserApproval { promptForApproval() }
+            return
+        }
+        activationInFlight = true
         let request = OSSystemExtensionRequest.activationRequest(
             forExtensionWithIdentifier: Self.extensionBundleIdentifier,
             queue: .main
         )
         request.delegate = self
-        OSSystemExtensionManager.shared.submitRequest(request)
+        submitRequest(request)
+    }
+
+    func cancelActivationWait() {
+        let completion = pendingCompletion
+        pendingCompletion = nil
+        completion?(.failure(CancellationError()))
     }
 
     private func finish(with result: Result<Void, Error>) {
+        activationInFlight = false
+        awaitingUserApproval = false
         let completion = pendingCompletion
         pendingCompletion = nil
         completion?(result)
@@ -90,16 +122,19 @@ extension SystemExtensionManager: OSSystemExtensionRequestDelegate {
     }
 
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
+        // Remember this even when the connection was cancelled before the callback.
+        awaitingUserApproval = true
+        promptForApproval()
+    }
+
+    private func promptForApproval() {
+        guard pendingCompletion != nil else { return }
         Logger.network.noticeAndFile("System extension needs user approval in System Settings")
         NotificationCenter.default.post(
             name: Self.needsApprovalNotification,
             object: nil
         )
-        // Take the user to the approval UI. The pending request completes
-        // (didFinishWithResult) once the user approves there.
-        if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
-            NSWorkspace.shared.open(url)
-        }
+        openApprovalSettings()
     }
 
     func request(

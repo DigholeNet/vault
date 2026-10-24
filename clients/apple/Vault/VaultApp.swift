@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !terminating else { return .terminateLater }
         terminating = true
         // Even an idle profile may still have an on-demand rule after a failure.
-        manager.disconnect { succeeded in
+        Self.disconnectBeforeTermination(manager) { succeeded in
             self.terminating = false
             NSApp.reply(toApplicationShouldTerminate: succeeded)
             if !succeeded {
@@ -26,6 +26,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return .terminateLater
+    }
+
+    static func disconnectBeforeTermination(
+        _ manager: VpnManager, timeout: TimeInterval = 15, completion: @escaping (Bool) -> Void
+    ) {
+        var replied = false
+        func finish(_ succeeded: Bool) {
+            guard !replied else { return }
+            replied = true
+            completion(succeeded)
+        }
+        // Timeout cancels quitting; profile cleanup is still allowed to finish.
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish(false) }
+        manager.disconnect(completion: finish)
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { WindowManager.shared.showWindow(withIdentifier: "configure") }

@@ -164,16 +164,16 @@ class VaultConfig: ObservableObject {
         return defaults
     }()
 
-    @AppStorage("id", store: sharedDefaults) var id = ""
-    @AppStorage("ip", store: sharedDefaults) var ip = ""
-    @AppStorage("host", store: sharedDefaults) var host = ""
-    @AppStorage("port", store: sharedDefaults) var port = 9527
-    @AppStorage("dns", store: sharedDefaults) var dns = ""
+    @AppStorage var id: String
+    @AppStorage var ip: String
+    @AppStorage var host: String
+    @AppStorage var port: Int
+    @AppStorage var dns: String
     /// Comma-separated domains for the on-demand diagnostics probes; empty
     /// means the provider's defaults.
-    @AppStorage("probeDomains", store: sharedDefaults) var probeDomains = ""
+    @AppStorage var probeDomains: String
     /// Optional tunnel MTU cap; empty = automatic (built-in upper bound).
-    @AppStorage("mtu", store: sharedDefaults) var mtu = ""
+    @AppStorage var mtu: String
 
     /// The app stores this secret in Keychain rather than App Group defaults.
     /// Connecting also copies it into providerConfiguration, which the OS
@@ -191,19 +191,26 @@ class VaultConfig: ObservableObject {
     private var passwordNeedsReload = false
     private var updatingSavedPassword = false
 
-    init() {
-        passwords = PasswordPersistence(
+    init(defaults: UserDefaults = VaultConfig.sharedDefaults, passwords: PasswordPersistence? = nil) {
+        _id = AppStorage(wrappedValue: "", "id", store: defaults)
+        _ip = AppStorage(wrappedValue: "", "ip", store: defaults)
+        _host = AppStorage(wrappedValue: "", "host", store: defaults)
+        _port = AppStorage(wrappedValue: 9527, "port", store: defaults)
+        _dns = AppStorage(wrappedValue: "", "dns", store: defaults)
+        _probeDomains = AppStorage(wrappedValue: "", "probeDomains", store: defaults)
+        _mtu = AppStorage(wrappedValue: "", "mtu", store: defaults)
+        self.passwords = passwords ?? PasswordPersistence(
             read: KeychainPasswordStore.load,
             write: KeychainPasswordStore.save,
-            readLegacy: { VaultConfig.sharedDefaults.string(forKey: "password") },
-            clearLegacy: { VaultConfig.sharedDefaults.removeObject(forKey: "password") }
+            readLegacy: { defaults.string(forKey: "password") },
+            clearLegacy: { defaults.removeObject(forKey: "password") }
         )
         do {
-            password = try passwords.load()
+            password = try self.passwords.load()
         } catch {
             // Migration failure leaves the recovery copy intact, including
             // in memory for this run. Never replace it with a stale item.
-            let legacy = VaultConfig.sharedDefaults.string(forKey: "password")
+            let legacy = defaults.string(forKey: "password")
             password = legacy ?? ""
             passwordNeedsReload = legacy?.isEmpty != false
             passwordStorageError = "Password could not be saved or loaded. Please try again."
