@@ -5,6 +5,7 @@
 //
 
 import SwiftUI
+import VaultCore
 
 #if os(iOS)
 
@@ -14,11 +15,32 @@ import SwiftUI
         @EnvironmentObject var languageManager: LanguageManager
 
         @State private var isSecured: Bool = true
-        // The port is edited as text and only persisted when it parses to
-        // 1...65535; an invalid edit stays visible with an error hint
-        // instead of being written to the shared defaults.
-        @State private var portText: String = ""
-        @State private var portInvalid: Bool = false
+        @State private var host = ""
+        @State private var password = ""
+        @State private var portText = ""
+        @State private var dns = ""
+        @State private var mtu = ""
+        @State private var probeDomains = ""
+        @State private var savedDraft: [String]?
+        @State private var loaded = false
+
+        private var draft: [String] { [host, portText, password, dns, mtu, probeDomains] }
+
+        private var validationError: String? {
+            SettingsValidation.configurationError(host: host, port: portText, password: password,
+                dns: dns, mtu: mtu, probeDomains: probeDomains)
+        }
+
+        private func save() {
+            guard validationError == nil, let port = Int(portText) else { return }
+            guard config.saveConnection(host: host.trimmingCharacters(in: .whitespacesAndNewlines),
+                port: port, password: password) else { return }
+            config.dns = dns.trimmingCharacters(in: .whitespacesAndNewlines)
+            config.mtu = mtu.trimmingCharacters(in: .whitespacesAndNewlines)
+            config.probeDomains = probeDomains.trimmingCharacters(in: .whitespacesAndNewlines)
+            host = config.host
+            savedDraft = draft
+        }
 
         var body: some View {
 
@@ -42,7 +64,7 @@ import SwiftUI
                                 systemName:
                                     "externaldrive.connected.to.line.below")
                             TextField(
-                                languageManager.tr("Host"), text: $config.host,
+                                languageManager.tr("Host"), text: $host,
                                 prompt: Text(languageManager.tr("IP Address or domain"))
                             ).autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
@@ -55,17 +77,9 @@ import SwiftUI
                             )
                             .keyboardType(.numberPad)
                             .autocorrectionDisabled()
-                            .onChange(of: portText) { _, newValue in
-                                if let port = Int(newValue), (1...65535).contains(port) {
-                                    portInvalid = false
-                                    config.port = port
-                                } else {
-                                    portInvalid = true
-                                }
-                            }
                         }
-                        if portInvalid {
-                            Text(languageManager.tr("Port must be a number between 1 and 65535."))
+                        if let error = validationError {
+                            Text(languageManager.tr(error))
                                 .foregroundColor(.red)
                                 .font(.footnote)
                         }
@@ -75,7 +89,7 @@ import SwiftUI
                                     HStack {
                                         Image(systemName: "p.circle.fill")
                                         SecureField(
-                                            languageManager.tr("Password"), text: $config.password
+                                            languageManager.tr("Password"), text: $password
                                         )
                                         .textInputAutocapitalization(
                                             .never)
@@ -84,7 +98,7 @@ import SwiftUI
                                     HStack {
                                         Image(systemName: "p.circle.fill")
                                         TextField(
-                                            languageManager.tr("Password"), text: $config.password
+                                            languageManager.tr("Password"), text: $password
                                         )
                                         .autocorrectionDisabled()
                                         .textInputAutocapitalization(
@@ -106,7 +120,7 @@ import SwiftUI
                         HStack {
                             Image(systemName: "arrow.up.arrow.down.circle")
                             TextField(
-                                languageManager.tr("MTU"), text: $config.mtu,
+                                languageManager.tr("MTU"), text: $mtu,
                                 prompt: Text("1280-1427")
                             )
                             .keyboardType(.numberPad)
@@ -119,7 +133,7 @@ import SwiftUI
                         HStack {
                             Image(systemName: "network")
                             TextField(
-                                languageManager.tr("DNS"), text: $config.dns,
+                                languageManager.tr("DNS"), text: $dns,
                                 prompt: Text(languageManager.tr("DNS Server"))
                             )
                             .autocorrectionDisabled()
@@ -134,7 +148,7 @@ import SwiftUI
                         HStack {
                             Image(systemName: "stethoscope")
                             TextField(
-                                languageManager.tr("Probe Domains"), text: $config.probeDomains,
+                                languageManager.tr("Probe Domains"), text: $probeDomains,
                                 prompt: Text(languageManager.tr("Domains to probe"))
                             )
                             .autocorrectionDisabled()
@@ -153,6 +167,12 @@ import SwiftUI
                     }
 
                     Section {
+                        Button(languageManager.tr("Save")) { save() }
+                            .disabled(validationError != nil)
+                        if savedDraft == draft {
+                            Text(languageManager.tr("Saved. Changes apply the next time you connect."))
+                                .font(.footnote)
+                        }
                         if let error = config.passwordStorageError {
                             Text(languageManager.tr(error))
                                 .foregroundColor(.red)
@@ -165,8 +185,15 @@ import SwiftUI
 
             }.navigationBarBackButtonHidden(true)
                 .onAppear {
+                    guard !loaded else { return }
+                    loaded = true
                     portText = String(config.port)
-                    portInvalid = !(1...65535).contains(config.port)
+                    host = config.host
+                    password = config.password
+                    dns = config.dns
+                    mtu = config.mtu
+                    probeDomains = config.probeDomains
+                    savedDraft = nil
                 }
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {

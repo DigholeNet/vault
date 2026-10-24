@@ -184,3 +184,22 @@ import Testing
     context.cancellation.cancel()
     #expect(context.overBudget)
 }
+
+@Test func connectionValidationRejectsInvalidDraftsAndPersistedSettings() {
+    func error(host: String = " vpn.example.com ", port: String = "9527",
+        password: String = "secret", dns: String = "", mtu: String = "",
+        domains: String = "") -> String? {
+        SettingsValidation.configurationError(host: host, port: port, password: password,
+            dns: dns, mtu: mtu, probeDomains: domains)
+    }
+    #expect(error() == nil)
+    #expect(error(host: "https://vpn.example.com") != nil)
+    #expect(error(port: "") != nil)
+    #expect(error(port: "0") != nil)
+    #expect(error(port: "65536") != nil)
+    #expect(error(password: "") != nil)
+    #expect(error(dns: "1.1.1.1,") != nil)
+    #expect(error(mtu: "abc") != nil)
+    #expect(error(domains: "https://example.com") != nil)
+    #expect(error(dns: "1.1.1.1, ::1", mtu: " 1280 ", domains: "example.com") == nil)
+}

@@ -8,7 +8,8 @@ Rust and `protoc`.
 ## Usage
 
 - **iOS:** Status shows the connection button, session clock, assigned IPv4/IPv6
-  addresses and traffic. Configure edits settings immediately; Diagnostics holds
+  addresses and traffic. Configure validates a draft; Save applies connection settings
+  on the next connection. Language changes apply immediately. Diagnostics holds
   connection checks and logs. About shows the app icon and version.
 - **macOS:** the menu bar shows connection state. The popover has a connection
   button, session clock, traffic, and Diagnostics / Settings / Quit actions.
@@ -115,13 +116,21 @@ xcodebuild -project Vault.xcodeproj -scheme Vault \
 
 swift test --package-path VaultCore
 xcodebuild -project Vault.xcodeproj -scheme Vault \
+  -destination 'platform=macOS' -only-testing:VaultTests \
+  -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test
+xcodebuild -project Vault.xcodeproj -scheme Vault \
   -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
 The framework build script lists the required Rust targets. Generated bindings
 and `VaultCore/Frameworks/VaultCoreFFI.xcframework` are not committed. Swift Testing
-covers core/glue logic; XCTest covers app/UI tests. CI also runs SwiftLint.
-Unsigned builds validate compilation; real tunnel tests need signed targets.
+covers core/glue logic; XCTest covers app/UI tests. CI runs SwiftLint, VaultCore
+tests, and unsigned app builds and `VaultTests` on both macOS and iOS Simulator.
+The macOS run includes the platform-specific lifecycle, Quit and IPC regressions.
+The iOS run also checks Diagnostics / Logs / About navigation without a VPN,
+using an available iPhone simulator running iOS 18.5 or later. Tests run serially
+within each platform; `.xcresult` bundles are retained as CI artifacts for 7 days.
+These checks do not activate a real tunnel; real tunnel tests need signed targets.
 
 ## Building Your Own Fork
 

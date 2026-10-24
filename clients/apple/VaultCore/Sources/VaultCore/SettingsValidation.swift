@@ -1,8 +1,25 @@
 import Foundation
 import Network
 
-/// Validation for connection settings before saving a macOS settings draft.
+/// Shared validation for settings drafts and the connection entry point.
 public enum SettingsValidation {
+    public static func configurationError(host: String, port: String, password: String,
+        dns: String, mtu: String, probeDomains: String) -> String? {
+        guard isValidServer(host) else {
+            return "Enter a server IP address or hostname without a URL scheme."
+        }
+        guard let number = Int(port), (1...65535).contains(number) else {
+            return "Port must be a number between 1 and 65535."
+        }
+        guard !password.isEmpty else { return "Enter the server password." }
+        guard isValidDNSList(dns) else { return "Enter valid DNS IP addresses, separated by commas." }
+        guard isValidMTU(mtu) else { return "MTU must be between 1280 and 1427, or empty for automatic." }
+        guard isValidProbeList(probeDomains) else {
+            return "Enter domain names separated by commas, without URLs."
+        }
+        return nil
+    }
+
     public static func isValidServer(_ value: String) -> Bool {
         let host = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return IPv4Address(host) != nil || IPv6Address(host) != nil || isValidProbeDomain(host)

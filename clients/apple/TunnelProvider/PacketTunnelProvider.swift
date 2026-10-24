@@ -214,14 +214,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         // DNS is optional, use default values
         if let dnsServers = conf["dns"] as? String, !dnsServers.isEmpty {
             self.dns = dnsServers.components(separatedBy: ",")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
         }
 
         // Probe domains for on-demand diagnostics are optional too.
         if let domains = conf["probeDomains"] as? String, !domains.isEmpty {
             let parsed = domains.components(separatedBy: ",")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
             if !parsed.isEmpty {
                 self.probeDomains = parsed

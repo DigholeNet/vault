@@ -1,7 +1,7 @@
 name: Apple checks
 
-# PR/push checks for the Apple clients: SwiftLint, VaultCore unit tests and
-# an unsigned iOS Simulator build. Signed release packaging (iOS IPA +
+# PR/push checks: SwiftLint, VaultCore tests, macOS/iOS app regression tests
+# and an iOS navigation smoke test. Signed release packaging (iOS IPA +
 # notarized macOS zip) runs in release.yml — see docs/releasing.md for the
 # required signing secrets.
 
@@ -46,6 +46,7 @@ jobs:
 
   build:
     runs-on: macos-latest
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: clients/apple
@@ -74,9 +75,64 @@ jobs:
       - name: Run VaultCore unit tests
         run: cd VaultCore && swift test
 
-      - name: Build app for iOS Simulator (unsigned)
+      # Most lifecycle, Quit and provider-IPC regression tests are macOS-only.
+      # Running VaultCore or only testing on iOS does not execute them.
+      - name: Build and test macOS app (unsigned)
         run: |
-          xcodebuild -scheme Vault \
-            -destination 'generic/platform=iOS Simulator' \
+          xcodebuild -project Vault.xcodeproj -scheme Vault \
+            -destination 'platform=macOS' \
             -configuration Debug \
-            build CODE_SIGNING_ALLOWED=NO
+            -derivedDataPath "$RUNNER_TEMP/vault-macos-build" \
+            -resultBundlePath "$RUNNER_TEMP/vault-macos-tests.xcresult" \
+            -parallel-testing-enabled NO \
+            -only-testing:VaultTests \
+            CODE_SIGNING_ALLOWED=NO test
+
+      - name: Select an available iPhone simulator
+        id: simulator
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          inventory = json.loads(subprocess.check_output(
+              ["xcrun", "simctl", "list", "devices", "available", "--json"], text=True))
+          candidates = []
+          for runtime, devices in inventory["devices"].items():
+              if ".iOS-" not in runtime:
+                  continue
+              version = tuple(int(part) for part in runtime.split(".iOS-", 1)[1].split("-"))
+              if version < (18, 5):
+                  continue
+              for device in devices:
+                  if device.get("isAvailable") and device["name"].startswith("iPhone"):
+                      candidates.append((version, device["name"], device["udid"]))
+          if not candidates:
+              raise SystemExit("No available iPhone simulator running iOS 18.5 or later")
+          version, name, udid = max(candidates)
+          print(f"Using {name} (iOS {'.'.join(map(str, version))}): {udid}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"udid={udid}\n")
+          PY
+
+      - name: Build and test iOS app and navigation (unsigned)
+        run: |
+          xcodebuild -project Vault.xcodeproj -scheme Vault \
+            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
+            -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/vault-ios-build" \
+            -resultBundlePath "$RUNNER_TEMP/vault-ios-tests.xcresult" \
+            -parallel-testing-enabled NO \
+            -only-testing:VaultTests \
+            -only-testing:VaultUITests/VaultUITests/testDiagnosticsAndAboutNavigationWithoutVPN \
+            CODE_SIGNING_ALLOWED=NO test
+
+      - name: Upload Apple test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: apple-test-results
+          path: ${{ runner.temp }}/vault-*-tests.xcresult
+          if-no-files-found: warn
+          retention-days: 7

@@ -19,8 +19,10 @@
    in CI* below; the
    `apple-packages` job fails fast with a list of missing secrets if they
    are not configured. The separate Apple CI (`.github/workflows/apple.yml`)
-   only performs PR/push checks (SwiftLint, VaultCore unit tests, unsigned
-   iOS Simulator build). Apple artifacts can also be built locally as
+   performs PR/push checks: SwiftLint, VaultCore unit tests, unsigned macOS
+   and iOS Simulator app builds and `VaultTests`, plus an iOS navigation
+   smoke test. Test result bundles are uploaded even when tests fail.
+   Apple artifacts can also be built locally as
    described below.
 
 ## Apple packaging and signing

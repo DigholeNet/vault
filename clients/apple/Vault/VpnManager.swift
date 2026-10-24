@@ -456,6 +456,12 @@ extension VpnManager {
             appData.showConfigureGuide = true
             return
         }
+        if let error = SettingsValidation.configurationError(host: config.host, port: String(config.port),
+            password: config.password, dns: config.dns, mtu: config.mtu, probeDomains: config.probeDomains) {
+            appData.connectionError = error
+            return
+        }
+        config.host = config.host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let token = connectionLifecycle.beginConnect() else {
             Logger.network.noticeAndFile("Ignoring connect while a connection operation is still active")
             return
