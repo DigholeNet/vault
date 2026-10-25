@@ -54,7 +54,7 @@ final class VaultUITests: XCTestCase {
         add(logs)
 
         app.tabBars.buttons["About"].tap()
-        XCTAssertTrue(app.staticTexts["VPN Client"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["A secure VPN client for cross-regional connectivity."].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["View Logs"].exists)
         XCTAssertFalse(app.buttons["Copy"].exists)
         let about = XCTAttachment(screenshot: app.screenshot())

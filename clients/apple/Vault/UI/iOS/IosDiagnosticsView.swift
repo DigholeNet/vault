@@ -72,7 +72,7 @@ struct IosDiagnosticsView: View {
                                         Spacer()
                                         Text("\(probe.durationMs) ms").monospacedDigit()
                                     }
-                                    Text(probe.detail).foregroundStyle(.secondary)
+                                    Text(probe.displayDetail).foregroundStyle(.secondary)
                                         .textSelection(.enabled)
                                     if let tls = probe.tlsDurationMs {
                                         Text("TLS  \(tls) ms").monospacedDigit().foregroundStyle(.secondary)
@@ -240,7 +240,7 @@ private struct IosDiagnosticsDetailView: View {
                                 Spacer(minLength: 4)
                                 Text("\(probe.durationMs) ms").monospacedDigit().fixedSize()
                             }
-                            Text(probe.detail).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                            Text(probe.displayDetail).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
                             if let tls = probe.tlsDurationMs {
                                 Text("TLS  \(tls) ms").font(.footnote).monospacedDigit().foregroundStyle(.secondary)
                             }

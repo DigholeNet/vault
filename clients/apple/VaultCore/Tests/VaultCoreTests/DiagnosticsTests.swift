@@ -35,7 +35,7 @@ private func response(_ request: DiagnosticRequest) -> DiagnosticResponse {
   #expect(result.engineState == .passed)
   #expect(DiagnosticsPresentation.passed(result))
   #expect(result.checks?.count == 9)
-  #expect(result.domainStates["example.com"] == .passed)
+  #expect(DiagnosticsPresentation.domainState(result, domain: "example.com") == .passed)
   #expect(scopes[.dns] == .tunnel && scopes[.https6] == .tunnel)
   #expect(scopes[.application] == .application && scopes[.route] == .application)
   #expect(scopes[.gateway] == .hostDefault && scopes[.ping] == .application)
@@ -124,11 +124,10 @@ private func response(_ request: DiagnosticRequest) -> DiagnosticResponse {
       if request.stage == .route { return .route(ipv4: "192.168.1.2", ipv6: "fd00::2") }
       return response(request)
     })
-  let decoded = try JSONDecoder().decode(DiagnosticsResult.self, from: JSONEncoder().encode(result))
-  #expect(decoded.engineState == .failed)
-  #expect(!DiagnosticsPresentation.passed(decoded))
-  #expect(decoded.domainStates["example.com"] == .passed)
-  #expect(decoded.lines.contains { $0.contains("route:") })
+  #expect(result.engineState == .failed)
+  #expect(!DiagnosticsPresentation.passed(result))
+  #expect(DiagnosticsPresentation.domainState(result, domain: "example.com") == .passed)
+  #expect(result.lines.contains { $0.contains("route:") })
 }
 
 @Test func sessionClockBounds() {
@@ -165,4 +164,19 @@ private func response(_ request: DiagnosticRequest) -> DiagnosticResponse {
   reconnected.connectionGeneration += 1
   #expect(!original.isSameSession(as: reconnected))
   #expect(original.isSameSession(as: original))
+}
+
+@Test func invalidatedVerdictRetainsRustObservations() throws {
+  var result = RustDiagnostics.run(
+    context: context(), cancellation: DiagnosticsCancellation(),
+    execute: { request, _ in response(request) })
+  let snapshot = try #require(result.snapshot)
+  #expect(result.engineState == .passed)
+  result.message = "INCOMPLETE - tunnel session changed; run diagnostics again"
+  #expect(result.engineState == .incomplete)
+  #expect(!DiagnosticsPresentation.passed(result))
+  #expect(result.snapshot == snapshot)
+  #expect(result.checks == snapshot.checks)
+  #expect(result.probes == snapshot.probes)
+  #expect(!result.lines.isEmpty)
 }

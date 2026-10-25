@@ -30,9 +30,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var pendingStart: PendingStart?
     private var startTimeoutWorkItem: DispatchWorkItem?
     private var settingsTimeoutWorkItem: DispatchWorkItem?
-    /// Polls Rust traffic counters once per second. iOS reads shared defaults;
-    /// macOS reads the same snapshot through provider IPC.
+    /// Polls Rust counters and publishes an in-memory status snapshot over IPC.
     private var statsTimer: DispatchSourceTimer?
+    private var statsSession = PacketStats.Session()
     /// Logs an "alive" marker with the memory footprint every 30s. When the
     /// markers stop without a stopTunnel/sleep line, the process was killed
     /// or suspended without warning.
@@ -132,10 +132,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         )
         self.startAliveMarker()
         self.stopRequested = false
-        // Statistics are per tunnel session: reset them so a new session
-        // (including one started after an app/extension restart) begins at
-        // zero instead of accumulating persisted values forever.
-        PacketStats.shared.reset()
+        // Each provider session owns fresh counters; the app carries forward
+        // the last observed totals when an on-demand restart replaces it.
+        statsSession.begin()
         guard
             let protoConfig = protocolConfiguration as? NETunnelProviderProtocol
         else {
@@ -433,6 +432,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// One cleanup path for startup failure, stop and provider replacement.
     private func cleanupSession() {
         stopRequested = true
+        statsSession.end()
         sessionToken = UUID()
         startFinished = false
         diagnostics.cancel()
@@ -605,8 +605,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     else { self.cancelTunnelWithError(error) }
                     return
                 }
-                // Publish only the addresses that the OS successfully installed.
-                UserDefaults(suiteName: kAppGroupIdentifier)?.set(configuration.addresses, forKey: "ip")
                 if let next = self.tunnelSettings.next() {
                     self.applySettings(next)
                 } else if self.pendingStart?.isPending == true {
@@ -628,7 +626,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             dns: dns, domains: probeDomains, connectionGeneration: connection.generation)
     }
 
-    var providerStatus: ProviderStatus { ProviderStatus(ip: assignedIp, stats: PacketStats.shared.currentStats) }
+    var providerStatus: ProviderStatus? {
+        guard startFinished, !stopRequested, Self.activeProvider === self else { return nil }
+        return statsSession.status(ip: assignedIp)
+    }
     var providerStarted: Bool { !stopRequested && (pendingStart != nil || startFinished) }
     var messageState: String {
         "startFinished=\(startFinished) startPending=\(pendingStart != nil) stopRequested=\(stopRequested) "
@@ -686,7 +687,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         timer.setEventHandler { [weak self] in
             guard let self = self, let edge = self.edge else { return }
             self.reasserting = self.tunnelSettings.isApplying || !edge.isConnected
-            PacketStats.shared.update(from: edge.getTrafficStats())
+            self.statsSession.update(PacketStats.Stats(edge.getTrafficStats()))
         }
         timer.resume()
         statsTimer = timer

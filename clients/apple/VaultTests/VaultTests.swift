@@ -91,7 +91,7 @@ extension VaultTests {
         let profile = TestTunnelManager()
         profile.isOnDemandEnabled = true
         controller.activeVPN = profile
-        defer { data.stopStatsMonitoring() }
+        defer { controller.stopStatsMonitoring() }
 
         let failed = expectation(description: "disconnect failed")
         profile.onSave = { completion in
@@ -203,8 +203,8 @@ extension VaultTests {
         let config = storage.config
         XCTAssertTrue(config.saveConnection(host: "test.invalid", port: 9527, password: "test-password"))
         let data = AppData()
-        addTeardownBlock { await MainActor.run { data.stopStatsMonitoring() } }
         let controller = DelayedLoadVpnManager(config: config, appData: data)
+        addTeardownBlock { await MainActor.run { controller.stopStatsMonitoring() } }
         controller.logPreferences = storage.defaults
         controller.systemExtensionManager = SystemExtensionManager(
             submitRequest: { [weak controller] in controller?.activationRequests.append($0) },
@@ -237,8 +237,8 @@ extension VaultTests {
             config.host = host
             config.password = password
             let data = AppData()
-            defer { data.stopStatsMonitoring() }
             let controller = DelayedLoadVpnManager(config: config, appData: data)
+            defer { controller.stopStatsMonitoring() }
             var startupFinished = false
             controller.startObservingStatus { startupFinished = true }
             let startupReply = try XCTUnwrap(controller.loaded)
@@ -704,7 +704,9 @@ extension VaultTests {
         let controller = try makeController()
         let profile = TestTunnelManager()
         controller.activeVPN = profile
-        controller.appData.vpnStatus = .connected
+        controller.updateVPNStatus(profile)
+        controller.stopStatsMonitoring()
+        controller.sentProviderMessages.removeAll()
         let sent = expectation(description: "active provider log request sent")
         var reply: ((Data?) -> Void)?
         controller.onProviderMessage = { data, completion in
@@ -735,7 +737,7 @@ extension VaultTests {
         await drainMainQueue()
         XCTAssertTrue(controller.sentProviderMessages.isEmpty)
 
-        controller.appData.stopStatsMonitoring()
+        controller.stopStatsMonitoring()
         controller.usesRealStartupProbe = true
         profile.isOnDemandEnabled = false
         profile.testConnection.testStatus = .connecting
@@ -758,8 +760,8 @@ extension VaultTests {
     @MainActor
     func testStaleStartupLoad() async throws {
         let data = AppData()
-        defer { data.stopStatsMonitoring() }
         let controller = DelayedLoadVpnManager(config: try makeConfig().config, appData: data)
+        defer { controller.stopStatsMonitoring() }
         var startupFinished = false
         controller.startObservingStatus { startupFinished = true }
         let startupReply = try XCTUnwrap(controller.loaded)
@@ -898,5 +900,177 @@ extension VaultTests {
         await model.clearLogs(using: controller)
         XCTAssertEqual(model.logMessage, "Unable to clear all log files. Please try again.")
         XCTAssertFalse(model.clearingLogs)
+    }
+}
+
+extension VaultTests {
+    func testDraftSaveValidatesBeforeWriting() throws {
+        let config = try makeConfig().config
+        var draft = config.connectionDraft
+        draft.host = " test.invalid "
+        draft.password = " secret "
+        draft.dns = "invalid-dns"
+        XCTAssertNotNil(config.save(draft))
+        XCTAssertEqual(config.host, "")
+        XCTAssertEqual(config.password, "")
+        draft.dns = " 1.1.1.1 "
+        draft.mtu = " 1280 "
+        draft.probeDomains = " example.com "
+        XCTAssertNil(config.save(draft))
+        XCTAssertEqual(config.host, "test.invalid")
+        XCTAssertEqual(config.password, " secret ")
+        XCTAssertEqual(config.dns, "1.1.1.1")
+        XCTAssertEqual(config.mtu, "1280")
+        XCTAssertEqual(config.probeDomains, "example.com")
+    }
+
+    func testDraftSectionSavePreservesOtherSettings() throws {
+        let config = try makeConfig().config
+        var draft = config.connectionDraft
+        draft.dns = "8.8.8.8"
+        draft.mtu = "1280"
+        // Network/advanced can be saved before connection settings are complete.
+        XCTAssertNil(config.save(draft, section: .network))
+        XCTAssertEqual(config.dns, "8.8.8.8")
+        XCTAssertEqual(config.mtu, "")
+        XCTAssertNil(config.save(draft, section: .advanced))
+        XCTAssertEqual(config.mtu, "1280")
+        draft.host = "test.invalid"
+        draft.password = "secret"
+        draft.dns = "invalid"
+        XCTAssertNil(config.save(draft, section: .connection))
+        XCTAssertEqual(config.host, "test.invalid")
+        XCTAssertEqual(config.dns, "8.8.8.8")
+    }
+
+    func testDraftPasswordFailureLeavesSettingsIntact() throws {
+        let suite = "VaultDraft.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let passwords = PasswordPersistence(read: { "old" }, write: { _ in
+            throw NSError(domain: "Keychain", code: 1)
+        }, readLegacy: { nil }, clearLegacy: {})
+        let config = VaultConfig(defaults: defaults, passwords: passwords)
+        var draft = config.connectionDraft
+        draft.host = "test.invalid"
+        draft.password = "new"
+        draft.dns = "1.1.1.1"
+        XCTAssertNotNil(config.save(draft))
+        XCTAssertEqual(config.host, "")
+        XCTAssertEqual(config.password, "old")
+        XCTAssertEqual(config.dns, "")
+    }
+
+    func testStatsAccumulateAcrossProviderSessions() {
+        let data = AppData()
+        var stats = PacketStats.Stats.zero
+        stats.bytesSent = 100
+        stats.bytesReceived = 200
+        data.applyStatus(ProviderStatus(ip: "10.0.0.2", stats: stats, session: "first"))
+        // The replacement can already exceed the previous sample: the session
+        // identity, rather than counter regression alone, must detect its reset.
+        stats.bytesSent = 150
+        stats.bytesReceived = 250
+        stats.bytesSentPerSecond = 12
+        data.applyStatus(ProviderStatus(ip: "10.0.0.3", stats: stats, session: "second"))
+        XCTAssertEqual(data.bytesSent, 250)
+        XCTAssertEqual(data.bytesReceived, 450)
+        XCTAssertEqual(data.bytesSentPerSecond, 12)
+        data.applyStatus(ProviderStatus(ip: "10.0.0.3", stats: stats, session: "second"))
+        XCTAssertEqual(data.bytesSent, 250)
+        data.resetStats()
+        data.applyStatus(ProviderStatus(ip: "10.0.0.3", stats: stats, session: "second"))
+        XCTAssertEqual(data.bytesSent, 150)
+    }
+}
+
+private final class StatusQueryVpnManager: VpnManager {
+    var replies: [(Data?) -> Void] = []
+    override func deliverProviderMessage(_ message: Data, manager: NETunnelProviderManager,
+        completion: @escaping (Data?) -> Void) throws {
+        replies.append(completion)
+    }
+}
+
+extension VaultTests {
+    @MainActor
+    func testStatusPollingRejectsLateReplyAfterDisconnect() async throws {
+        let data = AppData()
+        let config = try makeConfig().config
+        let controller = StatusQueryVpnManager(config: config, appData: data)
+        let profile = TestTunnelManager()
+        controller.activeVPN = profile
+        controller.updateVPNStatus(profile)
+        defer { controller.stopStatsMonitoring() }
+        XCTAssertEqual(controller.replies.count, 1)
+        // Status flaps must neither stack timers nor overlap a pending IPC query.
+        profile.testConnection.testStatus = .reasserting
+        controller.updateVPNStatus(profile)
+        profile.testConnection.testStatus = .connected
+        controller.updateVPNStatus(profile)
+        XCTAssertEqual(controller.replies.count, 1)
+        profile.testConnection.testStatus = .disconnected
+        controller.updateVPNStatus(profile)
+        var stats = PacketStats.Stats.zero
+        stats.bytesSent = 100
+        let stale = ProviderStatus(ip: "10.0.0.2", stats: stats, session: "old")
+        controller.replies[0](try JSONEncoder().encode(stale))
+        let drained = expectation(description: "late reply delivered")
+        DispatchQueue.main.async { drained.fulfill() }
+        await fulfillment(of: [drained], timeout: 2)
+        XCTAssertEqual(data.bytesSent, 0)
+        XCTAssertEqual(config.ip, "")
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
+    }
+
+    @MainActor
+    func testStatusSnapshotPublishesAddressAndCountersTogether() async throws {
+        let data = AppData()
+        let config = try makeConfig().config
+        let controller = StatusQueryVpnManager(config: config, appData: data)
+        let profile = TestTunnelManager()
+        controller.activeVPN = profile
+        controller.updateVPNStatus(profile)
+        defer { controller.stopStatsMonitoring() }
+        var stats = PacketStats.Stats.zero
+        stats.bytesSent = 123
+        let status = ProviderStatus(ip: "10.0.0.2", stats: stats, session: "live")
+        let reply = try XCTUnwrap(controller.replies.first)
+        reply(try JSONEncoder().encode(status))
+        let drained = expectation(description: "status published")
+        DispatchQueue.main.async { drained.fulfill() }
+        await fulfillment(of: [drained], timeout: 2)
+        XCTAssertEqual(data.bytesSent, 123)
+        XCTAssertEqual(config.ip, "10.0.0.2")
+        // Mutating UI storage cannot change the controller's authoritative phase.
+        data.vpnStatus = .disconnected
+        XCTAssertEqual(controller.vpnStatus, .connected)
+        controller.updateVPNStatus(profile)
+        XCTAssertEqual(data.vpnStatus, .connected)
+    }
+}
+
+extension VaultTests {
+    func testProviderReplacementDoesNotCountCleanedUpTotalsTwice() throws {
+        let data = AppData()
+        var previous = PacketStats.Session()
+        previous.begin()
+        var stats = PacketStats.Stats.zero
+        stats.bytesSent = 100
+        previous.update(stats)
+        data.applyStatus(try XCTUnwrap(previous.status(ip: "10.0.0.2")))
+
+        previous.end()
+        // Simulate the old instance servicing a queued status request after takeover.
+        if let queued = previous.status(ip: "") { data.applyStatus(queued) }
+        XCTAssertEqual(data.bytesSent, 100)
+
+        var replacement = PacketStats.Session()
+        replacement.begin()
+        stats.bytesSent = 50
+        replacement.update(stats)
+        data.applyStatus(try XCTUnwrap(replacement.status(ip: "10.0.0.3")))
+        XCTAssertEqual(data.bytesSent, 150)
+        XCTAssertNil(previous.status(ip: ""))
     }
 }

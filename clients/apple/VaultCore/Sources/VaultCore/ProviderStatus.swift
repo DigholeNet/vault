@@ -7,19 +7,21 @@
 //  Extension provider-message channel (`sendProviderMessage` /
 //  `handleAppMessage`).
 //
-//  macOS polls this payload for assigned addresses and statistics because
-//  its system extension runs outside the user's App Group session.
+//  Both apps poll addresses and statistics through this channel.
 //  Diagnostics obtains live configuration through diagnosticContext.
 //
 
 import Foundation
 
 public struct ProviderStatus: Codable, Sendable {
+    /// Stable for the lifetime of these counters; absent in legacy providers.
+    public var session: String?
     /// Addresses assigned by the supernode, "ipv4" or "ipv4/ipv6".
     public var ip: String
     public var stats: PacketStats.Stats
 
-    public init(ip: String, stats: PacketStats.Stats) {
+    public init(ip: String, stats: PacketStats.Stats, session: String? = nil) {
+        self.session = session
         self.ip = ip
         self.stats = stats
     }

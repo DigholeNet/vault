@@ -1,124 +1,56 @@
-//
-//  PacketStats.swift
-//  VaultCore
-//
-//
-
+// SPDX-License-Identifier: MIT
 import Foundation
 
-/// Bridges traffic statistics from the Rust core (vault-core owns the
-/// counters, living in the Network Extension process) to the main app via
-/// App Group UserDefaults on iOS and provider IPC on macOS.
-///
-/// The Network Extension polls `Edge.getTrafficStats()` once per second and
-/// calls `update(from:)`. The main app is a read-only consumer through
-/// `currentStats`. Thread-safe: all mutable state is protected by an
-/// internal serial dispatch queue.
-public final class PacketStats: @unchecked Sendable {
-    public static let shared = PacketStats()
-
-    private let statsKey = "packetStats"
-    private let appGroupIdentifier: String
-    private let defaults: UserDefaults
-    private let queue = DispatchQueue(label: "net.dighole.vault.packetstats")
-    private var _stats = Stats.zero
-
+/// In-memory provider snapshots. Both apps read them through provider status IPC.
+public enum PacketStats {
     public struct Stats: Codable, Sendable {
-        public var packetsSent: UInt64
-        public var packetsReceived: UInt64
-        public var bytesSent: UInt64
-        public var bytesReceived: UInt64
-        public var bytesSentPerSecond: UInt64
-        public var bytesReceivedPerSecond: UInt64
-        public var lastUpdated: Date
+        public var packetsSent: UInt64 = 0
+        public var packetsReceived: UInt64 = 0
+        public var bytesSent: UInt64 = 0
+        public var bytesReceived: UInt64 = 0
+        public var bytesSentPerSecond: UInt64 = 0
+        public var bytesReceivedPerSecond: UInt64 = 0
 
-        public static var zero: Stats {
-            Stats(
-                packetsSent: 0, packetsReceived: 0, bytesSent: 0, bytesReceived: 0,
-                bytesSentPerSecond: 0, bytesReceivedPerSecond: 0, lastUpdated: Date()
-            )
-        }
+        public static var zero: Stats { Stats() }
+        public init() {}
 
-        public init(
-            packetsSent: UInt64, packetsReceived: UInt64, bytesSent: UInt64,
-            bytesReceived: UInt64, bytesSentPerSecond: UInt64,
-            bytesReceivedPerSecond: UInt64, lastUpdated: Date
-        ) {
-            self.packetsSent = packetsSent
-            self.packetsReceived = packetsReceived
-            self.bytesSent = bytesSent
-            self.bytesReceived = bytesReceived
-            self.bytesSentPerSecond = bytesSentPerSecond
-            self.bytesReceivedPerSecond = bytesReceivedPerSecond
-            self.lastUpdated = lastUpdated
+        public init(_ core: TrafficStats) {
+            packetsSent = UInt64(max(0, core.packetsSent))
+            packetsReceived = UInt64(max(0, core.packetsReceived))
+            bytesSent = UInt64(max(0, core.bytesSent))
+            bytesReceived = UInt64(max(0, core.bytesReceived))
+            bytesSentPerSecond = UInt64(max(0, core.sendSpeed))
+            bytesReceivedPerSecond = UInt64(max(0, core.receiveSpeed))
         }
     }
 
-    private init() {
-        self.appGroupIdentifier = kAppGroupIdentifier
-        self.defaults = UserDefaults(suiteName: appGroupIdentifier) ?? .standard
-        loadPersisted()
-    }
+    /// Owns the identity and counters together. Ending a session invalidates
+    /// queued status reads; cancellation tokens never identify traffic totals.
+    public struct Session {
+        private var id: String?
+        private var stats: Stats = .zero
 
-    /// Initialize with custom app group identifier (for testing)
-    public init(appGroupIdentifier: String) {
-        self.appGroupIdentifier = appGroupIdentifier
-        self.defaults = UserDefaults(suiteName: appGroupIdentifier) ?? .standard
-        loadPersisted()
-    }
+        public init() {}
 
-    private func loadPersisted() {
-        if let data = defaults.data(forKey: statsKey),
-           let persisted = try? JSONDecoder().decode(Stats.self, from: data) {
-            self._stats = persisted
+        public mutating func begin() {
+            id = UUID().uuidString
+            stats = .zero
         }
-    }
 
-    /// Get current stats.
-    /// In the Network Extension process this returns the in-memory value.
-    /// In the main app process this merges the latest persisted data from
-    /// UserDefaults (written by the Network Extension) if it is newer.
-    public var currentStats: Stats {
-        queue.sync {
-            if let data = defaults.data(forKey: statsKey),
-               let persisted = try? JSONDecoder().decode(Stats.self, from: data),
-               persisted.lastUpdated > _stats.lastUpdated {
-                _stats = persisted
-            }
-            return _stats
+        public mutating func end() {
+            id = nil
+            stats = .zero
         }
-    }
 
-    /// Store a fresh snapshot from the Rust core. Called by the Network
-    /// Extension's poll timer; negative core values are clamped to zero.
-    public func update(from core: TrafficStats) {
-        let snapshot = Stats(
-            packetsSent: UInt64(max(0, core.packetsSent)),
-            packetsReceived: UInt64(max(0, core.packetsReceived)),
-            bytesSent: UInt64(max(0, core.bytesSent)),
-            bytesReceived: UInt64(max(0, core.bytesReceived)),
-            bytesSentPerSecond: UInt64(max(0, core.sendSpeed)),
-            bytesReceivedPerSecond: UInt64(max(0, core.receiveSpeed)),
-            lastUpdated: Date()
-        )
-        queue.async { [weak self] in
-            guard let self = self else { return }
-            self._stats = snapshot
-            self.persist()
+        public mutating func update(_ stats: Stats) {
+            guard id != nil else { return }
+            self.stats = stats
         }
-    }
 
-    /// Reset all stats (called by the Network Extension on tunnel start)
-    public func reset() {
-        queue.sync {
-            self._stats = .zero
-            self.persist()
+        public func status(ip: String) -> ProviderStatus? {
+            guard let id else { return nil }
+            return ProviderStatus(ip: ip, stats: stats, session: id)
         }
-    }
-
-    private func persist() {
-        guard let data = try? JSONEncoder().encode(_stats) else { return }
-        defaults.set(data, forKey: statsKey)
     }
 
     public static func formatBytes(_ bytes: UInt64) -> String {

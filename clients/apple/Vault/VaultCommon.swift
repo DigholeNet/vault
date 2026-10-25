@@ -50,8 +50,8 @@ class AppData: ObservableObject {
     @Published var bytesSentPerSecond: UInt64 = 0
     @Published var bytesReceivedPerSecond: UInt64 = 0
 
-    private var statsTimer: Timer?
     private var previousStats: PacketStats.Stats = .zero
+    private var providerSession: String?
     /// Accumulates totals from previous provider sessions within one visible
     /// "on" period. The provider zeroes its counters when the extension
     /// restarts (watchdog/crash + On-Demand restart can do this without a
@@ -62,38 +62,9 @@ class AppData: ObservableObject {
         bytesSent: UInt64(0), bytesReceived: UInt64(0)
     )
 
-    #if os(macOS)
-    /// macOS only: queries the running provider (a system extension in a
-    /// different user session) for stats + assigned IP. Set by VpnManager.
-    var providerStatusQuery: ((@escaping (ProviderStatus?) -> Void) -> Void)?
-    /// Called with the provider-reported assigned IP when it changes.
-    var onAssignedIp: ((String) -> Void)?
-    #endif
-
-    /// Start monitoring packet statistics
-    func startStatsMonitoring() {
-        // The main app is a read-only consumer; the network extension owns
-        // and resets the counters per tunnel session. Do NOT reset here —
-        // writing from both processes would make them overwrite each other.
-        // Seed previousStats to detect counter resets across provider restarts;
-        // byte rates are supplied by Rust.
-        //
-        // A status flap (on -> connecting -> on, e.g. an On-Demand restart
-        // of the extension) must not stack a second timer or reseed the
-        // baseline — that would leak timers and hide a counter regression.
-        guard statsTimer == nil else { return }
-        previousStats = PacketStats.shared.currentStats
-        updateStats()
-
-        statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.updateStats()
-        }
-    }
-
-    /// Stop monitoring packet statistics
-    func stopStatsMonitoring() {
-        statsTimer?.invalidate()
-        statsTimer = nil
+    /// Reset the visible connection period; the provider owns raw counters.
+    func resetStats() {
+        providerSession = nil
         statsBase = (0, 0, 0, 0)
         previousStats = .zero
         // Clear the displayed counters too: the session ended, so showing
@@ -106,25 +77,10 @@ class AppData: ObservableObject {
         bytesReceivedPerSecond = 0
     }
 
-    private func updateStats() {
-        #if os(macOS)
-        if let query = providerStatusQuery {
-            query { [weak self] status in
-                guard let status = status else { return }
-                DispatchQueue.main.async {
-                    self?.applyStats(status.stats)
-                    if !status.ip.isEmpty {
-                        self?.onAssignedIp?(status.ip)
-                    }
-                }
-            }
-            return
-        }
-        #endif
-        applyStats(PacketStats.shared.currentStats)
-    }
-
-    private func applyStats(_ stats: PacketStats.Stats) {
+    func applyStatus(_ status: ProviderStatus) {
+        let stats = status.stats
+        let restarted = providerSession != nil && status.session != nil && providerSession != status.session
+        providerSession = status.session
         // Byte rates come straight from the Rust core's own speed calculation.
         bytesSentPerSecond = stats.bytesSentPerSecond
         bytesReceivedPerSecond = stats.bytesReceivedPerSecond
@@ -132,16 +88,16 @@ class AppData: ObservableObject {
         // On a counter regression (extension restarted mid-session), fold
         // the lost counts into statsBase so the displayed totals never go
         // backwards while the tunnel stays up.
-        if stats.packetsSent < previousStats.packetsSent {
+        if restarted || stats.packetsSent < previousStats.packetsSent {
             statsBase.packetsSent += previousStats.packetsSent
         }
-        if stats.packetsReceived < previousStats.packetsReceived {
+        if restarted || stats.packetsReceived < previousStats.packetsReceived {
             statsBase.packetsReceived += previousStats.packetsReceived
         }
-        if stats.bytesSent < previousStats.bytesSent {
+        if restarted || stats.bytesSent < previousStats.bytesSent {
             statsBase.bytesSent += previousStats.bytesSent
         }
-        if stats.bytesReceived < previousStats.bytesReceived {
+        if restarted || stats.bytesReceived < previousStats.bytesReceived {
             statsBase.bytesReceived += previousStats.bytesReceived
         }
 
@@ -257,6 +213,35 @@ class VaultConfig: ObservableObject {
         self.host = host
         self.port = port
         return true
+    }
+
+    var connectionDraft: ConnectionDraft {
+        var draft = ConnectionDraft()
+        draft.host = host
+        draft.port = String(port)
+        draft.password = password
+        draft.dns = dns
+        draft.mtu = mtu
+        draft.probeDomains = probeDomains
+        return draft
+    }
+
+    /// Validate before writing; a failed credential write leaves all fields intact.
+    func save(_ draft: ConnectionDraft, section: ConnectionDraft.Section = .all) -> String? {
+        let draft = draft.normalized
+        if let error = draft.validationError(in: section) { return error }
+        if section == .all || section == .connection {
+            guard let port = Int(draft.port),
+                saveConnection(host: draft.host, port: port, password: draft.password) else {
+                return passwordStorageError ?? "Password could not be saved or loaded. Please try again."
+            }
+        }
+        if section == .all || section == .network { dns = draft.dns }
+        if section == .all || section == .advanced {
+            mtu = draft.mtu
+            probeDomains = draft.probeDomains
+        }
+        return nil
     }
 
     func persistPassword() {

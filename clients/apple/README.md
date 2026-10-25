@@ -49,7 +49,7 @@ not affect diagnostic results.
 The Apple app drives the engine on a worker queue. It runs application-route
 requests locally and forwards tunnel/host-default requests to the provider as
 single-probe IPC messages. The provider supplies live tunnel configuration.
-Swift adapts cancellation, IPC and typed snapshots for the UI. A changed session
+Swift adapts cancellation and IPC; the UI reads the Rust snapshot directly. A changed session
 invalidates the run. IPC reply waits allow transport deadlines plus delivery time;
 a normal probe timeout remains a probe result rather than cancelling the run.
 
@@ -163,6 +163,16 @@ outside the user's session, so status/log communication uses provider messages.
 | `VaultNetworkExtension/`, `VaultSystemExtension/` | Platform extension targets |
 | `VaultTests/`, `VaultUITests/` | App and UI tests |
 | `Config/` | Signing and identifier configuration |
+
+Both apps poll one provider status IPC endpoint for live addresses and traffic.
+The provider keeps counters in memory; it no longer writes statistics or assigned
+addresses to App Group defaults. Polls do not overlap, and replies from an ended
+session cannot update the UI. Provider session identifiers preserve displayed
+traffic totals across extension restarts.
+
+Connection intent and phase belong to `VPNConnectionLifecycle`; `AppData` is its
+UI projection. iOS and macOS share `ConnectionDraft` validation, normalization and
+save operations, while macOS still saves each settings section independently.
 
 Non-secret settings use App Group storage. The password is stored in Keychain
 and copied into the OS VPN profile for on-demand restarts; disconnecting does

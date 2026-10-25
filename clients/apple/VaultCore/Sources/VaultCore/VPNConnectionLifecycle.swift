@@ -16,9 +16,9 @@ public struct VPNConnectionLifecycle {
     public private(set) var stopFailed = false
     private var preparation: UInt64?
     private var stopInFlight = false
+    public private(set) var isStopping = false
     private var startIssued = false
     public var isPreparing: Bool { preparation != nil }
-    public var isStopping: Bool { phase == .disconnecting }
     public init() {}
 
     public mutating func beginConnect() -> UInt64? {
@@ -54,6 +54,7 @@ public struct VPNConnectionLifecycle {
         guard !isStopping else { return nil }
         generation &+= 1
         phase = .disconnecting
+        isStopping = true
         stopFailed = false
         return generation
     }
@@ -74,24 +75,29 @@ public struct VPNConnectionLifecycle {
     }
     public mutating func completeStopIfReady(tunnelDown: Bool) -> Bool {
         guard isStopping, !isPreparing, !stopInFlight, tunnelDown || stopFailed else { return false }
+        isStopping = false
         phase = tunnelDown ? .disconnected : (startIssued ? .connected : .connecting)
         startIssued = false
         // A failed cleanup must be explicitly retried, never auto-started.
         if stopFailed { wantsConnection = false }
         return true
     }
-    public mutating func observedConnected() {
-        guard !isStopping, !isPreparing else { return }
-        phase = .connected
-        wantsConnection = true
-        startIssued = true
-    }
-    public mutating func observedDisconnected() -> Bool {
+    /// Observe OS state only after preparation/teardown releases ownership.
+    /// A failed stop updates the displayed phase without restoring connect intent.
+    @discardableResult
+    public mutating func observe(_ status: Phase, updateIntent: Bool = true) -> Bool {
         guard !isStopping, !isPreparing else { return false }
-        let unexpected = wantsConnection && startIssued
-        phase = .disconnected
-        wantsConnection = false
-        startIssued = false
+        let unexpected = updateIntent && status == .disconnected && wantsConnection && startIssued
+        phase = status
+        if updateIntent {
+            if status == .connected {
+                wantsConnection = true
+                startIssued = true
+            } else if status == .disconnected {
+                wantsConnection = false
+                startIssued = false
+            }
+        }
         return unexpected
     }
 }

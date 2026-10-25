@@ -86,7 +86,7 @@ struct MacosStatusView: View {
                     if !DiagnosticsPresentation.pingProbes(result).isEmpty {
                         DisclosureGroup(languageManager.tr("Ping samples")) {
                             ForEach(DiagnosticsPresentation.pingProbes(result)) { probe in
-                                Text(probe.detail).font(.system(.caption, design: .monospaced))
+                                Text(probe.displayDetail).font(.system(.caption, design: .monospaced))
                                     .foregroundStyle(probe.succeeded ? Color.primary : .secondary)
                                     .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -110,7 +110,7 @@ struct MacosStatusView: View {
                                                     VStack(alignment: .leading, spacing: 4) {
                                                         Text(languageManager.tr(DiagnosticsPresentation.label(for: probe.stage)))
                                                             .font(.body.weight(.medium))
-                                                        Text(probe.detail).font(.system(.body, design: .monospaced))
+                                                        Text(probe.displayDetail).font(.system(.body, design: .monospaced))
                                                             .foregroundStyle(.secondary).textSelection(.enabled)
                                                             .fixedSize(horizontal: false, vertical: true)
                                                         if let tls = probe.tlsDurationMs {

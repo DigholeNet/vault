@@ -15,30 +15,15 @@ import VaultCore
         @EnvironmentObject var languageManager: LanguageManager
 
         @State private var isSecured: Bool = true
-        @State private var host = ""
-        @State private var password = ""
-        @State private var portText = ""
-        @State private var dns = ""
-        @State private var mtu = ""
-        @State private var probeDomains = ""
-        @State private var savedDraft: [String]?
+        @State private var draft = ConnectionDraft()
+        @State private var savedDraft: ConnectionDraft?
         @State private var loaded = false
 
-        private var draft: [String] { [host, portText, password, dns, mtu, probeDomains] }
-
-        private var validationError: String? {
-            SettingsValidation.configurationError(host: host, port: portText, password: password,
-                dns: dns, mtu: mtu, probeDomains: probeDomains)
-        }
+        private var validationError: String? { draft.validationError() }
 
         private func save() {
-            guard validationError == nil, let port = Int(portText) else { return }
-            guard config.saveConnection(host: host.trimmingCharacters(in: .whitespacesAndNewlines),
-                port: port, password: password) else { return }
-            config.dns = dns.trimmingCharacters(in: .whitespacesAndNewlines)
-            config.mtu = mtu.trimmingCharacters(in: .whitespacesAndNewlines)
-            config.probeDomains = probeDomains.trimmingCharacters(in: .whitespacesAndNewlines)
-            host = config.host
+            guard config.save(draft) == nil else { return }
+            draft = config.connectionDraft
             savedDraft = draft
         }
 
@@ -64,7 +49,7 @@ import VaultCore
                                 systemName:
                                     "externaldrive.connected.to.line.below")
                             TextField(
-                                languageManager.tr("Host"), text: $host,
+                                languageManager.tr("Host"), text: $draft.host,
                                 prompt: Text(languageManager.tr("IP Address or domain"))
                             ).autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
@@ -72,7 +57,7 @@ import VaultCore
                         HStack {
                             Image(systemName: "number.circle")
                             TextField(
-                                languageManager.tr("Port"), text: $portText,
+                                languageManager.tr("Port"), text: $draft.port,
                                 prompt: Text("1-65535")
                             )
                             .keyboardType(.numberPad)
@@ -84,7 +69,7 @@ import VaultCore
                                     HStack {
                                         Image(systemName: "p.circle.fill")
                                         SecureField(
-                                            languageManager.tr("Password"), text: $password
+                                            languageManager.tr("Password"), text: $draft.password
                                         )
                                         .textInputAutocapitalization(
                                             .never)
@@ -93,7 +78,7 @@ import VaultCore
                                     HStack {
                                         Image(systemName: "p.circle.fill")
                                         TextField(
-                                            languageManager.tr("Password"), text: $password
+                                            languageManager.tr("Password"), text: $draft.password
                                         )
                                         .autocorrectionDisabled()
                                         .textInputAutocapitalization(
@@ -115,7 +100,7 @@ import VaultCore
                         HStack {
                             Image(systemName: "arrow.up.arrow.down.circle")
                             TextField(
-                                languageManager.tr("MTU"), text: $mtu,
+                                languageManager.tr("MTU"), text: $draft.mtu,
                                 prompt: Text("1280-1427")
                             )
                             .keyboardType(.numberPad)
@@ -128,7 +113,7 @@ import VaultCore
                         HStack {
                             Image(systemName: "network")
                             TextField(
-                                languageManager.tr("DNS"), text: $dns,
+                                languageManager.tr("DNS"), text: $draft.dns,
                                 prompt: Text(languageManager.tr("DNS Server"))
                             )
                             .autocorrectionDisabled()
@@ -143,7 +128,7 @@ import VaultCore
                         HStack {
                             Image(systemName: "stethoscope")
                             TextField(
-                                languageManager.tr("Probe Domains"), text: $probeDomains,
+                                languageManager.tr("Probe Domains"), text: $draft.probeDomains,
                                 prompt: Text(languageManager.tr("Domains to probe"))
                             )
                             .autocorrectionDisabled()
@@ -187,12 +172,7 @@ import VaultCore
                 .onAppear {
                     guard !loaded else { return }
                     loaded = true
-                    portText = String(config.port)
-                    host = config.host
-                    password = config.password
-                    dns = config.dns
-                    mtu = config.mtu
-                    probeDomains = config.probeDomains
+                    draft = config.connectionDraft
                     savedDraft = nil
                 }
                 .toolbar {

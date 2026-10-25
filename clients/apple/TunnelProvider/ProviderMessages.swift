@@ -34,7 +34,7 @@ extension PacketTunnelProvider {
     func handleMessage(_ message: ProviderMessage) {
         switch message.command?.command {
         case nil, "status":
-            message.reply(try? JSONEncoder().encode(providerStatus))
+            message.reply(providerStatus.flatMap { try? JSONEncoder().encode($0) })
         case "clearLogs":
             guard let token = message.command?.token, !token.isEmpty else { message.reply(Data([0])); return }
             do {

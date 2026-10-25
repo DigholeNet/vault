@@ -40,7 +40,7 @@ final class DiagnosticsViewModel: ObservableObject {
         startedAt = now
         progressReceived = now
         completedAt = nil
-        result = DiagnosticsResult(summary: "RUNNING", lines: [], checks: [], activeCheck: "dns")
+        result = DiagnosticsResult(message: "RUNNING")
         manager.requestDiagnostics(onProgress: { [weak self] progress in
             DispatchQueue.main.async {
                 guard let self, self.running, self.generation == token else { return }
@@ -52,7 +52,7 @@ final class DiagnosticsViewModel: ObservableObject {
         }) { [weak self] reply in
             DispatchQueue.main.async {
                 guard let self, self.generation == token else { return }
-                self.result = reply ?? DiagnosticsResult(summary: "INCOMPLETE - provider returned no usable response", lines: [])
+                self.result = reply ?? DiagnosticsResult(message: "INCOMPLETE - provider returned no usable response")
                 self.running = false
                 self.completedAt = Date()
             }

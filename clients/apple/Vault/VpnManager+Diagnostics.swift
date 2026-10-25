@@ -19,7 +19,7 @@ extension VpnManager {
             return
         }
         guard diagnosticState.cancellation == nil, vpnStatus == .connected else {
-            completion(DiagnosticsResult(summary: "INCOMPLETE - diagnostics unavailable or already running", lines: []))
+            completion(DiagnosticsResult(message: "INCOMPLETE - diagnostics unavailable or already running"))
             return
         }
         let cancellation = DiagnosticsCancellation()
@@ -39,7 +39,7 @@ extension VpnManager {
                         self.diagnosticState.cancellation = nil
                         self.diagnosticState.runID = nil
                     }
-                    completion(DiagnosticsResult(summary: "INCOMPLETE - live diagnostic context unavailable", lines: []))
+                    completion(DiagnosticsResult(message: "INCOMPLETE - live diagnostic context unavailable"))
                     return
                 }
                 DispatchQueue.global(qos: .utility).async {
@@ -71,12 +71,11 @@ extension VpnManager {
                             || self.activeVPN?.connection.connectedDate != connectedDate
                             || finalContext?.isSameSession(as: context) != true
                         if changed {
-                            result.summary = "INCOMPLETE - tunnel session changed; run diagnostics again"
-                            result.engineState = .incomplete
+                            result.message = "INCOMPLETE - tunnel session changed; run diagnostics again"
                             let payload = try? JSONSerialization.data(withJSONObject: ["command": "cancelDiagnostics", "token": run])
                             self.sendProviderCommand("cancelDiagnostics", timeout: 3, payload: payload) { _ in }
                         }
-                        if self.diagnosticState.cancelledByUser { result.summary = "INCOMPLETE - diagnostics cancelled" }
+                        if self.diagnosticState.cancelledByUser { result.message = "INCOMPLETE - diagnostics cancelled" }
                         if self.diagnosticState.cancellation === cancellation {
                             self.diagnosticState.cancellation = nil
                             self.diagnosticState.runID = nil

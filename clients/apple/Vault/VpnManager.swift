@@ -17,6 +17,9 @@ class VpnManager {
     private var observers: [NSObjectProtocol]
     private var observationGeneration: UInt64 = 0
     private var connectionFailurePending = false
+    private var statsTimer: Timer?
+    private var statsGeneration: UInt64 = 0
+    private var statsQueryInFlight = false
     private var connectionRequestedAt: TimeInterval?
     private var tunnelStartIssuedAt: TimeInterval?
     var logState = VpnLogState()
@@ -41,16 +44,8 @@ class VpnManager {
     private var connectInFlight: Bool { connectionLifecycle.isPreparing }
 
     var diagnosticState = VpnDiagnosticState()
-    private(set) var vpnStatus: VpnStatus {
-        get { appData.vpnStatus }
-        set {
-            if newValue != appData.vpnStatus {
-                diagnosticState.generation &+= 1
-                diagnosticState.cancellation?.cancel()
-                appData.vpnStatus = newValue
-            }
-        }
-    }
+    /// Lifecycle owns the phase; AppData is its published UI projection.
+    var vpnStatus: VpnStatus { connectionLifecycle.phase }
 
     init(
         config: VaultConfig,
@@ -59,24 +54,10 @@ class VpnManager {
         self.config = config
         self.appData = appData
         self.observers = []
-
-        #if os(macOS)
-        // macOS: the provider is a system extension running outside the
-        // user's session, so App Group UserDefaults are not shared with
-        // it — stats and the assigned IP are queried over the NE
-        // provider-message channel instead.
-        appData.providerStatusQuery = { [weak self] completion in
-            guard let self = self else { return completion(nil) }
-            self.queryProviderStatus(completion: completion)
-        }
-        appData.onAssignedIp = { [weak self] ip in
-            guard let self = self, self.config.ip != ip else { return }
-            self.config.ip = ip
-        }
-        #endif
     }
 
     deinit {
+        statsTimer?.invalidate()
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -138,6 +119,7 @@ class VpnManager {
     }
 
     func updateVPNStatus(_ manager: NEVPNManager) {
+        dispatchPrecondition(condition: .onQueue(.main))
         // On-demand can connect and disconnect while preferences are saving.
         // Preparation owns the operation until its callback reads the current
         // session status; intermediate notifications must not complete it.
@@ -146,13 +128,13 @@ class VpnManager {
         if connectionLifecycle.isStopping {
             let down = manager.connection.status == .disconnected || manager.connection.status == .invalid
             guard connectionLifecycle.completeStopIfReady(tunnelDown: down) else {
-                publishStatus(.disconnecting)
+                publishStatus()
                 appData.connectionError = nil
                 return
             }
             stopResult = !connectionLifecycle.stopFailed
         }
-        let oldStatus = self.vpnStatus
+        let oldStatus = appData.vpnStatus
 
         let status: VpnStatus
         switch manager.connection.status {
@@ -162,12 +144,11 @@ class VpnManager {
         case .disconnecting: status = .disconnecting
         @unknown default: status = vpnStatus
         }
-        publishStatus(status, recovering: manager.connection.status == .reasserting)
+        let unexpectedDisconnect = connectionLifecycle.observe(status, updateIntent: stopResult == nil)
+        publishStatus(recovering: manager.connection.status == .reasserting)
 
         updateSessionDetails(manager, previousStatus: oldStatus)
 
-        if stopResult == nil, self.vpnStatus == .connected { connectionLifecycle.observedConnected() }
-        let unexpectedDisconnect = stopResult == nil && self.vpnStatus == .disconnected && connectionLifecycle.observedDisconnected()
         if self.vpnStatus == .connected {
             self.appData.connectionError = nil
         } else if self.vpnStatus == .disconnected {
@@ -178,8 +159,13 @@ class VpnManager {
         if let stopResult { finishDisconnect(succeeded: stopResult) }
     }
 
-    private func publishStatus(_ status: VpnStatus, recovering: Bool = false) {
-        vpnStatus = status
+    private func publishStatus(recovering: Bool = false) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        if appData.vpnStatus != vpnStatus {
+            diagnosticState.generation &+= 1
+            diagnosticState.cancellation?.cancel()
+            appData.vpnStatus = vpnStatus
+        }
         #if os(macOS)
         appData.isRecovering = recovering
         #endif
@@ -205,12 +191,9 @@ class VpnManager {
                     logStage("System tunnel startup completed", operation: connectionLifecycle.generation, since: issued)
                     tunnelStartIssuedAt = nil
                 }
-                self.appData.startStatsMonitoring()
-                self.queryProviderStatus { status in
-                    if let ip = status?.ip, !ip.isEmpty { self.config.ip = ip }
-                }
+                self.startStatsMonitoring()
             } else if self.vpnStatus == .disconnected {
-                self.appData.stopStatsMonitoring()
+                self.stopStatsMonitoring()
                 // The assigned address belongs to the session that just
                 // ended; leaving it persisted would show a stale IP on the
                 // status page and on the next app launch.
@@ -282,6 +265,35 @@ class VpnManager {
                 self.reportQueryFailure(nil)
                 completion(status)
             }
+        }
+    }
+
+    private func startStatsMonitoring() {
+        guard statsTimer == nil else { return }
+        refreshStats()
+        statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.refreshStats()
+        }
+    }
+
+    func stopStatsMonitoring() {
+        statsGeneration &+= 1
+        statsTimer?.invalidate()
+        statsTimer = nil
+        statsQueryInFlight = false
+        appData.resetStats()
+    }
+
+    private func refreshStats() {
+        guard !statsQueryInFlight else { return }
+        statsQueryInFlight = true
+        let generation = statsGeneration
+        queryProviderStatus { [weak self] status in
+            guard let self, self.statsGeneration == generation else { return }
+            self.statsQueryInFlight = false
+            guard let status else { return }
+            self.appData.applyStatus(status)
+            if self.config.ip != status.ip { self.config.ip = status.ip }
         }
     }
 
@@ -448,8 +460,7 @@ extension VpnManager {
             appData.showConfigureGuide = true
             return
         }
-        if let error = SettingsValidation.configurationError(host: config.host, port: String(config.port),
-            password: config.password, dns: config.dns, mtu: config.mtu, probeDomains: config.probeDomains) {
+        if let error = config.connectionDraft.validationError() {
             appData.connectionError = error
             return
         }
@@ -459,7 +470,7 @@ extension VpnManager {
             return
         }
         appData.connectionError = nil
-        publishStatus(.connecting)
+        publishStatus()
         connectionRequestedAt = ProcessInfo.processInfo.systemUptime
         tunnelStartIssuedAt = nil
         Logger.network.noticeAndFile("[operation:\(token)] Connection requested")
@@ -541,7 +552,7 @@ extension VpnManager {
         // Release only the activation waiter; a profile save must still finish.
         systemExtensionManager.cancelActivationWait()
         #endif
-        publishStatus(.disconnecting)
+        publishStatus()
         connectionRequestedAt = nil
         tunnelStartIssuedAt = nil
         Logger.network.noticeAndFile("[operation:\(token)] Disconnection requested")
@@ -559,9 +570,9 @@ extension VpnManager {
     }
 
     private func publishIdle() {
-        publishStatus(.disconnected)
+        publishStatus()
         appData.connectedSince = nil
-        appData.stopStatsMonitoring()
+        stopStatsMonitoring()
         config.ip = ""
         activeVPN = nil
     }

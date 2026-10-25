@@ -37,75 +37,62 @@ public final class DiagnosticsCancellation: @unchecked Sendable {
   }
 }
 
-// MARK: - UI result models
+// MARK: - Presentation of the Rust snapshot
 
-public struct DiagnosticsCheck: Codable, Sendable, Identifiable {
-  public enum State: String, Codable, Sendable { case passed, failed, incomplete }
-  public var id: String
-  public var passed: Int
-  public var attempted: Int
-  public var state: State
-  /// Mean duration of the sampled requests, in milliseconds.
-  public var durationMs: Int
-  public var sampleCount: Int
+/// Keeps the Rust snapshot as the only result model. A local failure can
+/// invalidate its verdict without losing observations collected before cancellation.
+public struct DiagnosticsResult: Sendable {
+  public let snapshot: DiagnosticSnapshot?
+  public var message: String?
 
-  public init(
-    id: String, passed: Int, attempted: Int, state: State, durationMs: Int, sampleCount: Int = 0
-  ) {
-    self.id = id
-    self.passed = passed
-    self.attempted = attempted
-    self.state = state
-    self.durationMs = durationMs
-    self.sampleCount = sampleCount
+  public init(snapshot: DiagnosticSnapshot? = nil, message: String? = nil) {
+    self.snapshot = snapshot
+    self.message = message
+  }
+
+  public var engineState: DiagnosticState { message == nil ? snapshot?.state ?? .incomplete : .incomplete }
+  public var domains: [String]? { snapshot?.domains }
+  public var checks: [DiagnosticCheck]? { snapshot?.checks }
+  public var probes: [DiagnosticProbe]? { snapshot?.probes }
+  public var durationMs: UInt64? { snapshot?.durationMs }
+  public var activeCheck: String? { snapshot?.activeStage.map { String(describing: $0) } }
+
+  public var summary: String {
+    if let message { return message }
+    guard let snapshot else { return "INCOMPLETE" }
+    if snapshot.cancelled { return "INCOMPLETE - diagnostics cancelled or tunnel session changed" }
+    let prefix = snapshot.running ? "RUNNING"
+      : snapshot.state == .passed ? "OK" : snapshot.state == .failed ? "PROBLEMS FOUND" : "INCOMPLETE"
+    let details = snapshot.routeIssues + snapshot.routeUnavailable
+    return prefix + (details.isEmpty ? "" : " - " + details.joined(separator: "; "))
+  }
+
+  public var lines: [String] {
+    guard let snapshot else { return [] }
+    return snapshot.probes.map {
+      "[probe] \($0.stage) \($0.domain): \($0.displayDetail) duration=\($0.durationMs)ms"
+    } + (snapshot.routeIssues + snapshot.routeUnavailable).map { "[probe] route: \($0)" }
   }
 }
 
-public struct DiagnosticsProbe: Codable, Sendable, Identifiable {
-  public var id: String
-  public var stage: String
-  public var domain: String
-  public var durationMs: Int
-  public var succeeded: Bool
-  public var detail: String
-  public var tlsDurationMs: Int?
-
-  public init(
-    stage: String, domain: String, durationMs: Int, succeeded: Bool, detail: String,
-    tlsDurationMs: Int? = nil
-  ) {
-    self.id = UUID().uuidString
-    self.stage = stage
-    self.domain = domain
-    self.durationMs = durationMs
-    self.succeeded = succeeded
-    self.detail = detail
-    self.tlsDurationMs = tlsDurationMs
-  }
+extension DiagnosticCheck: Identifiable {
+  public var id: String { String(describing: stage) }
 }
 
-public struct DiagnosticsResult: Codable, Sendable {
-  public var engineState: DiagnosticsCheck.State = .incomplete
-  public var domainStates: [String: DiagnosticsCheck.State] = [:]
-  public var summary: String
-  public var lines: [String]
-  public var domains: [String]?
-  public var checks: [DiagnosticsCheck]?
-  public var durationMs: Int?
-  public var activeCheck: String?
-  public var probes: [DiagnosticsProbe]?
-
-  public init(
-    summary: String, lines: [String], domains: [String]? = nil, checks: [DiagnosticsCheck]? = nil,
-    durationMs: Int? = nil, activeCheck: String? = nil, probes: [DiagnosticsProbe]? = nil
-  ) {
-    self.summary = summary
-    self.lines = lines
-    self.domains = domains
-    self.checks = checks
-    self.durationMs = durationMs
-    self.activeCheck = activeCheck
-    self.probes = probes
+extension DiagnosticProbe: Identifiable {
+  public var id: UInt64 { request.id }
+  public var stage: String { String(describing: request.stage) }
+  public var domain: String { request.domain }
+  public var displayDetail: String {
+    let target: String
+    switch request.operation {
+    case .dns(let server, _): target = "\(server): "
+    case .tcp(let address, let port): target = "\(address):\(port) · "
+    case .https(let address, let port): target = address.map { "\($0):\(port) · " } ?? ""
+    case .ping(let address, let sequence, let size): target = "\(address) seq=\(sequence) size=\(size) · "
+    case .route: target = ""
+    }
+    return target + detail
   }
 }
 
@@ -310,64 +297,12 @@ public enum RustDiagnostics {
       if cancellation.isCancelled { try? engine.cancel() }
       return result(engine.snapshot())
     } catch {
-      return DiagnosticsResult(summary: "INCOMPLETE - Rust diagnostics: \(error)", lines: [])
+      return DiagnosticsResult(message: "INCOMPLETE - Rust diagnostics: \(error)")
     }
   }
 
   public static func result(_ snapshot: DiagnosticSnapshot) -> DiagnosticsResult {
-    func state(_ value: DiagnosticState) -> DiagnosticsCheck.State {
-      switch value {
-      case .passed: return .passed
-      case .failed: return .failed
-      case .incomplete: return .incomplete
-      }
-    }
-    let probes = snapshot.probes.map { observation in
-      let target: String
-      switch observation.request.operation {
-      case .dns(let server, _): target = "\(server): "
-      case .tcp(let address, let port): target = "\(address):\(port) · "
-      case .https(let address, _): target = address.map { "\($0):443 · " } ?? ""
-      case .ping(let address, let sequence, let size):
-        target = "\(address) seq=\(sequence) size=\(size) · "
-      case .route: target = ""
-      }
-      var probe = DiagnosticsProbe(
-        stage: String(describing: observation.request.stage), domain: observation.request.domain,
-        durationMs: Int(clamping: observation.durationMs), succeeded: observation.succeeded, detail: target + observation.detail,
-        tlsDurationMs: observation.tlsDurationMs.map { Int(clamping: $0) })
-      probe.id = "\(snapshot.sessionId):\(observation.request.id)"
-      return probe
-    }
-    let prefix =
-      snapshot.running
-      ? "RUNNING"
-      : snapshot.state == .passed
-        ? "OK" : snapshot.state == .failed ? "PROBLEMS FOUND" : "INCOMPLETE"
-    let routeDetails = snapshot.routeIssues + snapshot.routeUnavailable
-    let summary =
-      snapshot.cancelled
-      ? "INCOMPLETE - diagnostics cancelled or tunnel session changed"
-      : prefix + (routeDetails.isEmpty ? "" : " - " + routeDetails.joined(separator: "; "))
-    var result = DiagnosticsResult(
-      summary: summary,
-      lines: probes.map {
-        "[probe] \($0.stage) \($0.domain): \($0.detail) duration=\($0.durationMs)ms"
-      }
-        + (snapshot.routeIssues + snapshot.routeUnavailable).map { "[probe] route: \($0)" },
-      domains: snapshot.domains,
-      checks: snapshot.checks.map {
-        DiagnosticsCheck(
-          id: String(describing: $0.stage), passed: Int($0.passed),
-          attempted: Int($0.attempted), state: state($0.state),
-          durationMs: Int(clamping: $0.durationMs), sampleCount: Int($0.sampleCount))
-      },
-      durationMs: Int(clamping: snapshot.durationMs),
-      activeCheck: snapshot.activeStage.map { String(describing: $0) }, probes: probes)
-    result.engineState = state(snapshot.state)
-    result.domainStates = Dictionary(
-      uniqueKeysWithValues: snapshot.domainStates.map { ($0.domain, state($0.state)) })
-    return result
+    DiagnosticsResult(snapshot: snapshot)
   }
 }
 
@@ -382,7 +317,7 @@ public enum DiagnosticsPresentation {
   public static let pingNote =
     "Ping is informational. ICMP may be filtered; no reply alone does not mean the VPN is broken. RTT averages replies only."
 
-  public static func pingProbes(_ result: DiagnosticsResult?) -> [DiagnosticsProbe] {
+  public static func pingProbes(_ result: DiagnosticsResult?) -> [DiagnosticProbe] {
     (result?.probes ?? []).filter { pingCheckIDs.contains($0.stage) }
   }
 
@@ -404,9 +339,9 @@ public enum DiagnosticsPresentation {
   }
 
   public static func domainState(_ result: DiagnosticsResult, domain: String)
-    -> DiagnosticsCheck.State
+    -> DiagnosticState
   {
-    result.domainStates[domain] ?? .incomplete
+    result.snapshot?.domainStates.first { $0.domain == domain }?.state ?? .incomplete
   }
 
   public static func filteredLogs(_ text: String, source: String, search: String) -> String {

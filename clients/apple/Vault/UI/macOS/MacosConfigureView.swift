@@ -22,12 +22,7 @@ struct MacosConfigureView: View {
     @EnvironmentObject var languageManager: LanguageManager
     @ObservedObject private var preferences = MacosPreferences.shared
     @State private var page: Page = .connection
-    @State private var host = ""
-    @State private var port = ""
-    @State private var password = ""
-    @State private var dns = ""
-    @State private var mtu = ""
-    @State private var domains = ""
+    @State private var draft = ConnectionDraft()
     @State private var revealsPassword = false
     @State private var feedback: String?
     @State private var isError = false
@@ -145,8 +140,7 @@ struct MacosConfigureView: View {
         .onAppear {
             guard !loaded else { return }
             loaded = true
-            host = config.host; port = String(config.port); password = config.password
-            dns = config.dns; mtu = config.mtu; domains = config.probeDomains
+            draft = config.connectionDraft
             preferences.refreshLoginStatus()
             DispatchQueue.main.async { focusedControl = .host }
         }
@@ -158,7 +152,7 @@ struct MacosConfigureView: View {
                 Button(languageManager.tr("OK"), role: .cancel) {}
             } message: { Text(languageManager.tr(preferences.launchError ?? "")) }
         .confirmationDialog(languageManager.tr("Restore advanced defaults?"), isPresented: $confirmReset) {
-            Button(languageManager.tr("Restore Defaults")) { mtu = ""; domains = ""; feedback = "Defaults restored. Save to apply."; isError = false }
+            Button(languageManager.tr("Restore Defaults")) { draft.mtu = ""; draft.probeDomains = ""; feedback = "Defaults restored. Save to apply."; isError = false }
         }
     }
 
@@ -184,19 +178,19 @@ struct MacosConfigureView: View {
     private var connection: some View {
         Group {
             Section {
-                TextField(languageManager.tr("Server"), text: $host, prompt: Text("vpn.example.com"))
+                TextField(languageManager.tr("Server"), text: $draft.host, prompt: Text("vpn.example.com"))
                     .autocorrectionDisabled()
                     .focused($focusedControl, equals: .host)
                     .onSubmit { focusedControl = .port }
-                TextField(languageManager.tr("Port"), text: $port)
+                TextField(languageManager.tr("Port"), text: $draft.port)
                     .focused($focusedControl, equals: .port)
                     .onSubmit { focusedControl = passwordControl }
                 HStack {
                     if revealsPassword {
-                        TextField(languageManager.tr("Password"), text: $password)
+                        TextField(languageManager.tr("Password"), text: $draft.password)
                             .focused($focusedControl, equals: .revealedPassword).onSubmit(save)
                     } else {
-                        SecureField(languageManager.tr("Password"), text: $password)
+                        SecureField(languageManager.tr("Password"), text: $draft.password)
                             .focused($focusedControl, equals: .password).onSubmit(save)
                     }
                     Button { togglePasswordVisibility() } label: {
@@ -218,7 +212,7 @@ struct MacosConfigureView: View {
     private var network: some View {
         Group {
             Section(languageManager.tr("DNS Servers")) {
-                TextField(languageManager.tr("DNS"), text: $dns, prompt: Text("1.1.1.1, 8.8.8.8"))
+                TextField(languageManager.tr("DNS"), text: $draft.dns, prompt: Text("1.1.1.1, 8.8.8.8"))
                     .autocorrectionDisabled().focused($focusedControl, equals: .dns).onSubmit(save)
                 Text(languageManager.tr("DNS server address separated by comma.")).font(.body).foregroundStyle(.secondary)
             }
@@ -242,11 +236,11 @@ struct MacosConfigureView: View {
     private var advanced: some View {
         Group {
             Section {
-                TextField(languageManager.tr("MTU"), text: $mtu, prompt: Text("1280–1427"))
+                TextField(languageManager.tr("MTU"), text: $draft.mtu, prompt: Text("1280–1427"))
                     .focused($focusedControl, equals: .mtu).onSubmit { focusedControl = .domains }
                 Text(languageManager.tr("Leave empty for automatic MTU. Valid range: 1280–1427."))
                     .font(.body).foregroundStyle(.secondary)
-                TextField(languageManager.tr("Probe Domains"), text: $domains, prompt: Text("www.google.com, github.com, t.co"))
+                TextField(languageManager.tr("Probe Domains"), text: $draft.probeDomains, prompt: Text("www.google.com, github.com, t.co"))
                     .autocorrectionDisabled().focused($focusedControl, equals: .domains).onSubmit(save)
                 Text(languageManager.tr("Diagnostic probe domains, separated by commas. Leave empty to use defaults."))
                     .font(.body).foregroundStyle(.secondary)
@@ -364,45 +358,27 @@ struct MacosConfigureView: View {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
     }
     private func retryPasswordStorage() {
-        let unchanged = password == config.password
+        let unchanged = draft.password == config.password
         config.retryPasswordStorage()
         if unchanged, config.passwordStorageError == nil {
-            password = config.password
+            draft.password = config.password
         }
     }
 
     private func save() {
         feedback = nil; isError = true
+        let section: ConnectionDraft.Section
         switch page {
         case .general: return
-        case .connection:
-            let cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard SettingsValidation.isValidServer(cleanHost) else {
-                feedback = "Enter a server IP address or hostname without a URL scheme."; return
-            }
-            guard let number = Int(port), (1...65535).contains(number) else {
-                feedback = "Port must be a number between 1 and 65535."; return
-            }
-            guard !password.isEmpty else { feedback = "Enter the server password."; return }
-            guard config.saveConnection(host: cleanHost, port: number, password: password) else {
-                feedback = config.passwordStorageError
-                return
-            }
-            host = cleanHost
-        case .network:
-            guard SettingsValidation.isValidDNSList(dns) else {
-                feedback = "Enter valid DNS IP addresses, separated by commas."; return
-            }
-            config.dns = dns.trimmingCharacters(in: .whitespacesAndNewlines)
-        case .advanced:
-            let cleanMtu = mtu.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard SettingsValidation.isValidMTU(cleanMtu) else {
-                feedback = "MTU must be between 1280 and 1427, or empty for automatic."; return
-            }
-            let cleanDomains = domains.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard SettingsValidation.isValidProbeList(cleanDomains) else { feedback = "Enter domain names separated by commas, without URLs."; return }
-            config.mtu = cleanMtu; config.probeDomains = cleanDomains
+        case .connection: section = .connection
+        case .network: section = .network
+        case .advanced: section = .advanced
         }
+        if let error = config.save(draft, section: section) {
+            feedback = error
+            return
+        }
+        draft = draft.normalized
         isError = false
         feedback = "Saved. Changes apply the next time you connect."
     }

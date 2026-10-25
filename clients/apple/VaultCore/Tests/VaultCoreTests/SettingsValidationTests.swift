@@ -29,9 +29,14 @@ import Testing
     password: String = "secret", dns: String = "", mtu: String = "",
     domains: String = ""
   ) -> String? {
-    SettingsValidation.configurationError(
-      host: host, port: port, password: password,
-      dns: dns, mtu: mtu, probeDomains: domains)
+    var draft = ConnectionDraft()
+    draft.host = host
+    draft.port = port
+    draft.password = password
+    draft.dns = dns
+    draft.mtu = mtu
+    draft.probeDomains = domains
+    return draft.validationError()
   }
   #expect(error() == nil)
   #expect(error(host: "https://vpn.example.com") != nil)
