@@ -7,9 +7,9 @@
 //  Extension provider-message channel (`sendProviderMessage` /
 //  `handleAppMessage`).
 //
-//  Both apps query current assigned addresses for route diagnostics.
-//  macOS also polls this payload for statistics because its system
-//  extension runs outside the user's App Group session.
+//  macOS polls this payload for assigned addresses and statistics because
+//  its system extension runs outside the user's App Group session.
+//  Diagnostics obtains live configuration through diagnosticContext.
 //
 
 import Foundation
@@ -31,6 +31,7 @@ public struct ProviderCommandEnvelope: Codable {
     public var requestID: String?
     public var trace: Bool?
     public var token: String?
+    public var payload: Data?
 
     public static func tracedPayload(command: String, requestID: String, trace: Bool, payload: Data?) throws -> Data {
         if let payload, payload.isEmpty { return payload }

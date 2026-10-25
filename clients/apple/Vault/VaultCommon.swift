@@ -75,8 +75,8 @@ class AppData: ObservableObject {
         // The main app is a read-only consumer; the network extension owns
         // and resets the counters per tunnel session. Do NOT reset here —
         // writing from both processes would make them overwrite each other.
-        // Seed previousStats with the current value so the first-tick rate
-        // does not spike to the session total.
+        // Seed previousStats to detect counter resets across provider restarts;
+        // byte rates are supplied by Rust.
         //
         // A status flap (on -> connecting -> on, e.g. an On-Demand restart
         // of the extension) must not stack a second timer or reseed the
@@ -171,7 +171,7 @@ class VaultConfig: ObservableObject {
     @AppStorage var port: Int
     @AppStorage var dns: String
     /// Comma-separated domains for the on-demand diagnostics probes; empty
-    /// means the provider's defaults.
+    /// selects the Rust diagnostic engine's defaults.
     @AppStorage var probeDomains: String
     /// Optional tunnel MTU cap; empty = automatic (built-in upper bound).
     @AppStorage var mtu: String

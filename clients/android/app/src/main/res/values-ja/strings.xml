@@ -86,7 +86,7 @@
 <string name="checks_disconnected">診断前に VPN に接続してください。ログは未接続でも表示できます。</string>
 <string name="checks_passed">接続チェックに成功しました</string>
 <string name="checks_failed">接続の問題が見つかりました</string>
-<string name="checks_incomplete">診断未完了。VPN が変更または切断されました。</string>
+<string name="checks_incomplete">診断未完了。一部のチェックを完了できませんでした。</string>
 <string name="check_dns">トンネル DNS · IPv4</string>
 <string name="check_tcp">トンネル TCP · IPv4</string>
 <string name="check_https">トンネル HTTPS · IPv4</string>
@@ -102,7 +102,7 @@
 <string name="connected_duration">接続時間 %1$s</string>
 <string name="uplink">上り</string>
 <string name="downlink">下り</string>
-<string name="probe_detail">%1$d/%2$d 成功 · %3$d ms</string>
+<string name="probe_detail">%1$d/%2$d 成功 · %3$s</string>
 <string name="check_dns6">トンネル DNS · AAAA</string>
 <string name="check_tcp6">トンネル TCP · IPv6</string>
 <string name="check_https6">トンネル HTTPS · IPv6</string>

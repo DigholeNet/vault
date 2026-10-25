@@ -27,6 +27,14 @@
                 android:accessibilityLiveRegion="polite"
                 android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Body"/>
             <TextView
+                android:id="@+id/tvDiagnosticDetails"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="12dp"
+                android:textIsSelectable="true"
+                android:visibility="gone"
+                android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
+            <TextView
                 android:id="@+id/tvDiagnosticElapsed"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -90,7 +98,7 @@
             android:layout_height="wrap_content"
             android:gravity="end">
             <com.google.android.material.button.MaterialButton
-                style="@style/Widget.Material3.Button.OutlinedButton"
+                style="@style/Widget.Material3.Button.TonalButton"
                 android:id="@+id/btnClearLogs"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
@@ -106,14 +114,14 @@
                 android:insetLeft="0dp"
                 android:insetRight="0dp"
                 android:enabled="false"
-                app:cornerRadius="8dp"
-                app:strokeWidth="1dp"
+                app:cornerRadius="16dp"
+                app:strokeWidth="0dp"
                 app:iconSize="14dp"
                 app:iconPadding="4dp"
                 app:iconGravity="textStart"
                 app:icon="@drawable/ic_log_clear"/>
             <com.google.android.material.button.MaterialButton
-                style="@style/Widget.Material3.Button.OutlinedButton"
+                style="@style/Widget.Material3.Button.TonalButton"
                 android:id="@+id/btnCopyLogs"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
@@ -129,13 +137,13 @@
                 android:insetLeft="0dp"
                 android:insetRight="0dp"
                 android:enabled="false"
-                app:cornerRadius="8dp"
-                app:strokeWidth="1dp"
+                app:cornerRadius="16dp"
+                app:strokeWidth="0dp"
                 app:iconSize="14dp"
                 app:iconPadding="4dp"
                 app:iconGravity="textStart"
                 app:icon="@drawable/ic_log_copy"
-                android:layout_marginStart="6dp"/>
+                android:layout_marginStart="12dp"/>
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

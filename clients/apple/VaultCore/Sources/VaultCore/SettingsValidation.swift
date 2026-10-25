@@ -25,7 +25,8 @@ public enum SettingsValidation {
         return IPv4Address(host) != nil || IPv6Address(host) != nil || isValidProbeDomain(host)
     }
     public static func isValidProbeDomain(_ value: String) -> Bool {
-        !value.isEmpty && value.utf8.count <= 253 && DNSPacket.buildQuery(domain: value, id: 0) != nil
+        !value.isEmpty && value.utf8.count <= 253
+            && (try? diagnosticDnsQuery(domain: value.hasSuffix(".") ? String(value.dropLast()) : value, id: 0, ipv6: false)) != nil
     }
     public static func isValidDNSList(_ value: String) -> Bool {
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }

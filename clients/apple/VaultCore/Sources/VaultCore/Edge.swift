@@ -13,8 +13,6 @@ import os.log
 
 public enum EdgeError: Error {
     case connectionFailed
-    case applyIpFailed
-    case settingIpFailed
     case invalidChannelState
 }
 
@@ -104,16 +102,9 @@ public final class Edge: @unchecked Sendable {
         platform: String,
         onData: @escaping ((Data) -> Void),
         onIpAssigned: @escaping ((String, String, String, Int32) -> Void),
-        pendingCompletion: @escaping ((Error?) -> Void),
         onNetworkUnreachable: @escaping () -> Void = {},
         onHandshakeFailed: @escaping () -> Void = {}
     ) throws {
-        // `pendingCompletion` is accepted for API compatibility with the
-        // previous Swift implementation. It is intentionally not invoked
-        // here: the tunnel provider owns the startTunnel completion handler
-        // and finishes it via its own timeout/backoff logic.
-        _ = pendingCompletion
-
         let callbacks = Callbacks(onData: onData, onIpAssigned: onIpAssigned,
                                   onNetworkUnreachable: onNetworkUnreachable,
                                   onHandshakeFailed: onHandshakeFailed)

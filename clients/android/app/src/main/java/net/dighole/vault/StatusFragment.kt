@@ -15,6 +15,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import net.dighole.vault.VaultVpnService.Companion.PREFS_NAME
 import net.dighole.vault.data.readVaultConfig
@@ -26,7 +29,8 @@ class StatusFragment : Fragment() {
     private lateinit var tvStatusDetail: TextView
     private lateinit var tvIpv4Address: TextView
     private lateinit var tvIpv6Address: TextView
-    private lateinit var duration: android.widget.Chronometer
+    private lateinit var duration: TextView
+    private var durationUpdates: Job? = null
     private lateinit var sentPackets: TextView
     private lateinit var receivedPackets: TextView
     private lateinit var sentBytes: TextView
@@ -73,11 +77,6 @@ class StatusFragment : Fragment() {
         tvIpv4Address = view.findViewById(R.id.tvIpv4Address)
         tvIpv6Address = view.findViewById(R.id.tvIpv6Address)
         duration = view.findViewById(R.id.connectionDuration)
-        duration.setOnChronometerTickListener { timer ->
-            val elapsed = StatusPresentation.duration(android.os.SystemClock.elapsedRealtime() - timer.base)
-            timer.text = elapsed
-            timer.contentDescription = getString(R.string.connected_duration, elapsed)
-        }
         sentPackets = view.findViewById(R.id.tvSentPackets)
         receivedPackets = view.findViewById(R.id.tvReceivedPackets)
         sentBytes = view.findViewById(R.id.tvSentBytes)
@@ -147,14 +146,14 @@ class StatusFragment : Fragment() {
     }
 
     override fun onPause() {
-        duration.stop()
+        stopDurationUpdates()
         super.onPause()
     }
 
     override fun onHiddenChanged(hidden: Boolean) {
         super.onHiddenChanged(hidden)
         if (view != null) {
-            if (hidden) duration.stop() else restoreStateFromPrefs()
+            if (hidden) stopDurationUpdates() else restoreStateFromPrefs()
         }
     }
 
@@ -256,10 +255,9 @@ class StatusFragment : Fragment() {
         tvStatusDetail.visibility = if (error == null) View.GONE else View.VISIBLE
         duration.visibility = if (connected) View.VISIBLE else View.GONE
         if (connected) {
-            duration.base = app.ensureConnectionStarted()
-            duration.text = StatusPresentation.duration(android.os.SystemClock.elapsedRealtime() - duration.base)
-            if (!isHidden && isResumed) duration.start()
-        } else duration.stop()
+            renderDuration(app.ensureConnectionStarted())
+            if (!isHidden && isResumed) startDurationUpdates(app.ensureConnectionStarted())
+        } else stopDurationUpdates()
         root.findViewById<View>(R.id.connectionInfo).visibility = if (connected) View.VISIBLE else View.GONE
         root.findViewById<View>(R.id.rowIpv4).visibility = if (currentIp.isNotEmpty()) View.VISIBLE else View.GONE
         root.findViewById<View>(R.id.rowIpv6).visibility = if (currentIpv6.isNotEmpty()) View.VISIBLE else View.GONE
@@ -271,12 +269,38 @@ class StatusFragment : Fragment() {
     }
 
     private fun renderTrafficStats(stats: VpnStatusEvent.TrafficStats?) {
-        sentPackets.text = (stats?.packetsSent ?: 0).coerceAtLeast(0).toString()
-        receivedPackets.text = (stats?.packetsReceived ?: 0).coerceAtLeast(0).toString()
-        sentBytes.text = StatusPresentation.bytes(stats?.bytesSent ?: 0)
-        receivedBytes.text = StatusPresentation.bytes(stats?.bytesReceived ?: 0)
-        sentSpeed.text = "+ " + StatusPresentation.bytes(stats?.sendSpeed ?: 0) + "/s"
-        receivedSpeed.text = "+ " + StatusPresentation.bytes(stats?.receiveSpeed ?: 0) + "/s"
+        sentPackets.setIfChanged((stats?.packetsSent ?: 0).coerceAtLeast(0).toString())
+        receivedPackets.setIfChanged((stats?.packetsReceived ?: 0).coerceAtLeast(0).toString())
+        sentBytes.setIfChanged(StatusPresentation.bytes(stats?.bytesSent ?: 0))
+        receivedBytes.setIfChanged(StatusPresentation.bytes(stats?.bytesReceived ?: 0))
+        sentSpeed.setIfChanged("+ " + StatusPresentation.bytes(stats?.sendSpeed ?: 0) + "/s")
+        receivedSpeed.setIfChanged("+ " + StatusPresentation.bytes(stats?.receiveSpeed ?: 0) + "/s")
+    }
+
+    private fun TextView.setIfChanged(value: String) {
+        if (text.toString() != value) text = value
+    }
+
+    private fun renderDuration(base: Long) {
+        val elapsed = StatusPresentation.duration(android.os.SystemClock.elapsedRealtime() - base)
+        duration.setIfChanged(elapsed)
+        duration.contentDescription = getString(R.string.connected_duration, elapsed)
+    }
+
+    private fun startDurationUpdates(base: Long) {
+        if (durationUpdates?.isActive == true) return
+        durationUpdates = viewLifecycleOwner.lifecycleScope.launch {
+            while (isActive) {
+                renderDuration(base)
+                val elapsed = (android.os.SystemClock.elapsedRealtime() - base).coerceAtLeast(0)
+                delay(1000 - elapsed % 1000)
+            }
+        }
+    }
+
+    private fun stopDurationUpdates() {
+        durationUpdates?.cancel()
+        durationUpdates = null
     }
 
     private fun generateDeviceId(): String {

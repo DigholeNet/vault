@@ -43,7 +43,7 @@
             android:textColor="@color/connection_disconnected"
             android:gravity="center"
             android:visibility="gone"/>
-        <Chronometer
+        <TextView
             android:id="@+id/connectionDuration"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

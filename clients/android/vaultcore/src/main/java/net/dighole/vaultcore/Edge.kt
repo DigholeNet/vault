@@ -2,7 +2,6 @@
 package net.dighole.vaultcore
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import android.os.Build
 import android.util.Log
@@ -28,7 +27,7 @@ class EdgeConfig(
 class EdgeException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
- * Core VPN networking component managing peer connections and packet routing.
+ * Kotlin adapter for the Rust VPN session and Android callbacks.
  *
  * This class is a thin Kotlin wrapper around the Rust implementation in
  * `vault-core`. The Rust runtime handles UDP sockets, handshake, heartbeat,
@@ -41,8 +40,7 @@ class Edge(
     private val onData: (ByteArray) -> Unit,
     private val onIpAssigned: (String, String, String, Int) -> Unit,
     private val pendingCompletion: (Throwable?) -> Unit,
-    private val protectSocket: ((Int) -> Boolean)? = null,
-    parentJob: Job? = null
+    private val protectSocket: ((Int) -> Boolean)? = null
 ) {
     private val rustEdge: RustEdge
 
@@ -102,7 +100,7 @@ class Edge(
     }
 
     /**
-     * Sends an encrypted IP packet to the server.
+     * Queues a plaintext IP packet for encryption and transmission by Rust.
      * Returns true if the packet was accepted, false if sending failed
      * (tunnel not connected or an internal error).
      */

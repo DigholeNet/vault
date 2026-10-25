@@ -8,7 +8,7 @@ import Foundation
 
 /// Bridges traffic statistics from the Rust core (vault-core owns the
 /// counters, living in the Network Extension process) to the main app via
-/// App Group UserDefaults.
+/// App Group UserDefaults on iOS and provider IPC on macOS.
 ///
 /// The Network Extension polls `Edge.getTrafficStats()` once per second and
 /// calls `update(from:)`. The main app is a read-only consumer through

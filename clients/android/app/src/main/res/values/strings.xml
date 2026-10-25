@@ -86,7 +86,7 @@
     <string name="checks_disconnected">Connect the VPN before running diagnostics. Logs remain available.</string>
     <string name="checks_passed">Connectivity checks passed</string>
     <string name="checks_failed">Connectivity issues found</string>
-    <string name="checks_incomplete">Diagnostics incomplete. The VPN changed or disconnected.</string>
+    <string name="checks_incomplete">Diagnostics incomplete. Some checks were not completed.</string>
     <string name="check_dns">Tunnel DNS · IPv4</string>
     <string name="check_tcp">Tunnel TCP · IPv4</string>
     <string name="check_https">Tunnel HTTPS · IPv4</string>
@@ -102,7 +102,7 @@
     <string name="connected_duration">Connected %1$s</string>
     <string name="uplink">Uplink</string>
     <string name="downlink">Downlink</string>
-    <string name="probe_detail">%1$d/%2$d · %3$d ms</string>
+    <string name="probe_detail">%1$d/%2$d · %3$s</string>
 <string name="check_dns6">Tunnel DNS · AAAA</string>
 <string name="check_tcp6">Tunnel TCP · IPv6</string>
 <string name="check_https6">Tunnel HTTPS · IPv6</string>

@@ -16,7 +16,8 @@ struct IosDiagnosticsView: View {
             Picker("", selection: $tab) {
                 Text(tr("Connection Checks")).tag(0)
                 Text(tr("Runtime Logs")).tag(1)
-            }.pickerStyle(.segmented).labelsHidden().padding()
+            }.pickerStyle(.segmented).labelsHidden()
+                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
             if tab == 0 { checks }
             else { logs }
         }
@@ -55,19 +56,37 @@ struct IosDiagnosticsView: View {
                 }
             }
             Section {
-                ForEach(DiagnosticsPresentation.checkIDs, id: \.self) { id in checkRow(id) }
+                ForEach(DiagnosticsPresentation.checkIDs, id: \.self) { id in
+                    let probes = (model.result?.probes ?? []).filter { $0.stage == id }
+                    if probes.isEmpty { checkRow(id) }
+                    else {
+                        DisclosureGroup {
+                            if DiagnosticsPresentation.pingCheckIDs.contains(id) {
+                                Text(tr(DiagnosticsPresentation.pingNote))
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                            ForEach(probes) { probe in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        Text(probe.domain)
+                                        Spacer()
+                                        Text("\(probe.durationMs) ms").monospacedDigit()
+                                    }
+                                    Text(probe.detail).foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                    if let tls = probe.tlsDurationMs {
+                                        Text("TLS  \(tls) ms").monospacedDigit().foregroundStyle(.secondary)
+                                    }
+                                }.font(.footnote).padding(.vertical, 4)
+                            }
+                        } label: { checkRow(id) }
+                    }
+                }
             } header: {
-                HStack { Text(tr("Check")); Spacer(); Text(tr(DiagnosticsPresentation.durationHeading(model.result))) }
+                HStack { Text(tr("Check")); Spacer(); Text(tr("Average duration")) }
             } footer: {
                 Text(tr("Request durations include failures and retries; Ping RTT includes replies only."))
                     .font(.footnote)
-            }
-            Section(tr("Ping samples")) {
-                Text(tr(DiagnosticsPresentation.pingNote)).font(.caption).foregroundStyle(.secondary)
-                ForEach(DiagnosticsPresentation.pingProbes(model.result)) { probe in
-                    Text(probe.detail).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                        .foregroundStyle(probe.succeeded ? Color.primary : .secondary)
-                }
             }
             if let result = model.result, !model.running {
                 if !model.passed {
@@ -97,6 +116,7 @@ struct IosDiagnosticsView: View {
 
             }
         }.font(.subheadline).listStyle(.insetGrouped)
+        .contentMargins(.top, 8, for: .scrollContent)
     }
 
     private var resultHeader: some View {
@@ -159,29 +179,46 @@ struct IosDiagnosticsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             if let message = model.logMessage { Text(tr(message)).font(.caption).foregroundStyle(.secondary) }
-            HStack(spacing: 6) {
+            HStack(spacing: 12) {
                 Spacer()
                 Button {
                     Task { await model.clearLogs(using: vpnManager) }
                 } label: {
                     Label(tr(model.clearingLogs ? "Clearing…" : "Clear"), systemImage: "trash")
-                        .frame(minHeight: 20)
                 }
                 .disabled(model.clearingLogs || model.loadingLogs || model.logText.isEmpty)
                 Button {
                     UIPasteboard.general.string = model.logText
                 } label: {
                     Label(tr("Copy"), systemImage: "doc.on.doc")
-                        .frame(minHeight: 20)
                 }
                 .disabled(model.clearingLogs || model.loadingLogs || model.logText.isEmpty)
             }
-            .font(.caption.weight(.medium))
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.roundedRectangle(radius: 8))
-            .controlSize(.small)
-            .tint(.accentColor)
+            .buttonStyle(CompactLogActionButtonStyle())
         }.padding(.horizontal).padding(.bottom, 12)
+    }
+}
+
+/// Keep log actions compact while matching the navigation bar's glass appearance.
+private struct CompactLogActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    @ViewBuilder
+    func makeBody(configuration: Configuration) -> some View {
+        if #available(iOS 26.0, *) {
+            configuration.label
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
+                .glassEffect(.regular.interactive(), in: Capsule())
+                .opacity(configuration.isPressed ? 0.75 : (isEnabled ? 1 : 0.45))
+        } else {
+            configuration.label
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .foregroundStyle(isEnabled ? Color.accentColor : Color.secondary)
+                .opacity(configuration.isPressed ? 0.75 : 1)
+        }
     }
 }
 

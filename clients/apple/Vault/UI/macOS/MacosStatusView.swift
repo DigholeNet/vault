@@ -55,11 +55,15 @@ struct MacosStatusView: View {
                     if let message = model.logMessage {
                         Text(languageManager.tr(message)).font(.caption).foregroundStyle(.secondary)
                     }
-                    Button(languageManager.tr(model.clearingLogs ? "Clearing…" : "Clear")) {
+                    Button {
                         Task { await model.clearLogs(using: vpnManager) }
+                    } label: {
+                        Label(languageManager.tr(model.clearingLogs ? "Clearing…" : "Clear"), systemImage: "trash")
                     }.disabled(model.clearingLogs)
                 }
-                Button(languageManager.tr("Copy")) { copy(tab == 0 ? diagnosticText : filteredLogs) }
+                Button { copy(tab == 0 ? diagnosticText : filteredLogs) } label: {
+                    Label(languageManager.tr("Copy"), systemImage: "doc.on.doc")
+                }
                     .disabled(tab == 0 ? result == nil : filteredLogs.isEmpty)
             }.padding(16)
         }
@@ -190,7 +194,7 @@ struct MacosStatusView: View {
             HStack {
                 Text(languageManager.tr("Check")); Spacer()
                 Text(languageManager.tr("Result")).frame(width: 80)
-                Text(languageManager.tr(DiagnosticsPresentation.durationHeading(result))).frame(width: 100, alignment: .trailing)
+                Text(languageManager.tr("Average duration")).frame(width: 100, alignment: .trailing)
             }.font(.body).foregroundStyle(.secondary).padding(12).background(.quaternary.opacity(0.4))
             ForEach(DiagnosticsPresentation.checkIDs, id: \.self) { id in
                 let check = result?.checks?.first { $0.id == id }

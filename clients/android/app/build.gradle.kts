@@ -39,8 +39,8 @@ android {
 
             // The keystore travels as base64 text (same variable as CI), so
             // no real keystore file ever needs to live in the repository
-            // tree; it is decoded into the build directory. Debug builds
-            // never read this file.
+            // tree; it is decoded into the build directory when configured.
+            // Debug APKs use the Android debug signing key.
             val keystoreFile =
                 layout.buildDirectory.file("signing/vault-release.keystore").get().asFile
             if (!keystoreBase64.isNullOrEmpty()) {

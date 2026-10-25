@@ -86,7 +86,7 @@
     <string name="checks_disconnected">請先連線 VPN 再執行診斷，未連線時仍可查看記錄。</string>
     <string name="checks_passed">連線檢查通過</string>
     <string name="checks_failed">發現連線問題</string>
-    <string name="checks_incomplete">診斷未完成，VPN 已發生變化或中斷。</string>
+    <string name="checks_incomplete">診斷未完成，部分檢查未能完成。</string>
     <string name="check_dns">隧道 DNS · IPv4</string>
     <string name="check_tcp">隧道 TCP · IPv4</string>
     <string name="check_https">隧道 HTTPS · IPv4</string>
@@ -102,7 +102,7 @@
     <string name="connected_duration">已連線 %1$s</string>
     <string name="uplink">上行</string>
     <string name="downlink">下行</string>
-    <string name="probe_detail">%1$d/%2$d 通過 · %3$d ms</string>
+    <string name="probe_detail">%1$d/%2$d 通過 · %3$s</string>
 <string name="check_dns6">隧道 DNS · AAAA</string>
 <string name="check_tcp6">隧道 TCP · IPv6</string>
 <string name="check_https6">隧道 HTTPS · IPv6</string>

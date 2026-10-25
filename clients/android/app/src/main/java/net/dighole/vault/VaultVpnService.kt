@@ -22,7 +22,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import net.dighole.vault.data.readVaultConfig
 import net.dighole.vaultcore.Edge
@@ -262,6 +261,8 @@ class VaultVpnService : VpnService() {
                 if (!sessionGate.update(sessionToken) {
                     serverHost = host
                     dnsList = dnsServers
+                    (application as VaultApplication).diagnosticDomains = config.probeDomains
+                        .split(',').map { it.trim() }.filter { it.isNotEmpty() }
                 }) return@launch
 
                 createAndStartEdge(password, host, port, id, sessionToken)
@@ -368,8 +369,7 @@ class VaultVpnService : VpnService() {
                     Log.e(TAG, "Error protecting UDP socket")
                     false
                 }
-            },
-            parentJob = scope.coroutineContext.job
+            }
         )
 
         if (!sessionGate.update(sessionToken) { edge = newEdge }) {

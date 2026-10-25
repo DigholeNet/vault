@@ -27,7 +27,11 @@ final class VaultUITests: XCTestCase {
 
         let diagnostics = app.tabBars.buttons["Diagnostics"]
         XCTAssertTrue(diagnostics.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.descendants(matching: .any)["vpn.connection"].isHittable)
+        app.tabBars.buttons["Status"].tap()
+        let connection = app.switches["vpn.connection"]
+        let ready = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true AND hittable == true"), object: connection)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed, app.debugDescription)
         let status = XCTAttachment(screenshot: app.screenshot())
         status.name = "iOS Status Existing Connection Icon"
         status.lifetime = .keepAlways

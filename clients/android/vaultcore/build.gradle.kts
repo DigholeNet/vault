@@ -181,6 +181,7 @@ tasks.register<Exec>("cargoNdkBuild") {
     environment("CARGO_TARGET_DIR", rustDir.resolve("target").absolutePath)
     commandLine(
         "$cargoBin/cargo", "ndk",
+        "--platform", libs.versions.min.sdk.get(),
         "-t", "arm64-v8a",
         "-t", "armeabi-v7a",
         "-t", "x86_64",

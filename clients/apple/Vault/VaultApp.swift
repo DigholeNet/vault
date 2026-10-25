@@ -15,7 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let manager = Self.vpnManager else { return .terminateNow }
         guard !terminating else { return .terminateLater }
         terminating = true
-        FileLogger.shared.logSync("App termination requested pid=\(ProcessInfo.processInfo.processIdentifier) vpnStatus=\(manager.vpnStatus) interfaces=\(FileLogger.tunnelInterfaceSummary())", level: "NOTICE")
+        FileLogger.shared.logSync("""
+        App termination requested pid=\(ProcessInfo.processInfo.processIdentifier) \
+        vpnStatus=\(manager.vpnStatus) interfaces=\(FileLogger.tunnelInterfaceSummary())
+        """, level: "NOTICE")
         // Even an idle profile may still have an on-demand rule after a failure.
         Self.disconnectBeforeTermination(manager) { succeeded in
             self.terminating = false
@@ -38,7 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var replied = false
         func finish(_ succeeded: Bool, source: String) {
             let elapsed = Int((ProcessInfo.processInfo.systemUptime - started) * 1000)
-            FileLogger.shared.logSync("Quit cleanup result source=\(source) succeeded=\(succeeded) late=\(replied) durationMs=\(elapsed) vpnStatus=\(manager.vpnStatus) interfaces=\(FileLogger.tunnelInterfaceSummary())", level: "NOTICE")
+            FileLogger.shared.logSync("""
+            Quit cleanup result source=\(source) succeeded=\(succeeded) late=\(replied) durationMs=\(elapsed) \
+            vpnStatus=\(manager.vpnStatus) interfaces=\(FileLogger.tunnelInterfaceSummary())
+            """, level: "NOTICE")
             guard !replied else { return }
             replied = true
             if !succeeded { manager.terminationInProgress = false }

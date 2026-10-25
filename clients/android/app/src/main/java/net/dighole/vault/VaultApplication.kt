@@ -41,26 +41,23 @@ class VaultApplication : Application() {
 
     /**
      * Process-wide event bus for VPN status updates.
-     * Replaces global broadcasts with a type-safe, zero-copy in-process flow.
-     * Extra buffer capacity prevents event loss during brief UI pauses.
+     * Replays the latest event to new collectors and buffers brief subscriber delays.
      */
     val vpnStatusEvents: MutableSharedFlow<VpnStatusEvent> =
         MutableSharedFlow(replay = 1, extraBufferCapacity = 64)
 
     /**
-     * The most recently emitted VPN status event.
-     * Used to immediately restore UI state after configuration changes
-     * (rotation, locale switch, process death) without waiting for a new event.
+     * Latest non-traffic status within this process; restores UI after rotation
+     * or locale changes. Persisted preferences provide the process-restart fallback.
      */
     @Volatile
     var currentVpnStatus: VpnStatusEvent? = null
         private set
 
-    /**
-     * Emit a VPN status event and update the cached current status.
-     * TrafficStats events are not cached so they do not overwrite
-     * the connection state (Connected/Disconnected/Error).
-     */
+    @Volatile var vpnGeneration: Long = 0
+        private set
+    @Volatile internal var diagnosticDomains: List<String> = emptyList()
+
     private val connectionClock = ConnectionClock()
     val connectedAt: Long? get() = connectionClock.startedAt
 
@@ -69,11 +66,13 @@ class VaultApplication : Application() {
 
     fun ensureConnectionStarted(): Long = connectionClock.connected(android.os.SystemClock.elapsedRealtime())
 
+    /** Cache connection state and traffic separately, then publish the event. */
     @Synchronized
     fun emitVpnStatusEvent(event: VpnStatusEvent) {
         when (event) {
             is VpnStatusEvent.Connected -> ensureConnectionStarted()
             is VpnStatusEvent.Disconnected, is VpnStatusEvent.Error -> {
+                diagnosticDomains = emptyList()
                 connectionClock.disconnected()
                 latestTrafficStats = null
             }
@@ -81,6 +80,7 @@ class VaultApplication : Application() {
             else -> Unit
         }
         if (event !is VpnStatusEvent.TrafficStats) {
+            vpnGeneration++
             currentVpnStatus = event
         }
         vpnStatusEvents.tryEmit(event)

@@ -9,6 +9,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import net.dighole.vaultcore.uniffi.DiagnosticProbe
+import net.dighole.vaultcore.uniffi.DiagnosticOperation
+import net.dighole.vaultcore.uniffi.DiagnosticStage
+import net.dighole.vaultcore.uniffi.DiagnosticState
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
@@ -30,10 +34,14 @@ class DiagnosticsFragment : Fragment() {
     private val logMutex = Mutex()
     private var clearingLogs = false
     private var logsRendered = false
-    private val expanded = mutableSetOf<Int>()
-    private val labels = listOf(R.string.check_dns, R.string.check_tcp, R.string.check_https,
-        R.string.check_dns6, R.string.check_tcp6, R.string.check_https6, R.string.check_app,
-        R.string.check_ping, R.string.check_ping6)
+    private val expanded = mutableSetOf<String>()
+    private val labels = linkedMapOf(
+        DiagnosticStage.DNS to R.string.check_dns, DiagnosticStage.TCP to R.string.check_tcp,
+        DiagnosticStage.HTTPS to R.string.check_https, DiagnosticStage.DNS6 to R.string.check_dns6,
+        DiagnosticStage.TCP6 to R.string.check_tcp6, DiagnosticStage.HTTPS6 to R.string.check_https6,
+        DiagnosticStage.APPLICATION to R.string.check_app, DiagnosticStage.PING to R.string.check_ping,
+        DiagnosticStage.PING6 to R.string.check_ping6
+    )
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View =
         inflater.inflate(R.layout.fragment_diagnostics, container, false)
@@ -88,14 +96,14 @@ class DiagnosticsFragment : Fragment() {
     private fun render() {
         val root = view ?: return
         val state = model.state.value
-        val results = state.results
+        val snapshot = state.snapshot
         root.findViewById<View>(R.id.checksPanel).visibility = if (tab == 0) View.VISIBLE else View.GONE
         root.findViewById<View>(R.id.logsPanel).visibility = if (tab == 1) View.VISIBLE else View.GONE
         root.findViewById<TextView>(R.id.tvDiagnosticSummary).setText(
-            if (!state.running && results.isEmpty() && !connected()) R.string.checks_disconnected else state.header)
+            if (!state.running && snapshot == null && !connected()) R.string.checks_disconnected else state.header)
         root.findViewById<MaterialButton>(R.id.btnRunChecks).apply {
             isEnabled = connected() && !state.running
-            setText(if (results.isEmpty()) R.string.run_checks else R.string.run_again)
+            setText(if (state.startedAt == 0L) R.string.run_checks else R.string.run_again)
         }
         root.findViewById<View>(R.id.diagnosticProgress).visibility = if (state.running) View.VISIBLE else View.GONE
         root.findViewById<TextView>(R.id.tvDiagnosticElapsed).apply {
@@ -104,27 +112,63 @@ class DiagnosticsFragment : Fragment() {
         }
         val rows = root.findViewById<LinearLayout>(R.id.diagnosticRows)
         rows.removeAllViews()
-        labels.forEachIndexed { index, label ->
-            val samples = results.filter { it.stage == index }
-            val row = layoutInflater.inflate(R.layout.diagnostic_row, rows, false)
-            row.findViewById<TextView>(R.id.checkTitle).setText(label)
-            row.findViewById<TextView>(R.id.checkSummary).text = if (samples.isEmpty()) getString(R.string.not_measured)
-            else (if (samples.all { it.passed }) "✓ " else "! ") + getString(R.string.probe_detail,
-                samples.count { it.passed }, samples.size, samples.filter { index < 7 || it.passed }.let { measured ->
-                    if (measured.isEmpty()) 0 else measured.sumOf { it.durationMs } / measured.size
-                })
-            row.findViewById<TextView>(R.id.checkDetails).apply {
-                text = samples.joinToString("\n\n") { "${it.domain} · ${it.durationMs} ms\n${it.detail}" }
-                visibility = if (index in expanded) View.VISIBLE else View.GONE
+        labels.forEach { (stage, label) ->
+            val check = snapshot?.checks?.firstOrNull { it.stage == stage }
+            val active = state.running && snapshot?.activeStage == stage && check == null
+            val summary = when {
+                active -> getString(R.string.checking)
+                check == null || check.attempted == 0u -> getString(R.string.not_measured)
+                else -> symbol(check.state) + " " + getString(R.string.probe_detail,
+                    check.passed.toLong(), check.attempted.toLong(),
+                    if (check.sampleCount > 0u) "${check.durationMs} ms" else "—")
             }
-            row.setOnClickListener {
-                row.findViewById<TextView>(R.id.checkDetails).apply {
-                    if (index in expanded) expanded.remove(index) else expanded.add(index)
-                    visibility = if (index in expanded) View.VISIBLE else View.GONE
-                }
-            }
-            rows.addView(row)
+            val details = snapshot?.probes.orEmpty().filter { it.request.stage == stage }.joinToString("\n\n", transform = ::probeDetail)
+            addRow(rows, stage.name, getString(label), summary, details)
         }
+        snapshot?.domainStates?.forEach { domain ->
+            val details = snapshot.probes.filter { it.request.domain == domain.domain }
+                .joinToString("\n\n", transform = ::probeDetail)
+            addRow(rows, domain.domain, domain.domain, symbol(domain.state), details)
+        }
+        root.findViewById<TextView>(R.id.tvDiagnosticDetails).apply {
+            val details = (listOfNotNull(state.error) + snapshot?.routeIssues.orEmpty() + snapshot?.routeUnavailable.orEmpty())
+                .joinToString("\n")
+            text = details
+            visibility = if (details.isEmpty()) View.GONE else View.VISIBLE
+        }
+    }
+
+    private fun symbol(state: DiagnosticState): String = when (state) {
+        DiagnosticState.PASSED -> "✓"
+        DiagnosticState.FAILED -> "!"
+        DiagnosticState.INCOMPLETE -> "—"
+    }
+
+    private fun addRow(rows: LinearLayout, key: String, title: String, summary: String, details: String) {
+        val row = layoutInflater.inflate(R.layout.diagnostic_row, rows, false)
+        row.findViewById<TextView>(R.id.checkTitle).text = title
+        row.findViewById<TextView>(R.id.checkSummary).text = summary
+        row.findViewById<TextView>(R.id.checkDetails).apply {
+            text = details
+            visibility = if (key in expanded) View.VISIBLE else View.GONE
+        }
+        row.setOnClickListener {
+            if (key in expanded) expanded.remove(key) else expanded.add(key)
+            row.findViewById<TextView>(R.id.checkDetails).visibility = if (key in expanded) View.VISIBLE else View.GONE
+        }
+        rows.addView(row)
+    }
+
+    private fun probeDetail(probe: DiagnosticProbe): String {
+        val target = when (val operation = probe.request.operation) {
+            is DiagnosticOperation.Dns -> "${operation.server}: "
+            is DiagnosticOperation.Tcp -> "${operation.address}:${operation.port} · "
+            is DiagnosticOperation.Https -> operation.address?.let { "$it:443 · " }.orEmpty()
+            is DiagnosticOperation.Ping -> "${operation.address} seq=${operation.sequence} size=${operation.packetSize} · "
+            DiagnosticOperation.Route -> ""
+        }
+        val tls = probe.tlsDurationMs?.let { "\nTLS $it ms" }.orEmpty()
+        return "${probe.request.domain} · ${probe.durationMs} ms\n$target${probe.detail}$tls"
     }
 
     private fun runChecks() {

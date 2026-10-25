@@ -40,23 +40,23 @@ the tunnel is down. Preferences writes always settle before another operation.
 
 ## Diagnostics & logs
 
-Connect the VPN, then start diagnostics manually. Both platforms share the
-request/progress model and result interpretation:
+Connect the VPN, then start diagnostics manually. Android, iOS and macOS use
+one [Rust diagnostic engine and transport](../../docs/diagnostics-engine.md),
+including DNS, TCP, HTTPS, ICMP, route assessment, deadlines and verdicts.
+Rustls verifies HTTPS against bundled Mozilla roots; platform trust stores do
+not affect diagnostic results.
 
-- Tunnel-bound DNS A/AAAA, TCP and HTTPS checks with separate IPv4/IPv6 results,
-  plus app-process HTTPS using the system resolver and default routes. AAAA
-  queries use the configured resolver; their DNS transport may be IPv4.
-- App-process Ping sends two 64-byte echo requests each to `1.1.1.1` and
-  `2606:4700:4700::1111`, with reply counts, per-request details, and average RTT
-  over received replies. ICMP is informational and does not change the required
-  connectivity verdict. Missing tunnel IPv6 addresses remain unmeasured; domains
-  without AAAA records are excluded from IPv6 transport targets. HTTPS reads a bounded sample (64 KiB).
-- Per-check times are request averages, including retries and failures; total
-  time is wall-clock elapsed time. All times use milliseconds.
-- Route checks use current provider addresses, not the persisted display cache.
-  Missing evidence or a changed session makes verification incomplete.
-- ICMP is informational. Missing replies do not establish packet loss or an MTU
-  fault. These checks are not a comprehensive IPv6 or DNS-leak audit.
+The Apple app drives the engine on a worker queue. It runs application-route
+requests locally and forwards tunnel/host-default requests to the provider as
+single-probe IPC messages. The provider supplies live tunnel configuration.
+Swift adapts cancellation, IPC and typed snapshots for the UI. A changed session
+invalidates the run. IPC reply waits allow transport deadlines plus delivery time;
+a normal probe timeout remains a probe result rather than cancelling the run.
+
+On iOS, each check expands to show its individual requests; target details also
+group results by domain. Ping is informational and uses reply-only average RTT.
+All durations are milliseconds. For probe order, budgets and result rules, see
+the shared diagnostics document rather than maintaining a separate Apple plan.
 
 File records use `[YYYY-MM-DD HH:mm:ss.SSSZ] [LEVEL] [SOURCE] message`:
 UTC timestamps, bracketed severity, and `app`, `ne`, or `rust` as the source.
@@ -94,8 +94,7 @@ and log contents are never copied into trace records.
 Logs are under Diagnostics → Runtime Logs. iOS follows new entries automatically;
 macOS also offers search, source filters, optional auto-scroll and Copy. macOS
 fetches the system extension's log over provider messages and caches it for
-viewing after disconnecting. Diagnostic time budgets are 60 seconds in the
-provider, 24 seconds for app HTTPS and Ping, and 95 seconds overall.
+viewing after disconnecting. Both platforms refresh visible logs every two seconds.
 
 Probe domains are configurable under macOS Settings → Advanced or iOS Configure.
 Empty uses `www.google.com, github.com, t.co`.
@@ -160,7 +159,7 @@ outside the user's session, so status/log communication uses provider messages.
 | `Vault/` | Shared app state, configuration, VPN controller and diagnostics model |
 | `Vault/UI/iOS/`, `Vault/UI/macOS/` | Platform UI |
 | `TunnelProvider/` | Shared packet tunnel provider |
-| `VaultCore/` | Rust bindings, Swift glue, diagnostics and unit tests |
+| `VaultCore/` | Rust bindings, platform glue and unit tests; `Sources/VaultCore/Diagnostics.swift` contains the diagnostics IPC/UI adapter |
 | `VaultNetworkExtension/`, `VaultSystemExtension/` | Platform extension targets |
 | `VaultTests/`, `VaultUITests/` | App and UI tests |
 | `Config/` | Signing and identifier configuration |

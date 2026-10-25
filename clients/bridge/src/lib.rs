@@ -17,6 +17,10 @@ use vault_core::client::{
 };
 use vault_core::logger::shared;
 
+pub mod diagnostics;
+#[cfg(any(target_os = "android", target_vendor = "apple"))]
+mod network;
+
 uniffi::setup_scaffolding!();
 
 static LOGGER_INIT: Once = Once::new();

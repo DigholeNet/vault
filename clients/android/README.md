@@ -2,17 +2,17 @@
 
 The Android client of the [Vault VPN](../../README.md) system — a secure,
 high-performance VPN app built with Kotlin and modern Android architecture.
-All protocol logic (handshake, heartbeat, reconnect, crypto, data pump)
+All protocol logic (handshake, heartbeat, reconnect, crypto, data pump, diagnostics)
 lives in the shared Rust core ([`vault-core`](../../core/) via
-[`vault-bridge`](../bridge/), loaded through UniFFI/JNA); this app is a thin
-platform adapter.
+[`vault-bridge`](../bridge/), loaded through UniFFI/JNA). Kotlin provides UI,
+configuration storage, Android lifecycle and VPN interface/socket callbacks. Diagnostic network binding lives in the Rust bridge.
 
 Features:
 
 - Encrypted client-to-server tunnels (SPAKE2 PAKE handshake, X25519 key exchange, AEAD ciphers); the supernode decrypts and relays traffic
 - Automatic reconnection on network changes
 - IPv4 and IPv6 support
-- Split tunneling for server traffic
+- Excludes server addresses from VPN routing to avoid routing loops
 
 ## Interface
 
@@ -22,19 +22,21 @@ and field order match iOS; language selection lives in Configure. Saving keeps
 the page open, and connection changes apply on the next connection. Drafts
 survive tab switches, rotation, and language changes.
 
-Diagnostics checks VPN-bound DNS, TCP, and HTTPS separately for IPv4 and IPv6,
-then checks application HTTPS through the default route. Expand a check to see
-each target and request duration. An absent AAAA record skips that target's
-IPv6 TCP/HTTPS checks. Ping samples are informational and do not affect the
-connectivity verdict. Logs update every second while visible, wrap to the screen width, and can be
+Diagnostics uses the shared [Rust engine and transport](../../docs/diagnostics-engine.md).
+Kotlin supplies live VPN metadata and its Network handle, publishes typed results,
+and cancels work when the session/network changes. Expand a check to see target
+results and request durations. TLS verification and trust anchors are owned by
+Rust; Android trust stores do not affect diagnostic HTTPS.
+
+Logs update every second while visible, wrap to the screen width, and can be
 copied or cleared while offline. Updates pause when the log page is hidden or
 the app enters the background. Scrolling back keeps your reading position.
 
 ## Network recovery
 
 Once connected, the VPN keeps its TUN interface and native session through long
-offline periods. The Rust core retries with exponential backoff; Android no
-longer stops recovery after 120 seconds. A debounced network change also wakes
+offline periods. The Rust core retries with exponential backoff until recovery
+or explicit teardown. A debounced network change also wakes
 an already recovering session, bypassing the current retry delay. Repeated
 watchdog checks remain deduplicated so they do not interrupt handshakes.
 
@@ -62,7 +64,7 @@ close the session. Initial connection failures retain their existing behavior.
                        ▼
         vault-bridge → vault-core (Rust)
         handshake · heartbeat · reconnect
-        crypto · data pump
+        crypto · data pump · diagnostics
                        │ encrypted UDP
                        ▼
                   supernode (server)
@@ -70,8 +72,8 @@ close the session. Initial connection failures retain their existing behavior.
 
 Data flow: the app starts `VaultVpnService`, which creates an `Edge` session
 over a protected socket; after the handshake completes the service
-establishes the VPN interface and pumps packets between the TUN fd and the
-Rust session.
+establishes the VPN interface and transfers plaintext packets between the TUN
+fd and the Rust session.
 
 ## Build
 
@@ -137,13 +139,8 @@ Connection issues:
 | "Cannot resolve host" | DNS issue | Try IP address instead of hostname |
 | "Apply IP failed" | Server unreachable | Check network and firewall |
 
-Performance issues:
-
-| Symptom | Diagnosis | Solution |
-|---|---|---|
-| Slow speeds | Wrong algorithm | Enable AES-GCM for hardware acceleration |
-| High latency | Distant server | Choose closer server location |
-| Battery drain | Frequent reconnection | Check network stability |
+Latency and repeated reconnection should be investigated with Diagnostics and
+Runtime Logs. The app does not expose a cipher-selection setting.
 
 ## Development
 
@@ -157,7 +154,9 @@ clients/android/
 │   │   │   ├── MainActivity.kt    # Main entry point
 │   │   │   ├── VaultVpnService.kt # VPN service implementation
 │   │   │   ├── StatusFragment.kt  # Connection status UI
-│   │   │   └── ConfigureFragment.kt # Settings UI
+│   │   │   ├── ConfigureFragment.kt # Settings UI
+│   │   │   ├── DiagnosticsViewModel.kt # Rust diagnostics adapter
+│   │   │   └── DiagnosticsFragment.kt # Checks and logs UI
 │   │   └── res/                  # Layouts, drawables, values
 │   └── build.gradle.kts
 ├── vaultcore/                    # Kotlin wrapper over the Rust core (UniFFI)
@@ -181,6 +180,7 @@ Code style: Kotlin coding conventions, 4-space indentation, max line length
 
 ## Documentation
 
+- [Shared diagnostics](../../docs/diagnostics-engine.md) — workflow, transport, trust and verification
 - [Protocol specification](../../docs/protocol.md) — wire format, handshake, encryption
 - [Performance measurements](../../docs/performance.md) — indicative benchmarks
 - [Releasing](../../docs/releasing.md) — release process and signing keys

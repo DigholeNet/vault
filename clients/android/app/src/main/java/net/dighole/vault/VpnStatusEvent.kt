@@ -4,9 +4,6 @@ package net.dighole.vault
 /**
  * Sealed class representing VPN status events emitted by [VaultVpnService]
  * and consumed by UI components (e.g. [StatusFragment]).
- *
- * Replaces global broadcast-based communication with a type-safe in-process flow,
- * eliminating broadcast receiver overhead and exported-broadcast risks.
  */
 sealed class VpnStatusEvent {
     data class Connected(val ipv4: String, val ipv6: String) : VpnStatusEvent()

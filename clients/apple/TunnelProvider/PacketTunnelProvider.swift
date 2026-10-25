@@ -49,15 +49,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var dns: [String] = ["1.1.1.1", "8.8.8.8"]
     /// Domains the on-demand diagnostics suite probes; overridable from the
     /// app's configure page via the "probeDomains" provider configuration.
-    private var probeDomains: [String] = TunnelDiagnostics.defaultProbeDomains
-    /// Guards against overlapping manual diagnostics runs.
+    private var probeDomains: [String] = []
+    /// Cancels the Rust transport executing the current provider-side probe.
     private var diagnosticsCancellation: DiagnosticsCancellation?
-    private var diagnosticsProgress: DiagnosticsResult?
+    private var diagnosticsRunID: String?
     private var edge: Edge!
     private var pendingStart: PendingStart?
     private var startTimeoutWorkItem: DispatchWorkItem?
-    /// Polls the Rust core's traffic counters once per second and publishes
-    /// them to the main app via `PacketStats` (App Group UserDefaults).
+    /// Polls Rust traffic counters once per second. iOS reads shared defaults;
+    /// macOS reads the same snapshot through provider IPC.
     private var statsTimer: DispatchSourceTimer?
     /// Logs an "alive" marker with the memory footprint every 30s. When the
     /// markers stop without a stopTunnel/sleep line, the process was killed
@@ -398,7 +398,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         )
                     }
                 },
-                pendingCompletion: { _ in },
                 onNetworkUnreachable: { [weak self] in
                     DispatchQueue.main.async {
                         self?.startFailed(reason: "network unreachable")
@@ -1034,8 +1033,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Serves the app's status queries (assigned IP + traffic counters).
     /// Required on macOS where the system extension runs outside the user's
     /// session and App Group UserDefaults are not shared with the app.
-    /// A {"command":"diagnose"} message instead runs the connectivity probe
-    /// suite and replies with its DiagnosticsResult once finished.
+    /// Diagnostic commands return live context or one Rust probe result;
+    /// the app drives the shared engine and aggregates its typed snapshots.
     override func handleAppMessage(
         _ messageData: Data,
         completionHandler: ((Data?) -> Void)? = nil
@@ -1074,15 +1073,23 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     let started = !self.stopRequested && (self.pendingStart != nil || self.startFinished)
                     tracedCompletion?(Data([started ? 1 : 0]))
                 }
-            case "diagnose":
-                runDiagnostics(completionHandler: tracedCompletion)
-            case "diagnosticsProgress":
+            case "diagnosticContext":
                 DispatchQueue.main.async {
-                    tracedCompletion?(self.diagnosticsProgress.flatMap { try? JSONEncoder().encode($0) })
+                    guard self.startFinished, !self.stopRequested, !self.reasserting else { tracedCompletion?(nil); return }
+                    let addresses = self.assignedIp.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+                    let context = AppleDiagnosticContext(provider: self.sessionID, generation: self.networkConfigurationSequence,
+                        ipv4: addresses.first ?? "", mask: self.assignedIPv4Mask ?? "",
+                        ipv6: addresses.count > 1 ? addresses[1] : nil, mtu: self.appliedMtu ?? 1427,
+                        dns: self.dns, domains: self.probeDomains)
+                    tracedCompletion?(try? JSONEncoder().encode(context))
                 }
+            case "diagnosticProbe":
+                guard let payload = command.payload, let request = try? JSONDecoder().decode(AppleProbeRequest.self, from: payload)
+                else { tracedCompletion?(nil); return }
+                runDiagnosticProbe(request, completionHandler: tracedCompletion)
             case "cancelDiagnostics":
                 DispatchQueue.main.async {
-                    self.diagnosticsCancellation?.cancel()
+                    if command.token == self.diagnosticsRunID { self.diagnosticsCancellation?.cancel() }
                     tracedCompletion?(Data())
                 }
             case "logs":
@@ -1107,62 +1114,37 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    /// Manual diagnostics entry point for both apps. Probing must be
-    /// user-triggered only: an automatic run after every connect would bury
-    /// the log in noise for the overwhelmingly common healthy case.
-    private func runDiagnostics(completionHandler: ((Data?) -> Void)?) {
-        // handleAppMessage's delivery queue is not documented; hop to main
-        // where startFinished/stopRequested/assignedIp are owned.
+    /// Executes one Rust-selected probe. The app owns the engine and performs
+    /// application-route requests itself; the provider never owns a second plan.
+    private func runDiagnosticProbe(_ request: AppleProbeRequest, completionHandler: ((Data?) -> Void)?) {
         DispatchQueue.main.async {
-            guard self.startFinished, !self.stopRequested, !self.reasserting else {
-                completionHandler?(try? JSONEncoder().encode(
-                    DiagnosticsResult(summary: "tunnel is not up", lines: [])
-                ))
-                return
-            }
-            guard self.diagnosticsCancellation == nil else {
-                completionHandler?(try? JSONEncoder().encode(
-                    DiagnosticsResult(summary: "diagnostics already running", lines: [])
-                ))
-                return
-            }
-            // The tunnel address the probes bind to; without it there is no
-            // utun interface to find.
-            let tunnelIPv4 = self.assignedIp.split(separator: "/").first.map(String.init) ?? ""
-            guard !tunnelIPv4.isEmpty else {
-                completionHandler?(try? JSONEncoder().encode(
-                    DiagnosticsResult(summary: "no assigned IPv4 address", lines: [])
-                ))
-                return
+            guard self.startFinished, !self.stopRequested, !self.reasserting,
+                request.provider == self.sessionID, request.generation == self.networkConfigurationSequence,
+                request.timeout.isFinite, request.timeout > 0, request.timeout <= 6,
+                self.diagnosticsCancellation == nil || self.diagnosticsCancellation?.isCancelled == true
+                else { completionHandler?(nil); return }
+            switch request.operation {
+            case .route: completionHandler?(nil); return
+            case .dns, .tcp, .https:
+                guard request.tunnel else { completionHandler?(nil); return }
+            case .ping:
+                guard !request.tunnel else { completionHandler?(nil); return }
             }
             let cancellation = DiagnosticsCancellation()
             self.diagnosticsCancellation = cancellation
-            self.diagnosticsProgress = DiagnosticsResult(summary: "RUNNING", lines: [], checks: [], activeCheck: "dns")
-            let sequence = self.networkConfigurationSequence
-            let dnsServers = self.dns
-            let domains = self.probeDomains
-            let ipv4Mask = self.assignedIPv4Mask
-            let tunnelIPv6 = self.assignedIp.split(separator: "/").dropFirst().first.map(String.init)
-            let mtu = self.appliedMtu
-            DispatchQueue.global(qos: .utility).async { [weak self] in
-                var result = TunnelDiagnostics.run(
-                    dnsServers: dnsServers, tunnelIPv4: tunnelIPv4, tunnelIPv4Mask: ipv4Mask,
-                    domains: domains,
-                    tunnelMtu: mtu, tunnelIPv6: tunnelIPv6, cancellation: cancellation,
-                    onProgress: { [weak self] progress in
-                        DispatchQueue.main.async {
-                            guard self?.diagnosticsCancellation === cancellation else { return }
-                            self?.diagnosticsProgress = progress
-                        }
-                    }
-                )
+            self.diagnosticsRunID = request.run
+            let ipv4 = self.assignedIp.split(separator: "/").first.map(String.init)
+            DispatchQueue.global(qos: .utility).async {
+                let response = RustDiagnostics.execute(request, tunnelIPv4: ipv4, cancellation: cancellation)
                 DispatchQueue.main.async {
-                    if self?.networkConfigurationSequence != sequence || self?.stopRequested != false || self?.reasserting != false {
-                        result.summary = "INCOMPLETE - tunnel session changed; run diagnostics again"
+                    let current = self.diagnosticsCancellation === cancellation
+                        && !cancellation.isCancelled && !self.stopRequested && !self.reasserting
+                        && self.networkConfigurationSequence == request.generation
+                    if self.diagnosticsCancellation === cancellation {
+                        self.diagnosticsCancellation = nil
+                        self.diagnosticsRunID = nil
                     }
-                    self?.diagnosticsProgress = result
-                    self?.diagnosticsCancellation = nil
-                    completionHandler?(try? JSONEncoder().encode(result))
+                    completionHandler?(current ? try? JSONEncoder().encode(AppleProbeReply(request: request, response: response)) : nil)
                 }
             }
         }
