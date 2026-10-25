@@ -101,7 +101,15 @@ Empty uses `www.google.com, github.com, t.co`.
 
 ## Build & test
 
-From `clients/apple`:
+From `clients/apple`, format handwritten Swift with the checked-in `.swiftformat`
+configuration. Generated bindings and build outputs are excluded:
+
+```bash
+swiftformat . --cache ignore
+swiftformat . --lint --cache ignore
+```
+
+Build and test:
 
 ```bash
 # Generate the Rust XCFramework and UniFFI Swift bindings after cloning or core changes.
@@ -156,23 +164,52 @@ outside the user's session, so status/log communication uses provider messages.
 
 | Path | Purpose |
 |---|---|
-| `Vault/` | Shared app state, configuration, VPN controller and diagnostics model |
+| `Vault/AppData.swift` | Main App runtime state, including assigned addresses and traffic |
+| `Vault/VaultConfig.swift` | Saved App settings, editable drafts, validation feedback and conversion to the shared profile schema |
+| `Vault/KeychainPasswordStore.swift` | Main App credential storage |
+| `Vault/AppPresentation.swift` | Status labels, IP/version helpers, diagnostic result models and display formatting |
+| Other `Vault/` files | Main App VPN controller, diagnostics ViewModel and platform app integration |
 | `Vault/UI/iOS/`, `Vault/UI/macOS/` | Platform UI |
 | `TunnelProvider/` | Shared packet tunnel provider |
-| `VaultCore/` | Rust bindings, platform glue and unit tests; `Sources/VaultCore/Diagnostics.swift` contains the diagnostics IPC/UI adapter |
+| `VaultCore/Sources/VaultCore/TunnelModels.swift` | Saved launch configuration, applied tunnel configuration and traffic snapshot values |
+| `VaultCore/Sources/VaultCore/ProviderProtocol.swift` | Shared status, command envelopes and diagnostic IPC types |
+| `VaultCore/Sources/VaultCore/TunnelState.swift` | Network settings serialization, startup completion ownership and traffic session state |
+| `VaultCore/Sources/VaultCore/RustDiagnostics.swift` | Cancellation and Rust transport/engine adapter returning native snapshots and errors |
+| Other `VaultCore/` files | Rust bindings, shared profile/status/message types and independent domain logic |
 | `VaultNetworkExtension/`, `VaultSystemExtension/` | Platform extension targets |
 | `VaultTests/`, `VaultUITests/` | App and UI tests |
 | `Config/` | Signing and identifier configuration |
 
+`Vault` and the extension targets depend on the Swift `VaultCore` library, which
+adapts the separate Rust VPN core. Core code does not depend on App state,
+SwiftUI layouts, form drafts or diagnostic display models. The provider owns
+NetworkExtension callbacks and live tunnel resources; the App owns user intent,
+profile management and presentation. The library is loaded separately in each
+process, so its singletons are not shared memory.
+
+Core tests cover native engine snapshots, protocol compatibility and pure logic.
+App tests cover draft validation, display formatting and conversion of engine
+errors into UI results.
+
 Both apps poll one provider status IPC endpoint for live addresses and traffic.
-The provider keeps counters in memory; it no longer writes statistics or assigned
-addresses to App Group defaults. Polls do not overlap, and replies from an ended
+The provider keeps counters in memory. Assigned addresses live only in app runtime
+state, and legacy persisted addresses are removed when configuration loads. Polls do not overlap, and replies from an ended
 session cannot update the UI. Provider session identifiers preserve displayed
 traffic totals across extension restarts.
 
 Connection intent and phase belong to `VPNConnectionLifecycle`; `AppData` is its
 UI projection. iOS and macOS share `ConnectionDraft` validation, normalization and
 save operations, while macOS still saves each settings section independently.
+
+Provider commands use one typed Codable envelope, retaining the legacy empty
+status request and the existing probe payload format. Message replies enter the
+app asynchronously on the main queue. Profile loading, saving and reloading also
+complete on main before the next lifecycle operation proceeds.
+
+A shared `TunnelLaunchConfiguration` converts settings into the existing OS VPN
+profile keys and validates the provider's startup input. The password changes
+only through explicit save/load/retry operations; a read retry never writes the
+placeholder value back to Keychain.
 
 Non-secret settings use App Group storage. The password is stored in Keychain
 and copied into the OS VPN profile for on-demand restarts; disconnecting does

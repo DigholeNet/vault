@@ -49,8 +49,8 @@ struct IosDiagnosticsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Check your connection")).font(.headline)
                         Text(tr(appData.vpnStatus == .connected
-                            ? "Test tunnel DNS, TCP, HTTPS, and application access. Durations are measured in milliseconds."
-                            : "Connect the VPN before running diagnostics. Logs are available while disconnected."))
+                                ? "Test tunnel DNS, TCP, HTTPS, and application access. Durations are measured in milliseconds."
+                                : "Connect the VPN before running diagnostics. Logs are available while disconnected."))
                             .foregroundStyle(.secondary)
                     }.padding(.vertical, 4)
                 }
@@ -65,7 +65,7 @@ struct IosDiagnosticsView: View {
                                 Text(tr(DiagnosticsPresentation.pingNote))
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
-                            ForEach(probes) { probe in
+                            ForEach(probes, id: \.id) { probe in
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack {
                                         Text(probe.domain)
@@ -83,7 +83,10 @@ struct IosDiagnosticsView: View {
                     }
                 }
             } header: {
-                HStack { Text(tr("Check")); Spacer(); Text(tr("Average duration")) }
+                HStack { Text(tr("Check"))
+                    Spacer()
+                    Text(tr("Average duration"))
+                }
             } footer: {
                 Text(tr("Request durations include failures and retries; Ping RTT includes replies only."))
                     .font(.footnote)
@@ -113,10 +116,9 @@ struct IosDiagnosticsView: View {
                         }
                     }
                 }
-
             }
         }.font(.subheadline).listStyle(.insetGrouped)
-        .contentMargins(.top, 8, for: .scrollContent)
+            .contentMargins(.top, 8, for: .scrollContent)
     }
 
     private var resultHeader: some View {
@@ -128,7 +130,7 @@ struct IosDiagnosticsView: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text(tr(model.running ? "Checking connection…" : (model.passed ? "Connectivity checks passed"
-                    : (model.incomplete ? "Diagnostics incomplete" : "Connectivity issues found"))))
+                        : (model.incomplete ? "Diagnostics incomplete" : "Connectivity issues found"))))
                     .font(.headline)
                 if model.running, let startedAt = model.startedAt {
                     TimelineView(.periodic(from: .now, by: 0.1)) { _ in
@@ -229,7 +231,7 @@ private struct IosDiagnosticsDetailView: View {
 
     var body: some View {
         List {
-            ForEach((result.probes ?? []).filter { $0.domain == domain }) { probe in
+            ForEach((result.probes ?? []).filter { $0.domain == domain }, id: \.id) { probe in
                 Section {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: probe.succeeded ? "checkmark.circle.fill" : "exclamationmark.circle.fill")

@@ -12,9 +12,9 @@
 #if os(macOS)
 import AppKit
 import Foundation
+import os.log
 import SystemExtensions
 import VaultCore
-import os.log
 
 enum SystemExtensionError: LocalizedError {
     case needsUserApproval

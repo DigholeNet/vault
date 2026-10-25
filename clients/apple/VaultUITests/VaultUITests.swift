@@ -7,7 +7,6 @@
 import XCTest
 
 final class VaultUITests: XCTestCase {
-
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -30,7 +29,8 @@ final class VaultUITests: XCTestCase {
         app.tabBars.buttons["Status"].tap()
         let connection = app.switches["vpn.connection"]
         let ready = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == true AND hittable == true"), object: connection)
+            predicate: NSPredicate(format: "exists == true AND hittable == true"), object: connection
+        )
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed, app.debugDescription)
         let status = XCTAttachment(screenshot: app.screenshot())
         status.name = "iOS Status Existing Connection Icon"

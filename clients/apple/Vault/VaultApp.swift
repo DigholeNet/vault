@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MacosPreferences.shared.applyActivationPolicy()
         Self.onLaunch?()
     }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let manager = Self.vpnManager else { return .terminateNow }
         guard !terminating else { return .terminateLater }
@@ -22,7 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Even an idle profile may still have an on-demand rule after a failure.
         Self.disconnectBeforeTermination(manager) { succeeded in
             self.terminating = false
-            FileLogger.shared.logSync("App termination reply allowed=\(succeeded) vpnStatus=\(manager.vpnStatus) interfaces=\(FileLogger.tunnelInterfaceSummary())", level: "NOTICE")
+            FileLogger.shared.logSync(
+                "App termination reply allowed=\(succeeded) vpnStatus=\(manager.vpnStatus) interfaces=\(FileLogger.tunnelInterfaceSummary())",
+                level: "NOTICE"
+            )
             NSApp.reply(toApplicationShouldTerminate: succeeded)
             if !succeeded {
                 let alert = NSAlert()
@@ -54,9 +58,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish(false, source: "timeout") }
         manager.disconnect { finish($0, source: "disconnect") }
     }
+
     func applicationWillTerminate(_ notification: Notification) {
-        FileLogger.shared.logSync("App will terminate pid=\(ProcessInfo.processInfo.processIdentifier) interfaces=\(FileLogger.tunnelInterfaceSummary())", level: "NOTICE")
+        FileLogger.shared.logSync(
+            "App will terminate pid=\(ProcessInfo.processInfo.processIdentifier) interfaces=\(FileLogger.tunnelInterfaceSummary())",
+            level: "NOTICE"
+        )
     }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { WindowManager.shared.showWindow(withIdentifier: "configure") }
         return true

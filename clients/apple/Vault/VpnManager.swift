@@ -4,8 +4,8 @@
 //
 //
 import NetworkExtension
-import VaultCore
 import os.log
+import VaultCore
 
 typealias VpnStatus = VPNConnectionLifecycle.Phase
 
@@ -24,7 +24,7 @@ class VpnManager {
     private var tunnelStartIssuedAt: TimeInterval?
     var logState = VpnLogState()
     var terminationInProgress = false
-    var lastMessageTrace: [String: (signature: String, time: TimeInterval)] = [:]
+    var lastMessageTrace: [ProviderCommand: (signature: String, time: TimeInterval)] = [:]
     var logPreferences = UserDefaults.standard
     private var stopCompletions: [(Bool) -> Void] = []
     var tunnelStopTimeout: TimeInterval = 15
@@ -33,7 +33,7 @@ class VpnManager {
     var systemExtensionManager = SystemExtensionManager.shared
     var providerStartupTimeout: TimeInterval = 30
     func queryProviderStarted(completion: @escaping (Bool) -> Void) {
-        sendProviderCommand("startupStatus", timeout: 0.5) { completion($0 == Data([1])) }
+        sendProviderCommand(.init(.startupStatus), timeout: 0.5) { completion($0 == Data([1])) }
     }
     #endif
     /// Serializes preparation, cancellation and teardown on both platforms.
@@ -41,6 +41,7 @@ class VpnManager {
     var providerOperation: (id: UInt64, preparing: Bool, stopping: Bool) {
         (connectionLifecycle.generation, connectionLifecycle.isPreparing, connectionLifecycle.isStopping)
     }
+
     private var connectInFlight: Bool { connectionLifecycle.isPreparing }
 
     var diagnosticState = VpnDiagnosticState()
@@ -64,8 +65,11 @@ class VpnManager {
     }
 
     /// Called only after the main-queue send gate has checked live state.
-    func deliverProviderMessage(_ message: Data, manager: NETunnelProviderManager,
-        completion: @escaping (Data?) -> Void) throws {
+    func deliverProviderMessage(
+        _ message: Data,
+        manager: NETunnelProviderManager,
+        completion: @escaping (Data?) -> Void
+    ) throws {
         guard let session = manager.connection as? NETunnelProviderSession else {
             throw NEVPNError(.connectionFailed)
         }
@@ -77,14 +81,14 @@ class VpnManager {
             && vpnStatus == .connected && activeVPN?.connection.status == .connected
     }
 
-    func canSendProviderCommand(_ command: String, manager: NETunnelProviderManager) -> Bool {
+    func canSendProviderCommand(_ command: ProviderCommand, manager: NETunnelProviderManager) -> Bool {
         let status = manager.connection.status
         // Startup acknowledgement is part of safe cancellation, including Quit.
-        if command == "startupStatus" {
+        if command == .startupStatus {
             return status == .connecting || status == .connected || status == .reasserting
         }
         guard !terminationInProgress, !connectionLifecycle.isPreparing, !connectionLifecycle.isStopping else { return false }
-        if command == "logs" { return canReadLiveProviderLogs && manager === activeVPN }
+        if command == .logs { return canReadLiveProviderLogs && manager === activeVPN }
         return status == .connected || status == .reasserting
     }
 
@@ -104,17 +108,12 @@ class VpnManager {
             ?? managers.first
     }
 
-    func loadProviderManager(
-        _ complete: @escaping (NETunnelProviderManager?, Error?) -> Void
-    ) {
-        NETunnelProviderManager.loadAllFromPreferences { (managers, error) in
-            if let error { complete(nil, error); return }
-            if let managers = managers,
-                let manager = self.preferredManager(from: managers) {
-                complete(manager, nil)
-                return
+    /// Preference callbacks enter the app on main, like provider-message replies.
+    func loadProviderManager(_ complete: @escaping (NETunnelProviderManager?, Error?) -> Void) {
+        NETunnelProviderManager.loadAllFromPreferences { managers, error in
+            DispatchQueue.main.async {
+                complete(error == nil ? managers.flatMap { self.preferredManager(from: $0) } : nil, error)
             }
-            complete(nil, nil)
         }
     }
 
@@ -194,10 +193,6 @@ class VpnManager {
                 self.startStatsMonitoring()
             } else if self.vpnStatus == .disconnected {
                 self.stopStatsMonitoring()
-                // The assigned address belongs to the session that just
-                // ended; leaving it persisted would show a stale IP on the
-                // status page and on the next app launch.
-                self.config.ip = ""
             }
         }
 
@@ -244,27 +239,26 @@ class VpnManager {
         observers.append(observer)
     }
 
-    /// Read authoritative session addresses on both platforms. An AppStorage
-    /// value can lag another process, so diagnostics must not use it as evidence.
+    /// The provider owns live addresses and counters on both platforms.
     private func queryProviderStatus(completion: @escaping (ProviderStatus?) -> Void) {
-        guard let connection = activeVPN?.connection else { completion(nil); return }
+        guard let connection = activeVPN?.connection else { completion(nil)
+            return
+        }
         let generation = diagnosticState.generation
-        sendProviderCommand("status", timeout: 3, payload: Data()) { data in
-            DispatchQueue.main.async {
-                guard self.diagnosticState.generation == generation,
-                    self.activeVPN?.connection === connection,
-                    connection.status == .connected || connection.status == .reasserting else {
-                    completion(nil)
-                    return
-                }
-                guard let data, let status = try? JSONDecoder().decode(ProviderStatus.self, from: data) else {
-                    self.reportQueryFailure("provider status unavailable or invalid")
-                    completion(nil)
-                    return
-                }
-                self.reportQueryFailure(nil)
-                completion(status)
+        sendProviderCommand(.init(.status), timeout: 3) { data in
+            guard self.diagnosticState.generation == generation,
+                  self.activeVPN?.connection === connection,
+                  connection.status == .connected || connection.status == .reasserting else {
+                completion(nil)
+                return
             }
+            guard let data, let status = try? JSONDecoder().decode(ProviderStatus.self, from: data) else {
+                self.reportQueryFailure("provider status unavailable or invalid")
+                completion(nil)
+                return
+            }
+            self.reportQueryFailure(nil)
+            completion(status)
         }
     }
 
@@ -293,7 +287,6 @@ class VpnManager {
             self.statsQueryInFlight = false
             guard let status else { return }
             self.appData.applyStatus(status)
-            if self.config.ip != status.ip { self.config.ip = status.ip }
         }
     }
 
@@ -315,19 +308,18 @@ class VpnManager {
     func startObservingStatus(completion: (() -> Void)? = nil) {
         let generation = connectionLifecycle.generation
         loadProviderManager { [weak self] manager, _ in
-            DispatchQueue.main.async {
-                // A user action supersedes startup, including its auto-connect callback.
-                guard let self, self.connectionLifecycle.generation == generation else { return }
-                if let manager {
-                    self.activeVPN = manager
-                    self.observeVPNStatus(for: manager)
-                    self.updateVPNStatus(manager)
-                }
-                completion?()
+            // A user action supersedes startup, including its auto-connect callback.
+            guard let self, self.connectionLifecycle.generation == generation else { return }
+            if let manager {
+                self.activeVPN = manager
+                self.observeVPNStatus(for: manager)
+                self.updateVPNStatus(manager)
             }
+            completion?()
         }
     }
 
+    /// Completes on main after the profile save and reload settle.
     func loadAndCreateProviderManager(
         _ complete: @escaping (NETunnelProviderManager?, _ loaded: Bool) -> Void
     ) {
@@ -359,15 +351,6 @@ class VpnManager {
                     manager = self.createProviderManager()
                 }
 
-                guard let idBytes = [UInt8](hex: self.config.id) else {
-                    Logger.network.errorAndFile("Invalid config id format")
-                    complete(nil, false)
-                    return
-                }
-                let id = Data(idBytes)
-
-                var conf = [String: AnyObject]()
-                conf["host"] = self.config.host as AnyObject
                 // Defensive clamp: a port persisted before range validation
                 // existed must not trap UInt16(Int). Repair the stored value too.
                 let port = min(max(self.config.port, 1), 65535)
@@ -377,19 +360,18 @@ class VpnManager {
                     )
                     self.config.port = port
                 }
-                conf["port"] = UInt16(port) as AnyObject
-                conf["dns"] = self.config.dns as AnyObject
-                conf["probeDomains"] = self.config.probeDomains as AnyObject
-                conf["mtu"] = self.config.mtu as AnyObject
-                if let token = self.logPreferences.string(forKey: "clearLogsToken") {
-                    conf["clearLogsToken"] = token as AnyObject
+                let launch: TunnelLaunchConfiguration
+                do {
+                    launch = try TunnelLaunchConfiguration(
+                        draft: self.config.connectionDraft,
+                        id: self.config.id,
+                        clearLogsToken: self.logPreferences.string(forKey: "clearLogsToken")
+                    )
+                } catch {
+                    Logger.network.errorAndFile("Invalid tunnel launch configuration: \(error)")
+                    complete(nil, false)
+                    return
                 }
-
-                conf["id"] = id as AnyObject
-                // The password is persisted in the OS VPN providerConfiguration: on macOS the
-                // provider is a system extension running outside the user's
-                // session, so App Group UserDefaults are not shared with it.
-                conf["password"] = self.config.password as AnyObject
 
                 guard let originConf =
                     manager.protocolConfiguration as? NETunnelProviderProtocol else {
@@ -404,7 +386,7 @@ class VpnManager {
                     SystemExtensionManager.extensionBundleIdentifier
                 #endif
                 originConf.serverAddress = self.config.host
-                originConf.providerConfiguration = conf
+                originConf.providerConfiguration = launch.providerConfiguration
                 manager.protocolConfiguration = originConf
                 manager.isEnabled = true
                 // Keep the tunnel up across suspends, network switches and
@@ -416,31 +398,36 @@ class VpnManager {
                 let saveStarted = ProcessInfo.processInfo.systemUptime
                 Logger.network.noticeAndFile("[operation:\(operation)] Saving VPN configuration onDemand=true")
                 manager.saveToPreferences { error in
-                    self.logStage("VPN configuration save completed", operation: operation, since: saveStarted, error: error)
-                    if let error = error {
-                        if let neError = error as? NEVPNError,
-                            neError.code == .configurationReadWriteFailed {
-                            Logger.network.errorAndFile(
-                                "User denied VPN configuration permission."
-                            )
-                        } else {
-                            Logger.network.errorAndFile(
-                                "Failed to save VPN configuration: \(error)"
-                            )
-                        }
-                        complete(nil, false)
-                        return
-                    }
-                    let reloadStarted = ProcessInfo.processInfo.systemUptime
-                    Logger.network.noticeAndFile("[operation:\(operation)] Reloading VPN configuration")
-                    manager.loadFromPreferences { error in
-                        self.logStage("VPN configuration reload completed", operation: operation, since: reloadStarted, error: error)
-                        if error != nil {
-                            // The saved on-demand profile still needs cleanup.
-                            complete(manager, false)
+                    DispatchQueue.main.async {
+                        self.logStage("VPN configuration save completed", operation: operation, since: saveStarted, error: error)
+                        if let error = error {
+                            if let neError = error as? NEVPNError,
+                               neError.code == .configurationReadWriteFailed {
+                                Logger.network.errorAndFile(
+                                    "User denied VPN configuration permission."
+                                )
+                            } else {
+                                Logger.network.errorAndFile(
+                                    "Failed to save VPN configuration: \(error)"
+                                )
+                            }
+                            complete(nil, false)
                             return
                         }
-                        complete(manager, true)
+                        let reloadStarted = ProcessInfo.processInfo.systemUptime
+                        Logger.network.noticeAndFile("[operation:\(operation)] Reloading VPN configuration")
+                        manager.loadFromPreferences { error in
+                            DispatchQueue.main.async {
+                                self.logStage(
+                                    "VPN configuration reload completed",
+                                    operation: operation,
+                                    since: reloadStarted,
+                                    error: error
+                                )
+                                // The saved on-demand profile still needs cleanup if reload failed.
+                                complete(manager, error == nil)
+                            }
+                        }
                     }
                 }
             }
@@ -449,7 +436,6 @@ class VpnManager {
 }
 
 extension VpnManager {
-
     func connect() {
         if !Thread.isMainThread {
             DispatchQueue.main.async { self.connect() }
@@ -482,8 +468,12 @@ extension VpnManager {
                 guard let self else { return }
                 let activationError: Error?
                 if case .failure(let error) = result { activationError = error } else { activationError = nil }
-                self.logStage("System extension activation completed", operation: token,
-                    since: activationStarted, error: activationError)
+                self.logStage(
+                    "System extension activation completed",
+                    operation: token,
+                    since: activationStarted,
+                    error: activationError
+                )
                 guard self.connectionLifecycle.canStart(token) else {
                     self.connectionLifecycle.finishPreparation(token)
                     self.advanceConnection()
@@ -505,46 +495,49 @@ extension VpnManager {
 
     private func prepareConnection(_ token: UInt64) {
         loadAndCreateProviderManager { manager, loaded in
-            DispatchQueue.main.async {
-                let permitted = self.connectionLifecycle.canStart(token)
-                self.connectionLifecycle.finishPreparation(token)
-                guard permitted else {
-                    if let manager { self.activeVPN = manager }
-                    self.advanceConnection()
-                    return
+            let permitted = self.connectionLifecycle.canStart(token)
+            self.connectionLifecycle.finishPreparation(token)
+            guard permitted else {
+                if let manager { self.activeVPN = manager }
+                self.advanceConnection()
+                return
+            }
+            guard let manager else { self.failConnect(token)
+                return
+            }
+            self.activeVPN = manager
+            if !loaded {
+                self.connectionFailurePending = true
+                self.disconnect()
+                return
+            }
+            self.observeVPNStatus(for: manager)
+            guard self.connectionLifecycle.markStarted(token) else { return }
+            do {
+                // Saving an on-demand profile may already have started it.
+                if manager.connection.status == .disconnected || manager.connection.status == .invalid {
+                    let issued = ProcessInfo.processInfo.systemUptime
+                    self.tunnelStartIssuedAt = issued
+                    Logger.network.noticeAndFile("[operation:\(token)] Calling startVPNTunnel status=\(manager.connection.status.rawValue)")
+                    try manager.connection.startVPNTunnel()
+                    self.logStage("startVPNTunnel returned; waiting for system status", operation: token, since: issued)
+                } else {
+                    Logger.network
+                        .noticeAndFile("[operation:\(token)] Adopting on-demand tunnel status=\(manager.connection.status.rawValue)")
+                    self.updateVPNStatus(manager)
                 }
-                guard let manager else { self.failConnect(token); return }
-                self.activeVPN = manager
-                if !loaded {
-                    self.connectionFailurePending = true
-                    self.disconnect()
-                    return
-                }
-                self.observeVPNStatus(for: manager)
-                guard self.connectionLifecycle.markStarted(token) else { return }
-                do {
-                    // Saving an on-demand profile may already have started it.
-                    if manager.connection.status == .disconnected || manager.connection.status == .invalid {
-                        let issued = ProcessInfo.processInfo.systemUptime
-                        self.tunnelStartIssuedAt = issued
-                        Logger.network.noticeAndFile("[operation:\(token)] Calling startVPNTunnel status=\(manager.connection.status.rawValue)")
-                        try manager.connection.startVPNTunnel()
-                        self.logStage("startVPNTunnel returned; waiting for system status", operation: token, since: issued)
-                    } else {
-                        Logger.network.noticeAndFile("[operation:\(token)] Adopting on-demand tunnel status=\(manager.connection.status.rawValue)")
-                        self.updateVPNStatus(manager)
-                    }
-                } catch {
-                    Logger.network.errorAndFile("startVPNTunnel failed: \(error.localizedDescription)")
-                    self.connectionFailurePending = true
-                    self.disconnect()
-                }
+            } catch {
+                Logger.network.errorAndFile("startVPNTunnel failed: \(error.localizedDescription)")
+                self.connectionFailurePending = true
+                self.disconnect()
             }
         }
     }
 
     func disconnect(completion: ((Bool) -> Void)? = nil) {
-        if !Thread.isMainThread { DispatchQueue.main.async { self.disconnect(completion: completion) }; return }
+        if !Thread.isMainThread { DispatchQueue.main.async { self.disconnect(completion: completion) }
+            return
+        }
         if let completion { stopCompletions.append(completion) }
         guard let token = connectionLifecycle.beginDisconnect() else { return }
         appData.connectionError = nil
@@ -573,7 +566,6 @@ extension VpnManager {
         publishStatus()
         appData.connectedSince = nil
         stopStatsMonitoring()
-        config.ip = ""
         activeVPN = nil
     }
 
@@ -621,52 +613,51 @@ extension VpnManager {
     private func performStop(_ token: UInt64, manager: NETunnelProviderManager?) {
         guard connectionLifecycle.beginTeardown(token) else { return }
         let stop: (NETunnelProviderManager?, Error?) -> Void = { manager, error in
-            DispatchQueue.main.async {
-                guard self.connectionLifecycle.acceptsStop(token) else { return }
-                if let error {
-                    Logger.network.errorAndFile("Failed to load VPN configuration for disconnect: \(error)")
-                    self.connectionLifecycle.finishTeardown(token, succeeded: false)
-                    self.completeStopIfPossible()
-                    return
-                }
-                guard let manager else {
-                    self.connectionLifecycle.finishTeardown(token)
-                    self.completeStopIfPossible()
-                    return
-                }
-                self.activeVPN = manager
-                self.observeVPNStatus(for: manager)
-                let finish: () -> Void = {
-                    DispatchQueue.main.async {
-                        #if os(macOS)
-                        let deadline = ProcessInfo.processInfo.systemUptime + self.providerStartupTimeout
-                        #else
-                        let deadline = ProcessInfo.processInfo.systemUptime
-                        #endif
-                        self.stopTunnelWhenReady(token, manager: manager, deadline: deadline)
-                    }
-                }
-                if manager.isOnDemandEnabled {
-                    manager.isOnDemandEnabled = false
-                    let disableStarted = ProcessInfo.processInfo.systemUptime
-                    Logger.network.noticeAndFile("[operation:\(token)] Disabling on-demand VPN configuration")
-                    manager.saveToPreferences { error in
-                        self.logStage("On-demand disable completed", operation: token, since: disableStarted, error: error)
-                        if let error {
-                            DispatchQueue.main.async {
-                                guard self.connectionLifecycle.acceptsStop(token) else { return }
-                                // Restore the in-memory flag too, so Retry persists it again.
-                                manager.isOnDemandEnabled = true
-                                Logger.network.errorAndFile("Failed to disable on-demand: \(error)")
-                                self.connectionLifecycle.finishTeardown(token, succeeded: false)
-                                self.completeStopIfPossible()
-                            }
-                            return
-                        }
-                        finish()
-                    }
-                } else { finish() }
+            dispatchPrecondition(condition: .onQueue(.main))
+            guard self.connectionLifecycle.acceptsStop(token) else { return }
+            if let error {
+                Logger.network.errorAndFile("Failed to load VPN configuration for disconnect: \(error)")
+                self.connectionLifecycle.finishTeardown(token, succeeded: false)
+                self.completeStopIfPossible()
+                return
             }
+            guard let manager else {
+                self.connectionLifecycle.finishTeardown(token)
+                self.completeStopIfPossible()
+                return
+            }
+            self.activeVPN = manager
+            self.observeVPNStatus(for: manager)
+            let finish: () -> Void = {
+                DispatchQueue.main.async {
+                    #if os(macOS)
+                    let deadline = ProcessInfo.processInfo.systemUptime + self.providerStartupTimeout
+                    #else
+                    let deadline = ProcessInfo.processInfo.systemUptime
+                    #endif
+                    self.stopTunnelWhenReady(token, manager: manager, deadline: deadline)
+                }
+            }
+            if manager.isOnDemandEnabled {
+                manager.isOnDemandEnabled = false
+                let disableStarted = ProcessInfo.processInfo.systemUptime
+                Logger.network.noticeAndFile("[operation:\(token)] Disabling on-demand VPN configuration")
+                manager.saveToPreferences { error in
+                    self.logStage("On-demand disable completed", operation: token, since: disableStarted, error: error)
+                    if let error {
+                        DispatchQueue.main.async {
+                            guard self.connectionLifecycle.acceptsStop(token) else { return }
+                            // Restore the in-memory flag too, so Retry persists it again.
+                            manager.isOnDemandEnabled = true
+                            Logger.network.errorAndFile("Failed to disable on-demand: \(error)")
+                            self.connectionLifecycle.finishTeardown(token, succeeded: false)
+                            self.completeStopIfPossible()
+                        }
+                        return
+                    }
+                    finish()
+                }
+            } else { finish() }
         }
         if let manager { stop(manager, nil) }
         else { loadProviderManager(stop) }
@@ -719,6 +710,4 @@ extension VpnManager {
         tunnelStopTimeoutWorkItem = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + tunnelStopTimeout, execute: timeout)
     }
-
-
 }

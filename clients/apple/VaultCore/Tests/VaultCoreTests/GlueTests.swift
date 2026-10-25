@@ -7,9 +7,8 @@
 //  is covered by its own Rust tests.
 //
 
-import Testing
 import Darwin
-
+import Testing
 @testable import VaultCore
 
 @Test func hexDecoding() {
@@ -23,10 +22,4 @@ import Darwin
 @Test func edgeConfig() {
     let config = EdgeConfig(password: "pw", host: "example.com", port: 9527)
     #expect(config.port == 9527)
-}
-
-@Test func formatBytes() {
-    #expect(PacketStats.formatBytes(0) == "0.00 B")
-    #expect(PacketStats.formatBytes(1024) == "1.00 KB")
-    #expect(PacketStats.formatBytes(1536) == "1.50 KB")
 }

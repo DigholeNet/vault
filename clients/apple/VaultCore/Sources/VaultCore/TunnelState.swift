@@ -1,24 +1,7 @@
 // SPDX-License-Identifier: MIT
 import Foundation
 
-/// Platform configuration that has either been requested or applied to the TUN.
-public struct TunnelConfiguration: Equatable, Sendable {
-    public let ipv4: String
-    public let mask: String
-    public let ipv6: String
-    public let prefix: Int32
-    public let mtu: Int
-
-    public init(ipv4: String, mask: String, ipv6: String, prefix: Int32, mtu: Int) {
-        self.ipv4 = ipv4
-        self.mask = mask
-        self.ipv6 = ipv6
-        self.prefix = prefix
-        self.mtu = mtu
-    }
-
-    public var addresses: String { ipv6.isEmpty ? ipv4 : "\(ipv4)/\(ipv6)" }
-}
+// MARK: - Network settings application
 
 /// Main-queue-owned serialization of asynchronous OS settings applications.
 /// Only a successful completion changes the configuration visible to readers.
@@ -81,5 +64,66 @@ public struct TunnelSettingsState {
         pending = nil
         applied = nil
         generation = 0
+    }
+}
+
+// MARK: - Startup completion ownership
+
+/// Owns the completions for one (possibly repeated) tunnel start. Access only on the provider's main queue.
+public final class PendingStart {
+    private var completions: [(Error?) -> Void]
+
+    public init(completion: @escaping (Error?) -> Void) {
+        self.completions = [completion]
+    }
+
+    public var isPending: Bool { !completions.isEmpty }
+
+    @discardableResult
+    public func appendCompletion(_ completion: @escaping (Error?) -> Void) -> Bool {
+        guard isPending else { return false }
+        completions.append(completion)
+        return true
+    }
+
+    /// Claim completion before performing any success or failure side effects.
+    public func takeCompletion() -> ((Error?) -> Void)? {
+        guard isPending else { return nil }
+        let callbacks = completions
+        completions.removeAll()
+        return { error in callbacks.forEach { $0(error) } }
+    }
+}
+
+// MARK: - Traffic session ownership
+
+extension PacketStats {
+    /// Owns the identity and counters together. Ending a session invalidates
+    /// queued status reads; cancellation tokens never identify traffic totals.
+    public struct Session {
+        private var id: String?
+        private var stats: Stats = .zero
+
+        public init() {}
+
+        public mutating func begin() {
+            id = UUID().uuidString
+            stats = .zero
+        }
+
+        public mutating func end() {
+            id = nil
+            stats = .zero
+        }
+
+        public mutating func update(_ stats: Stats) {
+            guard id != nil else { return }
+            self.stats = stats
+        }
+
+        public func status(ip: String) -> ProviderStatus? {
+            guard let id else { return nil }
+            return ProviderStatus(ip: ip, stats: stats, session: id)
+        }
     }
 }

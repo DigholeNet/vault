@@ -17,6 +17,7 @@ struct MacosConfigureView: View {
             }
         }
     }
+
     @ObservedObject var config: VaultConfig
     @EnvironmentObject var appData: AppData
     @EnvironmentObject var languageManager: LanguageManager
@@ -32,6 +33,7 @@ struct MacosConfigureView: View {
         case section(Page), about, host, port, password, revealedPassword, reveal, dns, mtu, domains
         case launch, autoConnect, dock, language, copyV4, copyV6, copyID, retryPassword, restore, save
     }
+
     @FocusState private var focusedControl: Control?
     @State private var keyboardControl: Control? = .host
 
@@ -49,17 +51,17 @@ struct MacosConfigureView: View {
                             .background(page == item ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
                             .foregroundStyle(page == item ? Color.accentColor : .primary)
                     }.buttonStyle(.plain)
-                    .keyboardShortcut(KeyEquivalent(Character(String((Page.allCases.firstIndex(of: item) ?? 0) + 1))))
-                    .macosKeyboardAction(focus: $keyboardControl, id: .section(item)) { select(item) }
-                    .accessibilityAddTraits(page == item ? .isSelected : [])
+                        .keyboardShortcut(KeyEquivalent(Character(String((Page.allCases.firstIndex(of: item) ?? 0) + 1))))
+                        .macosKeyboardAction(focus: $keyboardControl, id: .section(item)) { select(item) }
+                        .accessibilityAddTraits(page == item ? .isSelected : [])
                 }
                 Spacer()
                 Button {
                     WindowManager.shared.showWindow(withIdentifier: "about")
                 } label: {
                     Label(languageManager.tr("About"), systemImage: "questionmark.app")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
                 }
                 .buttonStyle(.plain).font(.body).foregroundStyle(.secondary)
                 .macosKeyboardAction(focus: $keyboardControl, id: .about) { WindowManager.shared.showWindow(withIdentifier: "about") }
@@ -106,14 +108,21 @@ struct MacosConfigureView: View {
                 moveKeyboardFocus(nextControl(after: keyboardControl, backwards: modifiers.contains(.shift)), window: event.window)
                 return true
             }
-            if event.keyCode == 53, modifiers.isEmpty { event.window?.performClose(nil); return true }
+            if event.keyCode == 53, modifiers.isEmpty { event.window?.performClose(nil)
+                return true
+            }
             if modifiers == .command, let key = event.charactersIgnoringModifiers {
-                if let number = Int(key), (1...Page.allCases.count).contains(number) {
-                    select(Page.allCases[number - 1]); event.window?.makeFirstResponder(nil)
+                if let number = Int(key), (1 ... Page.allCases.count).contains(number) {
+                    select(Page.allCases[number - 1])
+                    event.window?.makeFirstResponder(nil)
                     return true
                 }
-                if key.lowercased() == "s", page != .general { save(); return true }
-                if key.lowercased() == "w" { event.window?.performClose(nil); return true }
+                if key.lowercased() == "s", page != .general { save()
+                    return true
+                }
+                if key.lowercased() == "w" { event.window?.performClose(nil)
+                    return true
+                }
             }
             if modifiers.isEmpty, let current = keyboardControl {
                 if case .section(let section) = current {
@@ -122,13 +131,17 @@ struct MacosConfigureView: View {
                         select(Page.allCases[(index + (event.keyCode == 126 ? Page.allCases.count - 1 : 1)) % Page.allCases.count])
                         return true
                     }
-                    if event.keyCode == 124 { moveKeyboardFocus(firstControl, window: event.window); return true }
+                    if event.keyCode == 124 { moveKeyboardFocus(firstControl, window: event.window)
+                        return true
+                    }
                 }
                 if current == .language, [123, 124, 125, 126].contains(event.keyCode) {
-                    moveLanguage(by: event.keyCode == 123 || event.keyCode == 126 ? -1 : 1); return true
+                    moveLanguage(by: event.keyCode == 123 || event.keyCode == 126 ? -1 : 1)
+                    return true
                 }
                 if !event.isARepeat, [36, 49, 76].contains(event.keyCode), !isTextControl(current) {
-                    activate(current); return true
+                    activate(current)
+                    return true
                 }
             }
             return false
@@ -147,12 +160,17 @@ struct MacosConfigureView: View {
         .onChange(of: languageManager.language) { _, _ in WindowManager.shared.refreshTitles() }
         .onChange(of: page) { _, _ in preferences.refreshLoginStatus() }
         .alert(languageManager.tr("Login item could not be updated"), isPresented: Binding(
-            get: { preferences.launchError != nil }, set: { if !$0 { preferences.launchError = nil } })) {
-                Button(languageManager.tr("Open System Settings")) { SMAppService.openSystemSettingsLoginItems() }
-                Button(languageManager.tr("OK"), role: .cancel) {}
-            } message: { Text(languageManager.tr(preferences.launchError ?? "")) }
+            get: { preferences.launchError != nil }, set: { if !$0 { preferences.launchError = nil } }
+        )) {
+            Button(languageManager.tr("Open System Settings")) { SMAppService.openSystemSettingsLoginItems() }
+            Button(languageManager.tr("OK"), role: .cancel) {}
+        } message: { Text(languageManager.tr(preferences.launchError ?? "")) }
         .confirmationDialog(languageManager.tr("Restore advanced defaults?"), isPresented: $confirmReset) {
-            Button(languageManager.tr("Restore Defaults")) { draft.mtu = ""; draft.probeDomains = ""; feedback = "Defaults restored. Save to apply."; isError = false }
+            Button(languageManager.tr("Restore Defaults")) { draft.mtu = ""
+                draft.probeDomains = ""
+                feedback = "Defaults restored. Save to apply."
+                isError = false
+            }
         }
     }
 
@@ -160,8 +178,9 @@ struct MacosConfigureView: View {
         Group {
             Section {
                 Toggle(languageManager.tr("Launch at Login"), isOn: Binding(
-                    get: { preferences.launchAtLogin }, set: { preferences.setLaunchAtLogin($0) }))
-                    .macosKeyboardAction(focus: $keyboardControl, id: .launch) { preferences.setLaunchAtLogin(!preferences.launchAtLogin) }
+                    get: { preferences.launchAtLogin }, set: { preferences.setLaunchAtLogin($0) }
+                ))
+                .macosKeyboardAction(focus: $keyboardControl, id: .launch) { preferences.setLaunchAtLogin(!preferences.launchAtLogin) }
                 Toggle(languageManager.tr("Connect when Vault opens"), isOn: $preferences.autoConnect)
                     .macosKeyboardAction(focus: $keyboardControl, id: .autoConnect) { preferences.autoConnect.toggle() }
                 Toggle(languageManager.tr("Show in Dock"), isOn: $preferences.showInDock)
@@ -175,6 +194,7 @@ struct MacosConfigureView: View {
             }
         }
     }
+
     private var connection: some View {
         Group {
             Section {
@@ -196,8 +216,8 @@ struct MacosConfigureView: View {
                     Button { togglePasswordVisibility() } label: {
                         Image(systemName: revealsPassword ? "eye.slash" : "eye")
                     }.buttonStyle(.plain).help(languageManager.tr("Show or hide password"))
-                    .accessibilityLabel(languageManager.tr("Show or hide password"))
-                    .macosKeyboardAction(focus: $keyboardControl, id: .reveal, action: togglePasswordVisibility)
+                        .accessibilityLabel(languageManager.tr("Show or hide password"))
+                        .macosKeyboardAction(focus: $keyboardControl, id: .reveal, action: togglePasswordVisibility)
                 }
             } footer: { Text(languageManager.tr("Changes apply the next time you connect.")).font(.body) }
             if let error = config.passwordStorageError {
@@ -209,6 +229,7 @@ struct MacosConfigureView: View {
             }
         }
     }
+
     private var network: some View {
         Group {
             Section(languageManager.tr("DNS Servers")) {
@@ -218,7 +239,7 @@ struct MacosConfigureView: View {
             }
             Section(languageManager.tr("Tunnel Addresses")) {
                 if appData.vpnStatus == .connected || appData.isRecovering {
-                    let addresses = config.ip.parsedIPv4AndIPv6()
+                    let addresses = appData.assignedIp.parsedIPv4AndIPv6()
                     if let ipv4 = addresses.ipv4 { addressRow("IPv4", ipv4) }
                     if let ipv6 = addresses.ipv6 { addressRow("IPv6", ipv6) }
                     if addresses.ipv4 == nil && addresses.ipv6 == nil {
@@ -233,6 +254,7 @@ struct MacosConfigureView: View {
             }
         }
     }
+
     private var advanced: some View {
         Group {
             Section {
@@ -258,6 +280,7 @@ struct MacosConfigureView: View {
             }
         }
     }
+
     private func addressRow(_ family: String, _ value: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Text(family).font(.body).foregroundStyle(.secondary).frame(width: 35, alignment: .leading)
@@ -269,6 +292,7 @@ struct MacosConfigureView: View {
                 .macosKeyboardAction(focus: $keyboardControl, id: family == "IPv4" ? .copyV4 : .copyV6) { copy(value) }
         }
     }
+
     private var firstControl: Control {
         switch page {
         case .general: return .launch
@@ -277,6 +301,7 @@ struct MacosConfigureView: View {
         case .advanced: return .mtu
         }
     }
+
     private var focusOrder: [Control] {
         var order = Page.allCases.map(Control.section)
         switch page {
@@ -288,7 +313,7 @@ struct MacosConfigureView: View {
         case .network:
             order.append(.dns)
             if appData.vpnStatus == .connected || appData.isRecovering {
-                let ip = config.ip.parsedIPv4AndIPv6()
+                let ip = appData.assignedIp.parsedIPv4AndIPv6()
                 if ip.ipv4 != nil { order.append(.copyV4) }
                 if ip.ipv6 != nil { order.append(.copyV6) }
             }
@@ -297,6 +322,7 @@ struct MacosConfigureView: View {
         }
         return order + [.about]
     }
+
     private func nextControl(after current: Control?, backwards: Bool) -> Control? {
         let order = focusOrder
         guard let current, let index = order.firstIndex(of: current) else {
@@ -304,15 +330,18 @@ struct MacosConfigureView: View {
         }
         return order[(index + (backwards ? order.count - 1 : 1)) % order.count]
     }
+
     private func select(_ selected: Page) {
         page = selected
         feedback = nil
         focusedControl = nil
         keyboardControl = .section(selected)
     }
+
     private func isTextControl(_ control: Control) -> Bool {
         [.host, .port, .password, .revealedPassword, .dns, .mtu, .domains].contains(control)
     }
+
     private func moveKeyboardFocus(_ control: Control?, window: NSWindow?) {
         keyboardControl = control
         if let control, isTextControl(control) {
@@ -322,6 +351,7 @@ struct MacosConfigureView: View {
             window?.makeFirstResponder(nil)
         }
     }
+
     private func activate(_ control: Control) {
         switch control {
         case .section(let selected): select(selected)
@@ -331,8 +361,8 @@ struct MacosConfigureView: View {
         case .dock: preferences.showInDock.toggle()
         case .language: moveLanguage(by: 1)
         case .reveal: togglePasswordVisibility()
-        case .copyV4: if let ip = config.ip.parsedIPv4AndIPv6().ipv4 { copy(ip) }
-        case .copyV6: if let ip = config.ip.parsedIPv4AndIPv6().ipv6 { copy(ip) }
+        case .copyV4: if let ip = appData.assignedIp.parsedIPv4AndIPv6().ipv4 { copy(ip) }
+        case .copyV6: if let ip = appData.assignedIp.parsedIPv4AndIPv6().ipv6 { copy(ip) }
         case .copyID: copy(config.id)
         case .retryPassword: retryPasswordStorage()
         case .restore: confirmReset = true
@@ -340,11 +370,13 @@ struct MacosConfigureView: View {
         default: break
         }
     }
+
     private func moveLanguage(by offset: Int) {
         let all = AppLanguage.allCases
         let index = all.firstIndex(of: languageManager.language) ?? 0
         languageManager.language = all[(index + offset + all.count) % all.count]
     }
+
     private var passwordControl: Control { revealsPassword ? .revealedPassword : .password }
     private func togglePasswordVisibility() {
         focusedControl = nil
@@ -355,8 +387,10 @@ struct MacosConfigureView: View {
     }
 
     private func copy(_ text: String) {
-        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
+
     private func retryPasswordStorage() {
         let unchanged = draft.password == config.password
         config.retryPasswordStorage()
@@ -366,7 +400,8 @@ struct MacosConfigureView: View {
     }
 
     private func save() {
-        feedback = nil; isError = true
+        feedback = nil
+        isError = true
         let section: ConnectionDraft.Section
         switch page {
         case .general: return
@@ -406,6 +441,7 @@ struct MacosWelcomeView: View {
             }
         }.padding(28)
     }
+
     private func step(_ number: String, _ title: String, _ detail: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Text(number).font(.headline).frame(width: 25, height: 25)

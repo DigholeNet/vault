@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 import VaultCore
 
 protocol RuntimeLogStore {
@@ -42,20 +42,16 @@ final class DiagnosticsViewModel: ObservableObject {
         completedAt = nil
         result = DiagnosticsResult(message: "RUNNING")
         manager.requestDiagnostics(onProgress: { [weak self] progress in
-            DispatchQueue.main.async {
-                guard let self, self.running, self.generation == token else { return }
-                if self.result?.activeCheck != progress.activeCheck {
-                    self.progressReceived = ProcessInfo.processInfo.systemUptime
-                }
-                self.result = progress
+            guard let self, self.running, self.generation == token else { return }
+            if self.result?.activeCheck != progress.activeCheck {
+                self.progressReceived = ProcessInfo.processInfo.systemUptime
             }
+            self.result = progress
         }) { [weak self] reply in
-            DispatchQueue.main.async {
-                guard let self, self.generation == token else { return }
-                self.result = reply ?? DiagnosticsResult(message: "INCOMPLETE - provider returned no usable response")
-                self.running = false
-                self.completedAt = Date()
-            }
+            guard let self, self.generation == token else { return }
+            self.result = reply ?? DiagnosticsResult(message: "INCOMPLETE - provider returned no usable response")
+            self.running = false
+            self.completedAt = Date()
         }
     }
 

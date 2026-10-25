@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 import Network
 import NetworkExtension
-import VaultCore
 import os.log
+import VaultCore
 
 enum TunnelConstants {
     /// Bytes of tunnel overhead added to every inner packet:
@@ -17,10 +17,10 @@ enum TunnelConstants {
     /// minus tunnelOverhead. Jumbo-frame links do not inflate the tunnel
     /// MTU beyond this. Also the fallback when the underlying link MTU
     /// cannot be probed.
-    static let mtuUpperBound: Int = 1427
+    static let mtuUpperBound = TunnelLaunchConfiguration.mtuUpperBound
     /// Lower bound for the tunnel MTU: the IPv6 minimum link MTU. Below
     /// this the system cannot route IPv6 through the tunnel at all.
-    static let mtuLowerBound: Int = 1280
+    static let mtuLowerBound = TunnelLaunchConfiguration.mtuLowerBound
     /// Platform startup deadline; transport attempts and backoff remain in Rust.
     static let startTimeout: TimeInterval = 30
 }
@@ -77,7 +77,7 @@ enum TunnelNetworkSettings {
 
         for interface in sequence(first: first, next: { $0.pointee.ifa_next }) {
             guard let ifaAddress = interface.pointee.ifa_addr,
-                Int32(ifaAddress.pointee.sa_family) == AF_INET
+                  Int32(ifaAddress.pointee.sa_family) == AF_INET
             else { continue }
             let matches = ifaAddress.withMemoryRebound(
                 to: sockaddr_in.self,
@@ -102,7 +102,7 @@ enum TunnelNetworkSettings {
         var request = ifreq()
         withUnsafeMutablePointer(to: &request.ifr_name) { ptr in
             ptr.withMemoryRebound(to: CChar.self, capacity: Int(IFNAMSIZ)) { buffer in
-                for index in 0..<nameBytes.count {
+                for index in 0 ..< nameBytes.count {
                     buffer[index] = nameBytes[index]
                 }
             }
@@ -117,9 +117,9 @@ enum TunnelNetworkSettings {
     /// IOC_INOUT | (sizeof(struct ifreq) & IOCPARM_MASK) << 16 | 'i' << 8 | 51.
     private static let siocGifMtu: UInt =
         0xC000_0000 /* IOC_INOUT = IOC_IN | IOC_OUT */
-        | UInt(MemoryLayout<ifreq>.size & 0x1FFF) << 16
-        | 0x69 << 8 /* 'i' */
-        | 51
+            | UInt(MemoryLayout<ifreq>.size & 0x1FFF) << 16
+            | 0x69 << 8 /* 'i' */
+            | 51
 
     /// Tunnel MTU: the underlying link MTU minus the tunnel overhead,
     /// clamped to [mtuLowerBound, mtuUpperBound] so PPPoE-class links
@@ -145,8 +145,12 @@ enum TunnelNetworkSettings {
         return mtu
     }
 
-    static func make(_ configuration: TunnelConfiguration, remoteAddress: String,
-        candidates: [String], dns: [String]) -> NEPacketTunnelNetworkSettings {
+    static func make(
+        _ configuration: TunnelConfiguration,
+        remoteAddress: String,
+        candidates: [String],
+        dns: [String]
+    ) -> NEPacketTunnelNetworkSettings {
         let superNodeIp = remoteAddress
         let excludedV4Addresses = candidates.filter { !$0.contains(":") }
         let excludedV6Addresses = candidates.filter { $0.contains(":") }
@@ -190,7 +194,7 @@ enum TunnelNetworkSettings {
                     destinationAddress: ipv6Network,
                     networkPrefixLength: NSNumber(value: ipv6Prefixlen)
                 ),
-                NEIPv6Route.default(),
+                NEIPv6Route.default()
             ]
 
             let excludedRoutesV6 = excludedV6Addresses.map {
@@ -201,7 +205,6 @@ enum TunnelNetworkSettings {
             Logger.network.noticeAndFile(
                 "IPv6 settings: interface=\(ipv6)/120 pool=\(ipv6Network)/\(ipv6Prefixlen) included=pool,::/0 excluded=\(excludedRoutesV6.map(\.destinationAddress).joined(separator: ","))"
             )
-
         }
 
         let dnsSettings = NEDNSSettings(servers: dns)
@@ -214,7 +217,7 @@ enum TunnelNetworkSettings {
 
     private static func extractIpv6Network(_ ipv6: String, prefixLen: Int32) -> String {
         guard let addr = IPv6Address(ipv6) else { return ipv6 }
-        let raw = addr.rawValue  // 16 bytes
+        let raw = addr.rawValue // 16 bytes
 
         let prefix = Int(prefixLen)
         guard prefix >= 0 && prefix <= 128 else { return ipv6 }
@@ -224,7 +227,7 @@ enum TunnelNetworkSettings {
         let remainingBits = prefix % 8
 
         // Zero out bits beyond the prefix length
-        for byteIndex in fullBytes..<16 {
+        for byteIndex in fullBytes ..< 16 {
             if byteIndex == fullBytes && remainingBits > 0 {
                 let mask = UInt8(0xFF) << (8 - remainingBits)
                 networkBytes[byteIndex] &= mask
@@ -236,5 +239,4 @@ enum TunnelNetworkSettings {
         guard let networkAddr = IPv6Address(Data(networkBytes)) else { return ipv6 }
         return networkAddr.debugDescription
     }
-
 }

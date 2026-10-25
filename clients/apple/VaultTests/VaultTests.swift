@@ -1,17 +1,17 @@
 import NetworkExtension
-import XCTest
 import VaultCore
+import XCTest
 #if os(macOS)
 import SystemExtensions
 #endif
 @testable import Vault
 
 final class VaultTests: XCTestCase {
-    private func makeConfig() throws -> (config: VaultConfig, defaults: UserDefaults) {
+    private func makeConfig(password initialPassword: String = "") throws -> (config: VaultConfig, defaults: UserDefaults) {
         let suite = "VaultTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
-        var password = ""
+        var password = initialPassword
         let passwords = PasswordPersistence(
             read: { password }, write: { password = $0 },
             readLegacy: { defaults.string(forKey: "password") },
@@ -67,6 +67,7 @@ private final class TestVPNConnection: NEVPNConnection {
         if let startError { throw startError }
         testStatus = .connecting
     }
+
     override func stopVPNTunnel() {
         stopCalls += 1
         testStatus = .disconnecting
@@ -135,7 +136,9 @@ extension VaultTests {
         let completed = expectation(description: "cleanup completed")
         var saved: ((Error?) -> Void)?
         var finished = false
-        profile.onSave = { saved = $0; saving.fulfill() }
+        profile.onSave = { saved = $0
+            saving.fulfill()
+        }
         profile.testConnection.onStop = { stopping.fulfill() }
         controller.disconnect { succeeded in
             finished = true
@@ -171,15 +174,20 @@ private final class DelayedLoadVpnManager: VpnManager {
     var sentProviderMessages: [Data] = []
     var onProviderMessage: ((Data, @escaping (Data?) -> Void) -> Void)?
 
-    override func deliverProviderMessage(_ message: Data, manager: NETunnelProviderManager,
-        completion: @escaping (Data?) -> Void) throws {
+    override func deliverProviderMessage(
+        _ message: Data,
+        manager: NETunnelProviderManager,
+        completion: @escaping (Data?) -> Void
+    ) throws {
         sentProviderMessages.append(message)
         if let onProviderMessage { onProviderMessage(message, completion) }
         else { completion(nil) }
     }
 
     override func queryProviderStarted(completion: @escaping (Bool) -> Void) {
-        if usesRealStartupProbe { super.queryProviderStarted(completion: completion); return }
+        if usesRealStartupProbe { super.queryProviderStarted(completion: completion)
+            return
+        }
         startupProbe = completion
         onStartupProbe?()
     }
@@ -233,9 +241,8 @@ extension VaultTests {
     @MainActor
     func testInvalidConnect() async throws {
         for (host, password) in [("", ""), ("test.invalid", ""), ("", "test-password")] {
-            let config = try makeConfig().config
+            let config = try makeConfig(password: password).config
             config.host = host
-            config.password = password
             let data = AppData()
             let controller = DelayedLoadVpnManager(config: config, appData: data)
             defer { controller.stopStatsMonitoring() }
@@ -269,7 +276,9 @@ extension VaultTests {
         XCTAssertEqual(controller.activationRequests.count, 1)
         let request = try XCTUnwrap(controller.activationRequests.first)
         let stopped = expectation(description: "cancelled activation stopped")
-        controller.disconnect { succeeded in XCTAssertTrue(succeeded); stopped.fulfill() }
+        controller.disconnect { succeeded in XCTAssertTrue(succeeded)
+            stopped.fulfill()
+        }
         await drainMainQueue()
         controller.loaded?(nil, nil)
         await fulfillment(of: [stopped], timeout: 2)
@@ -330,7 +339,9 @@ extension VaultTests {
         let stopping = expectation(description: "retry issued")
         profile.testConnection.onStop = { stopping.fulfill() }
         let finished = expectation(description: "retry finished")
-        controller.disconnect { succeeded in XCTAssertTrue(succeeded); finished.fulfill() }
+        controller.disconnect { succeeded in XCTAssertTrue(succeeded)
+            finished.fulfill()
+        }
         await fulfillment(of: [stopping], timeout: 2)
         profile.testConnection.testStatus = .disconnected
         controller.updateVPNStatus(profile)
@@ -417,7 +428,9 @@ extension VaultTests {
         profile.isOnDemandEnabled = true
         var saved: ((Error?) -> Void)?
         let saving = expectation(description: "late profile disabled")
-        profile.onSave = { saved = $0; saving.fulfill() }
+        profile.onSave = { saved = $0
+            saving.fulfill()
+        }
         prepared(profile, true)
         await fulfillment(of: [saving], timeout: 2)
         XCTAssertEqual(profile.testConnection.startCalls, 0)
@@ -446,7 +459,9 @@ extension VaultTests {
             profile.testConnection.startError = NEVPNError(.configurationInvalid)
             var saved: ((Error?) -> Void)?
             let saving = expectation(description: "failed connection profile cleanup")
-            profile.onSave = { saved = $0; saving.fulfill() }
+            profile.onSave = { saved = $0
+                saving.fulfill()
+            }
             controller.prepared?(profile, reloadSucceeded)
             await fulfillment(of: [saving], timeout: 2)
             XCTAssertEqual(profile.testConnection.startCalls, reloadSucceeded ? 1 : 0)
@@ -526,13 +541,17 @@ extension VaultTests {
     func testDisconnectLoadRetry() async throws {
         let controller = try makeController()
         let failed = expectation(description: "profile lookup failed")
-        controller.disconnect { succeeded in XCTAssertFalse(succeeded); failed.fulfill() }
+        controller.disconnect { succeeded in XCTAssertFalse(succeeded)
+            failed.fulfill()
+        }
         await drainMainQueue()
         controller.loaded?(nil, NEVPNError(.configurationReadWriteFailed))
         await fulfillment(of: [failed], timeout: 2)
         XCTAssertEqual(controller.vpnStatus, .disconnected)
         let retried = expectation(description: "profile lookup retried")
-        controller.disconnect { succeeded in XCTAssertTrue(succeeded); retried.fulfill() }
+        controller.disconnect { succeeded in XCTAssertTrue(succeeded)
+            retried.fulfill()
+        }
         await drainMainQueue()
         controller.loaded?(nil, nil)
         await fulfillment(of: [retried], timeout: 2)
@@ -547,7 +566,9 @@ extension VaultTests {
         controller.activeVPN = profile
         let saving = expectation(description: "quit cleanup started")
         var saved: ((Error?) -> Void)?
-        profile.onSave = { saved = $0; saving.fulfill() }
+        profile.onSave = { saved = $0
+            saving.fulfill()
+        }
         var firstReplies = 0
         let timedOut = expectation(description: "quit cancelled on timeout")
         AppDelegate.disconnectBeforeTermination(controller, timeout: 0) { succeeded in
@@ -586,13 +607,15 @@ extension VaultTests {
         let probing = expectation(description: "waiting for provider to own the startup")
         controller.onStartupProbe = { probing.fulfill() }
         let completed = expectation(description: "cancellation finished")
-        controller.disconnect { succeeded in XCTAssertTrue(succeeded); completed.fulfill() }
+        controller.disconnect { succeeded in XCTAssertTrue(succeeded)
+            completed.fulfill()
+        }
         await fulfillment(of: [probing], timeout: 2)
         XCTAssertEqual(profile.testConnection.stopCalls, 0)
         XCTAssertFalse(profile.isOnDemandEnabled)
         XCTAssertEqual(controller.vpnStatus, .disconnecting)
         var repeatedCompletions = 0
-        for _ in 0..<10 {
+        for _ in 0 ..< 10 {
             controller.disconnect { succeeded in
                 XCTAssertTrue(succeeded)
                 repeatedCompletions += 1
@@ -625,7 +648,9 @@ extension VaultTests {
             let probing = expectation(description: "startup queried")
             controller.onStartupProbe = { probing.fulfill() }
             let completed = expectation(description: "startup settled")
-            controller.disconnect { succeeded in XCTAssertTrue(succeeded); completed.fulfill() }
+            controller.disconnect { succeeded in XCTAssertTrue(succeeded)
+                completed.fulfill()
+            }
             await fulfillment(of: [probing], timeout: 2)
             profile.testConnection.testStatus = startupSucceeded ? .connected : .disconnected
             controller.startupProbe?(false)
@@ -651,7 +676,9 @@ extension VaultTests {
         let probing = expectation(description: "startup queried")
         controller.onStartupProbe = { probing.fulfill() }
         let failed = expectation(description: "unsafe cancellation rejected")
-        controller.disconnect { succeeded in XCTAssertFalse(succeeded); failed.fulfill() }
+        controller.disconnect { succeeded in XCTAssertFalse(succeeded)
+            failed.fulfill()
+        }
         await fulfillment(of: [probing], timeout: 2)
         controller.startupProbe?(false)
         await fulfillment(of: [failed], timeout: 2)
@@ -662,7 +689,9 @@ extension VaultTests {
         let stopping = expectation(description: "retry stops an initialized provider")
         profile.testConnection.onStop = { stopping.fulfill() }
         let completed = expectation(description: "retry completed")
-        controller.disconnect { succeeded in XCTAssertTrue(succeeded); completed.fulfill() }
+        controller.disconnect { succeeded in XCTAssertTrue(succeeded)
+            completed.fulfill()
+        }
         await fulfillment(of: [stopping], timeout: 2)
         profile.testConnection.testStatus = .disconnected
         controller.updateVPNStatus(profile)
@@ -711,7 +740,7 @@ extension VaultTests {
         var reply: ((Data?) -> Void)?
         controller.onProviderMessage = { data, completion in
             let message = try? JSONDecoder().decode(ProviderCommandEnvelope.self, from: data)
-            XCTAssertEqual(message?.command, "logs")
+            XCTAssertEqual(message?.command, .logs)
             reply = completion
             sent.fulfill()
         }
@@ -743,13 +772,15 @@ extension VaultTests {
         profile.testConnection.testStatus = .connecting
         controller.onProviderMessage = { message, completion in
             let envelope = try? JSONDecoder().decode(ProviderCommandEnvelope.self, from: message)
-            XCTAssertEqual(envelope?.command, "startupStatus")
+            XCTAssertEqual(envelope?.command, .startupStatus)
             completion(Data([1]))
         }
         let stopping = expectation(description: "quit safely stops initialized provider")
         profile.testConnection.onStop = { stopping.fulfill() }
         let completed = expectation(description: "quit stop completed")
-        controller.disconnect { succeeded in XCTAssertTrue(succeeded); completed.fulfill() }
+        controller.disconnect { succeeded in XCTAssertTrue(succeeded)
+            completed.fulfill()
+        }
         await fulfillment(of: [stopping], timeout: 2)
         XCTAssertEqual(controller.sentProviderMessages.count, 1)
         profile.testConnection.testStatus = .disconnected
@@ -861,6 +892,7 @@ private final class LogControlTestManager: RuntimeLogStore {
             onLogRead?()
         }
     }
+
     func clearLogs() async throws -> Bool {
         if let clearError { throw clearError }
         return clearComplete
@@ -986,8 +1018,11 @@ extension VaultTests {
 
 private final class StatusQueryVpnManager: VpnManager {
     var replies: [(Data?) -> Void] = []
-    override func deliverProviderMessage(_ message: Data, manager: NETunnelProviderManager,
-        completion: @escaping (Data?) -> Void) throws {
+    override func deliverProviderMessage(
+        _ message: Data,
+        manager: NETunnelProviderManager,
+        completion: @escaping (Data?) -> Void
+    ) throws {
         replies.append(completion)
     }
 }
@@ -1019,7 +1054,7 @@ extension VaultTests {
         DispatchQueue.main.async { drained.fulfill() }
         await fulfillment(of: [drained], timeout: 2)
         XCTAssertEqual(data.bytesSent, 0)
-        XCTAssertEqual(config.ip, "")
+        XCTAssertEqual(data.assignedIp, "")
         XCTAssertEqual(controller.vpnStatus, .disconnected)
     }
 
@@ -1041,7 +1076,7 @@ extension VaultTests {
         DispatchQueue.main.async { drained.fulfill() }
         await fulfillment(of: [drained], timeout: 2)
         XCTAssertEqual(data.bytesSent, 123)
-        XCTAssertEqual(config.ip, "10.0.0.2")
+        XCTAssertEqual(data.assignedIp, "10.0.0.2")
         // Mutating UI storage cannot change the controller's authoritative phase.
         data.vpnStatus = .disconnected
         XCTAssertEqual(controller.vpnStatus, .connected)
@@ -1072,5 +1107,165 @@ extension VaultTests {
         data.applyStatus(try XCTUnwrap(replacement.status(ip: "10.0.0.3")))
         XCTAssertEqual(data.bytesSent, 150)
         XCTAssertNil(previous.status(ip: ""))
+    }
+}
+
+extension VaultTests {
+    func testAssignedIpLivesOnlyInRuntimeState() throws {
+        let (_, defaults) = try makeConfig()
+        defaults.set("10.0.0.99", forKey: "ip")
+        let passwords = PasswordPersistence(read: { "secret" }, write: { _ in }, readLegacy: { nil }, clearLegacy: {})
+        _ = VaultConfig(defaults: defaults, passwords: passwords)
+        XCTAssertNil(defaults.object(forKey: "ip"))
+        let data = AppData()
+        XCTAssertTrue(data.assignedIp.isEmpty)
+        data.applyStatus(ProviderStatus(ip: "10.0.0.2", stats: .zero, session: "live"))
+        XCTAssertEqual(data.assignedIp, "10.0.0.2")
+        XCTAssertNil(defaults.object(forKey: "ip"))
+        XCTAssertTrue(AppData().assignedIp.isEmpty)
+        data.resetStats()
+        XCTAssertTrue(data.assignedIp.isEmpty)
+    }
+
+    func testPasswordReadRetryDoesNotWriteCredentials() throws {
+        let (_, defaults) = try makeConfig()
+        var unavailable = true
+        var writes: [String] = []
+        let passwords = PasswordPersistence(read: {
+            if unavailable { throw NSError(domain: "Keychain", code: 1) }
+            return "saved-password"
+        }, write: { writes.append($0) }, readLegacy: { nil }, clearLegacy: {})
+        let config = VaultConfig(defaults: defaults, passwords: passwords)
+        XCTAssertTrue(config.password.isEmpty)
+        XCTAssertNotNil(config.passwordStorageError)
+        unavailable = false
+        config.retryPasswordStorage()
+        XCTAssertEqual(config.password, "saved-password")
+        XCTAssertNil(config.passwordStorageError)
+        XCTAssertTrue(writes.isEmpty)
+        config.retryPasswordStorage()
+        XCTAssertTrue(writes.isEmpty)
+        XCTAssertTrue(config.saveConnection(host: "test.invalid", port: 9527, password: "saved-password"))
+        XCTAssertTrue(writes.isEmpty)
+        XCTAssertTrue(config.saveConnection(host: "test.invalid", port: 9527, password: "replacement"))
+        XCTAssertEqual(writes, ["replacement"])
+    }
+
+    func testPasswordMigrationRetryWritesRecoveryCopyOnce() throws {
+        let (_, defaults) = try makeConfig()
+        defaults.set("recovery", forKey: "password")
+        var unavailable = true
+        var writes: [String] = []
+        let passwords = PasswordPersistence(
+            read: { XCTFail("Migration retry should save the recovery copy")
+                return "stale"
+            },
+            write: {
+                if unavailable { throw NSError(domain: "Keychain", code: 1) }
+                writes.append($0)
+            },
+            readLegacy: { defaults.string(forKey: "password") },
+            clearLegacy: { defaults.removeObject(forKey: "password") }
+        )
+        let config = VaultConfig(defaults: defaults, passwords: passwords)
+        XCTAssertEqual(config.password, "recovery")
+        unavailable = false
+        config.retryPasswordStorage()
+        XCTAssertEqual(writes, ["recovery"])
+        XCTAssertNil(config.passwordStorageError)
+        XCTAssertNil(defaults.object(forKey: "password"))
+    }
+
+    @MainActor
+    func testProviderReplyArrivesOnMainOnceFromWorker() async throws {
+        let controller = StatusQueryVpnManager(config: try makeConfig().config, appData: AppData())
+        controller.activeVPN = TestTunnelManager()
+        let completed = expectation(description: "one main-queue reply")
+        var calls = 0
+        controller.sendProviderCommand(.init(.diagnosticContext)) { response in
+            XCTAssertTrue(Thread.isMainThread)
+            XCTAssertEqual(response, Data([1]))
+            calls += 1
+            completed.fulfill()
+        }
+        let reply = try XCTUnwrap(controller.replies.first)
+        DispatchQueue.global().async { reply(Data([1]))
+            reply(Data([2]))
+        }
+        await fulfillment(of: [completed], timeout: 2)
+        XCTAssertEqual(calls, 1)
+    }
+
+    @MainActor
+    func testBlockedAndTimedOutProviderRepliesAreAsynchronousOnMain() async throws {
+        let controller = StatusQueryVpnManager(config: try makeConfig().config, appData: AppData())
+        let blocked = expectation(description: "blocked request")
+        var called = false
+        controller.sendProviderCommand(.init(.status)) { response in
+            XCTAssertTrue(Thread.isMainThread)
+            XCTAssertNil(response)
+            called = true
+            blocked.fulfill()
+        }
+        XCTAssertFalse(called)
+        await fulfillment(of: [blocked], timeout: 2)
+        controller.activeVPN = TestTunnelManager()
+        let timedOut = expectation(description: "timeout on main")
+        controller.sendProviderCommand(.init(.diagnosticContext), timeout: 0.01) { response in
+            XCTAssertTrue(Thread.isMainThread)
+            XCTAssertNil(response)
+            timedOut.fulfill()
+        }
+        await fulfillment(of: [timedOut], timeout: 2)
+    }
+}
+
+private final class InvalidDiagnosticContextVpnManager: VpnManager {
+    let context = AppleDiagnosticContext(
+        provider: "provider-test",
+        generation: 7,
+        ipv4: "10.0.0.2",
+        mask: "255.255.255.0",
+        ipv6: nil,
+        mtu: 1427,
+        dns: ["invalid-address"],
+        domains: ["example.com"]
+    )
+    var probeRequests = 0
+
+    override func deliverProviderMessage(
+        _ message: Data,
+        manager: NETunnelProviderManager,
+        completion: @escaping (Data?) -> Void
+    ) throws {
+        switch try ProviderCommandEnvelope.decode(message).command {
+        case .diagnosticContext: completion(try JSONEncoder().encode(context))
+        case .status: completion(try JSONEncoder().encode(ProviderStatus(ip: context.ipv4, stats: .zero)))
+        default:
+            probeRequests += 1
+            completion(nil)
+        }
+    }
+}
+
+extension VaultTests {
+    @MainActor
+    func testRustDiagnosticErrorIsPresentedByApp() async throws {
+        let controller = InvalidDiagnosticContextVpnManager(config: try makeConfig().config, appData: AppData())
+        let profile = TestTunnelManager()
+        controller.activeVPN = profile
+        controller.updateVPNStatus(profile)
+        defer { controller.stopStatsMonitoring() }
+        let completed = expectation(description: "App presents the engine error")
+        controller.requestDiagnostics { result in
+            XCTAssertTrue(Thread.isMainThread)
+            XCTAssertEqual(result?.engineState, .incomplete)
+            XCTAssertNil(result?.snapshot)
+            XCTAssertTrue(result?.summary.contains("INCOMPLETE - Rust diagnostics:") == true)
+            XCTAssertNil(controller.diagnosticState.cancellation)
+            completed.fulfill()
+        }
+        await fulfillment(of: [completed], timeout: 3)
+        XCTAssertEqual(controller.probeRequests, 0)
     }
 }

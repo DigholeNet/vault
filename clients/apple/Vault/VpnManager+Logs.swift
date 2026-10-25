@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import NetworkExtension
-import VaultCore
 import os.log
+import VaultCore
 
 struct VpnLogState {
     var generation: UInt64 = 0
@@ -38,10 +38,8 @@ extension VpnManager {
     @MainActor
     private func clearProviderLogs(token: String) async -> Bool {
         guard let status = activeVPN?.connection.status, status == .connected || status == .reasserting else { return false }
-        struct Command: Encodable { let command = "clearLogs"; let token: String }
-        guard let payload = try? JSONEncoder().encode(Command(token: token)) else { return false }
         return await withCheckedContinuation { continuation in
-            sendProviderCommand("clearLogs", timeout: 3, payload: payload) { data in
+            sendProviderCommand(.init(.clearLogs, token: token), timeout: 3) { data in
                 continuation.resume(returning: data == Data([1]))
             }
         }
@@ -82,7 +80,7 @@ extension VpnManager {
         let extensionLog: String?
         if canReadLiveProviderLogs {
             extensionLog = await withCheckedContinuation { continuation in
-                sendProviderCommand("logs") { data in
+                sendProviderCommand(.init(.logs)) { data in
                     continuation.resume(returning: data.flatMap { String(data: $0, encoding: .utf8) })
                 }
             }
@@ -90,14 +88,13 @@ extension VpnManager {
         var parts = [await appLog ?? ""]
         guard generation == logState.generation, !logState.clearing else { return "" }
         if canReadLiveProviderLogs, sessionGeneration == diagnosticState.generation,
-            activeVPN?.connection === connection, let extensionLog, !extensionLog.isEmpty {
+           activeVPN?.connection === connection, let extensionLog, !extensionLog.isEmpty {
             if let cache = extensionLogCacheURL {
                 try? extensionLog.write(to: cache, atomically: true, encoding: .utf8)
             }
             parts.append(extensionLog)
         } else if let cache = extensionLogCacheURL,
-            let cached = try? String(contentsOf: cache, encoding: .utf8), !cached.isEmpty
-        {
+                  let cached = try? String(contentsOf: cache, encoding: .utf8), !cached.isEmpty {
             parts.append(cached)
         }
         return FileLogger.mergeChronologically(parts.filter { !$0.isEmpty })
@@ -112,5 +109,4 @@ extension VpnManager {
         return generation == logState.generation && !logState.clearing ? text : ""
     }
     #endif
-
 }

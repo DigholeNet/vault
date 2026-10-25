@@ -3,7 +3,7 @@ import Testing
 
 @Test func rapidToggleWaitsForStopCallbacks() throws {
     var state = VPNConnectionLifecycle()
-    for _ in 0..<1000 {
+    for _ in 0 ..< 1000 {
         let connect = try #require({ state.beginConnect() }())
         #expect({ state.beginConnect() == nil }())
         state.finishPreparation(connect)

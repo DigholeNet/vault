@@ -11,6 +11,18 @@
 import Foundation
 import os.log
 
+public struct EdgeConfig {
+    var password: String
+    var host: String
+    var port: UInt16
+
+    public init(password: String, host: String, port: UInt16) {
+        self.password = password
+        self.host = host
+        self.port = port
+    }
+}
+
 public enum EdgeError: Error {
     case connectionFailed
     case invalidChannelState
@@ -18,7 +30,6 @@ public enum EdgeError: Error {
 
 /// Core VPN networking component managing the connection to the supernode.
 public final class Edge: @unchecked Sendable {
-
     /// Adapts the UniFFI `EdgeCallbacks` to the closures passed to `Edge.init`.
     /// Callbacks fire on Rust worker threads; the handlers here only forward.
     private final class Callbacks: EdgeCallbacks, @unchecked Sendable {

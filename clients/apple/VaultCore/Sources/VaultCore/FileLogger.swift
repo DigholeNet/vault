@@ -188,10 +188,10 @@ public final class FileLogger: @unchecked Sendable {
 
     private func rotateIfNeeded(url: URL) {
         guard let prev = prevLogFileURL,
-            FileManager.default.fileExists(atPath: url.path),
-            let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-            let size = attrs[.size] as? UInt64,
-            size > maxLogSize
+              FileManager.default.fileExists(atPath: url.path),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? UInt64,
+              size > maxLogSize
         else { return }
         try? FileManager.default.removeItem(at: prev)
         try? FileManager.default.moveItem(at: url, to: prev)
@@ -223,7 +223,7 @@ public final class FileLogger: @unchecked Sendable {
         var converted: [String: String] = [:]
         func timestamp(_ line: Substring) -> String {
             guard line.first == "[", let end = line.firstIndex(of: "]") else { return "" }
-            let value = String(line[line.index(after: line.startIndex)..<end])
+            let value = String(line[line.index(after: line.startIndex) ..< end])
             if value.hasSuffix("Z") { return String(value.dropLast()) }
             if let cached = converted[value] { return cached }
             let key = local.date(from: value).map { utc.string(from: $0) } ?? value
@@ -235,7 +235,7 @@ public final class FileLogger: @unchecked Sendable {
             if line.hasPrefix("[[") {
                 while line.hasPrefix("[[") { line = line.dropFirst() }
                 guard let end = line.firstIndex(of: "]") else { return raw }
-                let value = line[line.index(after: line.startIndex)..<end]
+                let value = line[line.index(after: line.startIndex) ..< end]
                 guard utc.date(from: String(value.hasSuffix("Z") ? value.dropLast() : value)) != nil else { return raw }
             }
             // Older Rust logs put the source before an unbracketed severity.
@@ -265,7 +265,6 @@ public final class FileLogger: @unchecked Sendable {
         }
         return entries.map { String($0.line) }.joined(separator: "\n")
     }
-
 }
 
 public extension Logger {

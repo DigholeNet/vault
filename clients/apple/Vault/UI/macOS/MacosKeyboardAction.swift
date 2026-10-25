@@ -26,12 +26,16 @@ private struct MacosKeyboardAction<ID: Hashable>: ViewModifier {
 }
 
 extension View {
-    func macosKeyboardAction<ID: Hashable>(focus: Binding<ID?>, id: ID,
-        enabled: Bool = true, circular: Bool = false, action: @escaping () -> Void) -> some View {
+    func macosKeyboardAction<ID: Hashable>(
+        focus: Binding<ID?>,
+        id: ID,
+        enabled: Bool = true,
+        circular: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         modifier(MacosKeyboardAction(focus: focus, id: id, enabled: enabled, circular: circular, action: action))
     }
 }
-
 
 /// Intercept navigation before AppKit's native Tab traversal can skip custom
 /// controls. The monitor is restricted to this view's own window and ignores IME
@@ -51,17 +55,21 @@ private struct MacosKeyboardNavigation: NSViewRepresentable {
                 return self.handler(event) ? nil : event
             }
         }
+
         func stop() {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
         }
+
         deinit { stop() }
     }
+
     func makeNSView(context: Context) -> MonitorView {
         let view = MonitorView()
         view.handler = handler
         return view
     }
+
     func updateNSView(_ view: MonitorView, context: Context) { view.handler = handler }
     static func dismantleNSView(_ view: MonitorView, coordinator: ()) { view.stop() }
 }

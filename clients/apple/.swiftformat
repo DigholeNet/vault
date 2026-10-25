@@ -1,0 +1,16 @@
+# Formatting only; avoid rules that rewrite declarations or control flow.
+--swift-version 6.0
+--language-mode 5
+--indent 4
+--ifdef no-indent
+--max-width 140
+--linebreaks lf
+--semicolons never
+--trailing-commas never
+--wrap-arguments before-first
+--wrap-parameters before-first
+--wrap-collections before-first
+--wrap-conditions after-first
+--wrap-string-interpolation preserve
+--exclude VaultCore/Sources/VaultCore/Generated,**/.build,**/build,VaultCore/Frameworks
+--rules blankLineAfterImports,blankLinesAroundMark,blankLinesAtEndOfScope,blankLinesAtStartOfScope,blankLinesBetweenImports,blankLinesBetweenScopes,braces,consecutiveBlankLines,consecutiveSpaces,elseOnSameLine,emptyBraces,indent,linebreakAtEndOfFile,linebreaks,semicolons,sortImports,spaceAroundBraces,spaceAroundBrackets,spaceAroundComments,spaceAroundGenerics,spaceAroundOperators,spaceAroundParens,spaceInsideBraces,spaceInsideBrackets,spaceInsideGenerics,spaceInsideParens,trailingCommas,trailingSpace,wrap,wrapArguments,wrapAttributes

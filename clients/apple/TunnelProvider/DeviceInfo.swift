@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 import Foundation
 #if os(iOS)
-import UIKit
 import Darwin
+import UIKit
 #endif
 
 #if os(iOS)
@@ -64,7 +64,7 @@ func deviceModelName(for identifier: String) -> String {
         "iPhone18,5": "iPhone 17e",
         "i386": "iPhone Simulator",
         "x86_64": "iPhone Simulator",
-        "arm64": "iPhone Simulator",
+        "arm64": "iPhone Simulator"
     ]
     return modelNames[identifier] ?? identifier
 }

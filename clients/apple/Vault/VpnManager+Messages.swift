@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: MIT
 import NetworkExtension
-import VaultCore
 import os.log
+import VaultCore
 
 extension VpnManager {
     /// Send a provider-message command and return the raw reply. The reply
-    /// arrives on an unspecified queue; nil means the message channel itself
+    /// always arrives asynchronously on main; nil means the message channel itself
     /// failed (no manager, not a provider session, no response).
-    func sendProviderCommand(_ command: String, timeout: TimeInterval = 8, payload: Data? = nil, completion: @escaping (Data?) -> Void) {
+    func sendProviderCommand(_ request: ProviderCommandEnvelope, timeout: TimeInterval = 8, completion: @escaping (Data?) -> Void) {
         if !Thread.isMainThread {
-            DispatchQueue.main.async { self.sendProviderCommand(command, timeout: timeout, payload: payload, completion: completion) }
+            DispatchQueue.main.async { self.sendProviderCommand(request, timeout: timeout, completion: completion) }
             return
         }
+        let command = request.command
         let requestID = String(UUID().uuidString.prefix(8))
         let requested = ProcessInfo.processInfo.systemUptime
         let operation = providerOperation.id
         let appPID = ProcessInfo.processInfo.processIdentifier
-        let prefix = "[request:\(requestID)] [operation:\(operation)] command=\(command) appPID=\(appPID)"
+        let prefix = "[request:\(requestID)] [operation:\(operation)] command=\(command.rawValue) appPID=\(appPID)"
         let replyLock = NSLock()
         var replied = false
         // Reply callbacks may arrive off-main. The trace decision shares the
@@ -32,9 +33,12 @@ extension VpnManager {
             replyLock.unlock()
             if emit {
                 let elapsed = Int((ProcessInfo.processInfo.systemUptime - requested) * 1000)
-                Logger.network.noticeAndFile("\(prefix) reply reason=\(reason) first=\(first) bytes=\(data?.count ?? 0) durationMs=\(elapsed) \(context)")
+                Logger.network
+                    .noticeAndFile(
+                        "\(prefix) reply reason=\(reason) first=\(first) bytes=\(data?.count ?? 0) durationMs=\(elapsed) \(context)"
+                    )
             }
-            if first { completion(data) }
+            if first { DispatchQueue.main.async { completion(data) } }
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
             replyLock.lock()
@@ -49,7 +53,7 @@ extension VpnManager {
             neStatus=\(status.rawValue) uiStatus=\(self.vpnStatus) preparing=\(self.providerOperation.preparing) \
             stopping=\(self.providerOperation.stopping) terminating=\(self.terminationInProgress) onDemand=\(manager.isOnDemandEnabled)
             """
-            let periodic = ["status", "logs", "diagnosticProbe", "startupStatus"].contains(command)
+            let periodic = [ProviderCommand.status, .logs, .diagnosticProbe, .startupStatus].contains(command)
             let signature = "\(ObjectIdentifier(manager.connection))|\(context)"
             let last = self.lastMessageTrace[command]
             let emit = !periodic || self.terminationInProgress
@@ -76,8 +80,7 @@ extension VpnManager {
                 Logger.network.noticeAndFile("\(prefix) send \(context) interfaces=\(FileLogger.tunnelInterfaceSummary())")
             }
             do {
-                let message = try ProviderCommandEnvelope.tracedPayload(command: command,
-                    requestID: requestID, trace: emit, payload: payload)
+                let message = try request.encoded(requestID: requestID, trace: emit)
                 try self.deliverProviderMessage(message, manager: manager) { data in reply(data) }
             } catch {
                 Logger.network.errorAndFile("\(prefix) send failed error=\(error.localizedDescription)")
@@ -91,5 +94,4 @@ extension VpnManager {
             reply(nil, reason: "noActiveManager")
         }
     }
-
 }

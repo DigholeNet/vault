@@ -30,17 +30,21 @@ public struct VPNConnectionLifecycle {
         preparation = generation
         return generation
     }
+
     public func canStart(_ token: UInt64) -> Bool {
         token == generation && wantsConnection && !isStopping
     }
+
     public mutating func finishPreparation(_ token: UInt64) {
         if preparation == token { preparation = nil }
     }
+
     public mutating func markStarted(_ token: UInt64) -> Bool {
         guard canStart(token) else { return false }
         startIssued = true
         return true
     }
+
     public mutating func failConnect(_ token: UInt64) -> Bool {
         guard canStart(token) else { return false }
         finishPreparation(token)
@@ -49,6 +53,7 @@ public struct VPNConnectionLifecycle {
         startIssued = false
         return true
     }
+
     public mutating func beginDisconnect() -> UInt64? {
         wantsConnection = false
         guard !isStopping else { return nil }
@@ -58,21 +63,25 @@ public struct VPNConnectionLifecycle {
         stopFailed = false
         return generation
     }
+
     public func acceptsStop(_ token: UInt64) -> Bool { token == generation && isStopping }
     public mutating func beginTeardown(_ token: UInt64) -> Bool {
         guard acceptsStop(token), !isPreparing, !stopInFlight else { return false }
         stopInFlight = true
         return true
     }
+
     public mutating func finishTeardown(_ token: UInt64, succeeded: Bool = true) {
         guard acceptsStop(token), stopInFlight else { return }
         stopInFlight = false
         if !succeeded { stopFailed = true }
     }
+
     public mutating func failStop(_ token: UInt64) {
         guard acceptsStop(token), !stopInFlight else { return }
         stopFailed = true
     }
+
     public mutating func completeStopIfReady(tunnelDown: Bool) -> Bool {
         guard isStopping, !isPreparing, !stopInFlight, tunnelDown || stopFailed else { return false }
         isStopping = false
@@ -82,6 +91,7 @@ public struct VPNConnectionLifecycle {
         if stopFailed { wantsConnection = false }
         return true
     }
+
     /// Observe OS state only after preparation/teardown releases ownership.
     /// A failed stop updates the displayed phase without restoring connect intent.
     @discardableResult

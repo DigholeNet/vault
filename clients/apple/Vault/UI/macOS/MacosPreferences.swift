@@ -34,12 +34,14 @@ final class MacosPreferences: ObservableObject {
     @Published var autoConnect: Bool {
         didSet { UserDefaults.standard.set(autoConnect, forKey: "macAutoConnect") }
     }
+
     @Published var showInDock: Bool {
         didSet {
             UserDefaults.standard.set(showInDock, forKey: "macShowInDock")
             applyActivationPolicy()
         }
     }
+
     @Published private(set) var launchAtLogin = false
     @Published var launchError: String?
 

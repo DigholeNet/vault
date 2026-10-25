@@ -5,9 +5,9 @@
 //
 import Network
 import NetworkExtension
+import os.log
 import SystemConfiguration
 import VaultCore
-import os.log
 #if os(iOS)
 import Darwin
 import UIKit
@@ -19,7 +19,6 @@ enum ConfigurationError: Error {
 }
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
-
     private var dns: [String] = ["1.1.1.1", "8.8.8.8"]
     /// Domains the on-demand diagnostics suite probes; overridable from the
     /// app's configure page via the "probeDomains" provider configuration.
@@ -60,12 +59,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override init() {
         super.init()
-        FileLogger.shared.logSync("[session:\(sessionID)] Provider instance initialized pid=\(ProcessInfo.processInfo.processIdentifier)", level: "NOTICE")
+        FileLogger.shared.logSync(
+            "[session:\(sessionID)] Provider instance initialized pid=\(ProcessInfo.processInfo.processIdentifier)",
+            level: "NOTICE"
+        )
     }
 
     func clearLogsIfNeeded(_ token: String?) throws {
         guard let token, !token.isEmpty,
-            UserDefaults.standard.string(forKey: "lastClearedLogToken") != token else { return }
+              UserDefaults.standard.string(forKey: "lastClearedLogToken") != token else { return }
         try FileLogger.shared.clearLogs()
         UserDefaults.standard.set(token, forKey: "lastClearedLogToken")
     }
@@ -135,8 +137,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         // Each provider session owns fresh counters; the app carries forward
         // the last observed totals when an on-demand restart replaces it.
         statsSession.begin()
-        guard
-            let protoConfig = protocolConfiguration as? NETunnelProviderProtocol
+        guard let protoConfig = protocolConfiguration as? NETunnelProviderProtocol
         else {
             Logger.network.error("Invalid protocol configuration type")
             finishStart(with: ConfigurationError.invalidConfiguration("protocol type"))
@@ -149,63 +150,21 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
 
-        guard let rawHost = conf["host"] as? String, !rawHost.isEmpty else {
-            Logger.network.error("Missing or empty host")
-            finishStart(with: ConfigurationError.invalidConfiguration("host"))
+        let launch: TunnelLaunchConfiguration
+        do {
+            launch = try TunnelLaunchConfiguration(providerConfiguration: conf)
+        } catch {
+            Logger.network.errorAndFile("Invalid tunnel launch configuration: \(error)")
+            finishStart(with: error)
             return
         }
-        // Accept "[::1]" style input by stripping URL-style brackets.
-        let host =
-            (rawHost.hasPrefix("[") && rawHost.hasSuffix("]"))
-            ? String(rawHost.dropFirst().dropLast()) : rawHost
-
-        guard let port = conf["port"] as? UInt16 else {
-            Logger.network.error("Missing or invalid port")
-            finishStart(with: ConfigurationError.invalidConfiguration("port"))
-            return
-        }
-
-        // The password is persisted in the OS VPN providerConfiguration: on macOS the
-        // provider is a system extension running outside the user's session,
-        // so App Group UserDefaults are not shared with it.
-        guard let password = conf["password"] as? String, !password.isEmpty else {
-            Logger.network.error("Missing password")
-            finishStart(with: ConfigurationError.invalidConfiguration("password"))
-            return
-        }
-
-        guard let id = conf["id"] as? Data else {
-            Logger.network.error("Missing id")
-            finishStart(with: ConfigurationError.invalidConfiguration("id"))
-            return
-        }
-
-        // DNS is optional, use default values
-        if let dnsServers = conf["dns"] as? String, !dnsServers.isEmpty {
-            self.dns = dnsServers.components(separatedBy: ",")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        }
-
-        // Probe domains for on-demand diagnostics are optional too.
-        if let domains = conf["probeDomains"] as? String, !domains.isEmpty {
-            let parsed = domains.components(separatedBy: ",")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            if !parsed.isEmpty {
-                self.probeDomains = parsed
-            }
-        }
-
-        // Optional tunnel MTU cap (Configure page; empty = built-in bound).
-        // clamp to [mtuLowerBound, mtuUpperBound] regardless of input.
-        if let rawMtu = conf["mtu"] as? String, !rawMtu.isEmpty,
-            let parsed = Int(rawMtu.trimmingCharacters(in: .whitespaces))
-        {
-            self.mtuCap = min(
-                max(parsed, TunnelConstants.mtuLowerBound), TunnelConstants.mtuUpperBound
-            )
-        }
+        let host = launch.host
+        let port = launch.port
+        let password = launch.password
+        let id = launch.peerID
+        dns = launch.dns
+        probeDomains = launch.probeDomains
+        mtuCap = launch.mtuCap
 
         // The system sometimes spawns a second provider instance for the
         // same tunnel while a previous one still holds a live session. Both
@@ -222,7 +181,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         self.startTimeoutWorkItem?.cancel()
         let timeoutWorkItem = DispatchWorkItem { [weak self] in
             guard let self = self, !self.stopRequested,
-                self.pendingStart === pending else { return }
+                  self.pendingStart === pending else { return }
             Logger.network.errorAndFile("[session:\(self.sessionID)] Tunnel start timed out")
             self.startFailed(reason: "start timed out")
         }
@@ -244,10 +203,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             Logger.network.noticeAndFile("[session:\(self.sessionID)] Resolving supernode hostname")
             let candidates = self.resolveAllAddresses(host)
             let resolveMs = Int(((ProcessInfo.processInfo.systemUptime - resolveStarted) * 1000).rounded())
-            Logger.network.noticeAndFile("[session:\(self.sessionID)] Hostname resolution completed durationMs=\(resolveMs) candidates=\(candidates.count)")
+            Logger.network
+                .noticeAndFile(
+                    "[session:\(self.sessionID)] Hostname resolution completed durationMs=\(resolveMs) candidates=\(candidates.count)"
+                )
             DispatchQueue.main.async {
                 guard !self.stopRequested, self.pendingStart === pending,
-                    pending.isPending else { return }
+                      pending.isPending else { return }
                 guard !candidates.isEmpty else {
                     Logger.network.error("Failed to resolve hostname: \(host)")
                     self.startFailed(reason: "hostname resolution failed")
@@ -264,7 +226,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 )
             }
         }
-
     }
 
     /// Guards against overlapping startTunnel calls: each start owns
@@ -296,7 +257,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// A superseded instance must never terminate its replacement's process.
     private func exitIfUnowned() {
         guard Self.activeProvider == nil, Self.startOwner == nil else {
-            FileLogger.shared.logSync("[session:\(sessionID)] Skipping process exit activeProvider=\(Self.activeProvider?.sessionID ?? "none") startOwner=\(Self.startOwner?.sessionID ?? "none")", level: "NOTICE")
+            FileLogger.shared.logSync(
+                "[session:\(sessionID)] Skipping process exit activeProvider=\(Self.activeProvider?.sessionID ?? "none") startOwner=\(Self.startOwner?.sessionID ?? "none")",
+                level: "NOTICE"
+            )
             return
         }
         FileLogger.shared.logSync(
@@ -557,20 +521,32 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         dispatchPrecondition(condition: .onQueue(.main))
         guard !stopRequested else { return }
         diagnostics.cancel()
-        let configuration = TunnelConfiguration(ipv4: ipv4, mask: ipv4Mask,
-            ipv6: ipv6, prefix: ipv6PrefixLen, mtu: TunnelNetworkSettings.mtu(cap: mtuCap, sessionID: sessionID))
+        let configuration = TunnelConfiguration(
+            ipv4: ipv4,
+            mask: ipv4Mask,
+            ipv6: ipv6,
+            prefix: ipv6PrefixLen,
+            mtu: TunnelNetworkSettings.mtu(
+                cap: mtuCap,
+                sessionID: sessionID
+            )
+        )
         if let update = tunnelSettings.enqueue(configuration) { applySettings(update) }
     }
 
     private func applySettings(_ update: TunnelSettingsState.Update) {
         let configuration = update.configuration
-        let settings = TunnelNetworkSettings.make(configuration, remoteAddress: superNodeIp,
-            candidates: serverCandidates, dns: dns)
+        let settings = TunnelNetworkSettings.make(
+            configuration,
+            remoteAddress: superNodeIp,
+            candidates: serverCandidates,
+            dns: dns
+        )
         Logger.network.noticeAndFile("[session:\(sessionID)] Applying tunnel settings revision=\(update.revision)")
         let token = sessionToken
         let timeout = DispatchWorkItem { [weak self] in
             guard let self, !self.stopRequested, self.sessionToken == token,
-                self.tunnelSettings.outstanding == update else { return }
+                  self.tunnelSettings.outstanding == update else { return }
             Logger.network.errorAndFile("[session:\(self.sessionID)] OS settings request timed out; recycling provider process")
             Self.settingsRestartRequired = true
             let error = NEVPNError(.connectionFailed)
@@ -618,22 +594,30 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     func diagnosticContext() -> AppleDiagnosticContext? {
         guard startFinished, !stopRequested, !tunnelSettings.isApplying,
-            let configuration = tunnelSettings.applied,
-            let connection = edge?.connectionStatus, connection.connected else { return nil }
-        return AppleDiagnosticContext(provider: sessionID, generation: tunnelSettings.generation,
-            ipv4: configuration.ipv4, mask: configuration.mask,
-            ipv6: configuration.ipv6.isEmpty ? nil : configuration.ipv6, mtu: configuration.mtu,
-            dns: dns, domains: probeDomains, connectionGeneration: connection.generation)
+              let configuration = tunnelSettings.applied,
+              let connection = edge?.connectionStatus, connection.connected else { return nil }
+        return AppleDiagnosticContext(
+            provider: sessionID,
+            generation: tunnelSettings.generation,
+            ipv4: configuration.ipv4,
+            mask: configuration.mask,
+            ipv6: configuration.ipv6.isEmpty ? nil : configuration.ipv6,
+            mtu: configuration.mtu,
+            dns: dns,
+            domains: probeDomains,
+            connectionGeneration: connection.generation
+        )
     }
 
     var providerStatus: ProviderStatus? {
         guard startFinished, !stopRequested, Self.activeProvider === self else { return nil }
         return statsSession.status(ip: assignedIp)
     }
+
     var providerStarted: Bool { !stopRequested && (pendingStart != nil || startFinished) }
     var messageState: String {
         "startFinished=\(startFinished) startPending=\(pendingStart != nil) stopRequested=\(stopRequested) "
-          + "edgePresent=\(edge != nil) reasserting=\(reasserting) interfaces=\(FileLogger.tunnelInterfaceSummary())"
+            + "edgePresent=\(edge != nil) reasserting=\(reasserting) interfaces=\(FileLogger.tunnelInterfaceSummary())"
     }
 
     override func handleAppMessage(_ data: Data, completionHandler: ((Data?) -> Void)? = nil) {

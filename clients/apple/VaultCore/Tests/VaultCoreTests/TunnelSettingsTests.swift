@@ -124,7 +124,7 @@ private func configuration(_ ip: String) -> TunnelConfiguration {
     let outstanding = try #require(request)
     // Cleanup/retry cannot cancel the OS call. This remains observable so
     // the provider can recycle the process instead of retrying forever.
-    for _ in 0..<3 {
+    for _ in 0 ..< 3 {
         state.reset()
         #expect(state.outstanding == outstanding)
         #expect(state.enqueue(configuration("10.0.0.3")) == nil)
