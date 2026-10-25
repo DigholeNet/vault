@@ -6,6 +6,19 @@ plugins {
     alias(libs.plugins.detekt)
 }
 
+// Same build identity as Apple: commit count, with a timestamp for tracked local changes.
+val gitBuildId = providers.exec {
+    workingDir(rootProject.file("../.."))
+    commandLine("bash", "-c", """
+        commits=${'$'}(git rev-list --count HEAD 2>/dev/null || echo 0)
+        if git diff-index --quiet HEAD -- 2>/dev/null; then
+            echo "${'$'}commits"
+        else
+            echo "${'$'}commits.${'$'}(date +%Y%m%d%H%M)"
+        fi
+    """.trimIndent())
+}.standardOutput.asText.get().trim()
+
 android {
     namespace = "net.dighole.vault"
     compileSdk = libs.versions.compile.sdk.get().toInt()
@@ -16,6 +29,7 @@ android {
         targetSdk = libs.versions.target.sdk.get().toInt()
         versionCode = providers.gradleProperty("versionCode").map(String::toInt).orElse(1).get()
         versionName = providers.gradleProperty("versionName").orElse("1.0.0").get()
+        buildConfigField("String", "GIT_BUILD_ID", "\"$gitBuildId\"")
     }
 
     signingConfigs {
@@ -107,6 +121,10 @@ android {
     detekt {
         config.setFrom(files("$rootDir/detekt.yml"))
         buildUponDefaultConfig.set(false)
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {

@@ -37,8 +37,7 @@ class AboutFragment : Fragment() {
                 android.content.pm.PackageManager.PackageInfoFlags.of(0)
             )
             val versionName = packageInfo.versionName
-            val versionCode = packageInfo.longVersionCode
-            tvVersion.text = getString(R.string.version_format, versionName, versionCode.toString())
+            tvVersion.text = getString(R.string.version_format, versionName, BuildConfig.GIT_BUILD_ID)
         } catch (_e: Exception) {
             Log.e("AboutFragment", "Failed to get version", _e)
             tvVersion.text = getString(R.string.version_unknown)

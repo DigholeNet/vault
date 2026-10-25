@@ -107,6 +107,8 @@ jobs:
         working-directory: clients/android
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable

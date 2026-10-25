@@ -29,6 +29,8 @@ jobs:
         working-directory: clients/android
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       # Keep detekt on JDK 24: this pin dates from the detekt 1.x era
       # (detekt 1.23.8 failed on newer JDKs with the bare JDK version string
@@ -52,6 +54,8 @@ jobs:
         working-directory: clients/android
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
