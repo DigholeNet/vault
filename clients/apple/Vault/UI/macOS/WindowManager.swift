@@ -26,8 +26,8 @@ final class WindowManager {
                     .environmentObject(appData).environmentObject(config).environmentObject(LanguageManager.shared))
         }
         factories["about"] = { [unowned self] in
-            makeWindow(id: "about", title: "About", size: NSSize(width: 380, height: 340),
-                minimum: NSSize(width: 380, height: 340), resizable: false, content:
+            makeWindow(id: "about", title: "About", size: NSSize(width: 420, height: 440),
+                minimum: NSSize(width: 420, height: 440), resizable: false, content:
                     MacosAboutView().environmentObject(LanguageManager.shared))
         }
         factories["welcome"] = { [unowned self] in
@@ -46,7 +46,7 @@ final class WindowManager {
         window.minSize = minimum
         window.isReleasedWhenClosed = false
         window.contentViewController = NSHostingController(rootView: content)
-        let frameName = "vault-\(id)-\(id == "status" ? "v3" : "v2")"
+        let frameName = "vault-\(id)-\(["status", "about"].contains(id) ? "v3" : "v2")"
         if !window.setFrameUsingName(frameName) { window.center() }
         window.setFrameAutosaveName(frameName)
         return NSWindowController(window: window)

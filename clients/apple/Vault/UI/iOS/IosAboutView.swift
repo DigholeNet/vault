@@ -13,20 +13,46 @@ struct IosAboutView: View {
     }
 
     var body: some View {
-        VStack(spacing: 14) {
-            if let icon = appIcon {
-                Image(uiImage: icon)
-                    .resizable().scaledToFit().frame(width: 80, height: 80)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .accessibilityHidden(true)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    if let icon = appIcon {
+                        Image(uiImage: icon)
+                            .resizable().scaledToFit().frame(width: 80, height: 80)
+                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                            .accessibilityHidden(true)
+                            .padding(.bottom, 16)
+                    }
+                    Text("Vault")
+                        .font(.system(size: 24, weight: .bold))
+                        .padding(.bottom, 12)
+                    Text(languageManager.tr(
+                        "Version %@ (%@)",
+                        Bundle.main.appVersionShort,
+                        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+                    ))
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 32)
+
+                    Link(destination: URL(string: "https://github.com/DigholeNet/vault")!) {
+                        Text(verbatim: "https://github.com/DigholeNet/vault")
+                    }
+                    .font(.system(size: 14))
+                    .padding(.bottom, 16)
+                    Text(languageManager.tr("A secure VPN client for cross-regional connectivity."))
+                        .font(.system(size: 14))
+                        .padding(.bottom, 16)
+                    Text(verbatim: "© 2026 Dighole Team")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .multilineTextAlignment(.center)
+                .padding(32)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: geometry.size.height)
             }
-            Text("Vault").font(.title2.weight(.semibold))
-            Text(languageManager.tr("Vault version : %@", Bundle.main.appVersionShort))
-                .foregroundStyle(.secondary)
-            Text(languageManager.tr("VPN Client")).foregroundStyle(.secondary)
         }
-        .font(.body)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(languageManager.tr("About"))
         .navigationBarTitleDisplayMode(.inline)
     }
