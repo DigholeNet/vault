@@ -17,10 +17,33 @@ blocking mode).
 
 ## Exported API
 
-- `RustEdge` — client session handle (connect, write packets, close)
+- `RustEdge` — client session handle (connect, network-change notification,
+  connection status, write packets, close)
 - `EdgeCallbacks` — packet delivery, status and error callbacks into the app
-- `TrafficStats`, `VpnError` — statistics and error types
+- `ConnectionStatus`, `TrafficStats`, `VpnError` — connection snapshots, statistics and errors
 - `set_log_file_path` — point the Rust logger at the app's shared log file
+
+## Client/platform boundary
+
+The core resolves and orders candidates, races IPv4/IPv6 handshakes, detects
+transport failure, coalesces OS network-change events and retries with backoff. `on_ip_assigned` configures the
+platform tunnel after the first successful handshake and only repeats when
+the assigned addresses, mask or prefix actually change. Same-IP reconnects
+keep the existing TUN. Failed configuration may retry.
+
+Android and Apple own UI, settings storage, OS tunnel lifecycle, routes/DNS,
+socket protection, TUN I/O and physical-network notifications. They may resolve
+addresses before enabling the tunnel to install route exclusions and avoid
+routing their own DNS lookups through a disconnected VPN. They pass all
+candidates to the core without choosing a family or host. `is_connected` is the
+source for recovery presentation. `get_connection_status` also supplies a core-owned
+attempt generation, read atomically with readiness, so diagnostics can reject
+results spanning a same-IP reconnect. Errors are informational and IP assignment
+is not a reconnect notification. Apple retains an OS startup deadline, which
+bounds the pending platform completion rather than individual Rust attempts.
+IPv6 multicast filtering is shared in the core rather than implemented by
+individual packet bridges. Linux follows the same session contract while
+maintaining OS routes and DNS.
 
 ## Bindgen
 

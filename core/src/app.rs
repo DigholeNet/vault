@@ -216,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn config_errors_and_duplicate_starts_preserve_active_socket() {
+    fn failed_start_keeps_socket() {
         let dir = std::env::temp_dir().join(format!(
             "vs-{}",
             &uuid::Uuid::new_v4().simple().to_string()[..8]
@@ -237,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_config_does_not_create_control_files() {
+    fn missing_config_no_socket() {
         let dir = std::env::temp_dir().join(format!(
             "vs-{}",
             &uuid::Uuid::new_v4().simple().to_string()[..8]

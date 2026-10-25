@@ -19,41 +19,18 @@ public enum EdgeError: Error {
 /// Core VPN networking component managing the connection to the supernode.
 public final class Edge: @unchecked Sendable {
 
-    // The bridge currently delivers errors as Display strings. Match Darwin
-    // errno suffixes, not localized descriptions; timeouts remain retryable.
-    static func isNetworkUnreachable(_ error: String) -> Bool {
-        guard error.hasPrefix("IO error:") else { return false }
-        return [ENETDOWN, ENETUNREACH, EHOSTDOWN, EHOSTUNREACH].contains {
-            error.hasSuffix("(os error \($0))")
-        }
-    }
-
-    /// "Handshake failed: ..." from the bridge's VpnError::HandshakeFailed
-    /// Display. The core races every candidate before reporting, so this
-    /// means all addresses failed; the provider fails the start (with
-    /// backoff) instead of waiting for the backstop timeout.
-    static func isHandshakeFailure(_ error: String) -> Bool {
-        error.hasPrefix("Handshake failed:")
-    }
-
     /// Adapts the UniFFI `EdgeCallbacks` to the closures passed to `Edge.init`.
     /// Callbacks fire on Rust worker threads; the handlers here only forward.
     private final class Callbacks: EdgeCallbacks, @unchecked Sendable {
         let onData: (Data) -> Void
         let onIpAssigned: (String, String, String, Int32) -> Void
-        let onNetworkUnreachable: () -> Void
-        let onHandshakeFailed: () -> Void
 
         init(
             onData: @escaping (Data) -> Void,
-            onIpAssigned: @escaping (String, String, String, Int32) -> Void,
-            onNetworkUnreachable: @escaping () -> Void,
-            onHandshakeFailed: @escaping () -> Void
+            onIpAssigned: @escaping (String, String, String, Int32) -> Void
         ) {
             self.onData = onData
             self.onIpAssigned = onIpAssigned
-            self.onNetworkUnreachable = onNetworkUnreachable
-            self.onHandshakeFailed = onHandshakeFailed
         }
 
         func onDataBatch(packets: [Data]) {
@@ -75,11 +52,6 @@ public final class Edge: @unchecked Sendable {
 
         func onError(error: String) {
             Logger.network.errorAndFile("vault-core client error: \(error)")
-            if Edge.isNetworkUnreachable(error) {
-                onNetworkUnreachable()
-            } else if Edge.isHandshakeFailure(error) {
-                onHandshakeFailed()
-            }
         }
 
         func protectSocket(fd: Int32) -> Bool {
@@ -101,13 +73,9 @@ public final class Edge: @unchecked Sendable {
         deviceName: String,
         platform: String,
         onData: @escaping ((Data) -> Void),
-        onIpAssigned: @escaping ((String, String, String, Int32) -> Void),
-        onNetworkUnreachable: @escaping () -> Void = {},
-        onHandshakeFailed: @escaping () -> Void = {}
+        onIpAssigned: @escaping ((String, String, String, Int32) -> Void)
     ) throws {
-        let callbacks = Callbacks(onData: onData, onIpAssigned: onIpAssigned,
-                                  onNetworkUnreachable: onNetworkUnreachable,
-                                  onHandshakeFailed: onHandshakeFailed)
+        let callbacks = Callbacks(onData: onData, onIpAssigned: onIpAssigned)
         self.callbacks = callbacks
         // The Rust core races every candidate Happy-Eyeballs style (300 ms
         // stagger, first completed handshake wins).
@@ -155,10 +123,8 @@ public final class Edge: @unchecked Sendable {
         self.rustEdge.getTrafficStats()
     }
 
-    /// Seconds since the last authenticated packet from the server.
-    public func getLastActivityAgeSecs() -> UInt64 {
-        self.rustEdge.getLastActivityAgeSecs()
-    }
+    public var connectionStatus: ConnectionStatus { rustEdge.getConnectionStatus() }
+    public var isConnected: Bool { connectionStatus.connected }
 
     deinit {
         try? self.rustEdge.shutdown()

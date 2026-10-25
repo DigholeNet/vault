@@ -161,7 +161,7 @@ async fn failed_config_never_activates() {
 
 #[tokio::test]
 async fn reconnect_session() {
-    let (server, handle) = vault_core::test_utils::run_mock_server_sessions("password", 2).await;
+    let (server, handle) = vault_core::test_utils::run_mock_server_sessions("password", 3).await;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let session = ClientSession::start(
         ClientConfig {
@@ -193,12 +193,21 @@ async fn reconnect_session() {
         Some(Event::Data)
     ));
     let bytes = session.traffic_stats().bytes_sent;
-    session.reconnect().unwrap();
-    assert!(matches!(
-        timeout(Duration::from_secs(5), rx.recv()).await.unwrap(),
-        Some(Event::IpAssigned(..))
-    ));
-    assert!(session.traffic_stats().bytes_sent >= bytes);
+    let mut generation = session.connection_status().generation;
+    assert!(generation > 0);
+    for _ in 0..2 {
+        session.reconnect().unwrap();
+        // Each authenticated session resumes data without another IP callback.
+        assert!(matches!(
+            timeout(Duration::from_secs(5), rx.recv()).await.unwrap(),
+            Some(Event::Data)
+        ));
+        let status = session.connection_status();
+        assert!(status.connected);
+        assert!(status.generation > generation);
+        generation = status.generation;
+        assert!(session.traffic_stats().bytes_sent >= bytes);
+    }
     timeout(Duration::from_secs(5), handle)
         .await
         .unwrap()
@@ -210,7 +219,7 @@ async fn reconnect_session() {
 /// would take the full handshake timeout to fail, but the second candidate
 /// is staggered by 300ms and must win long before that.
 #[tokio::test]
-async fn handshake_race_picks_reachable_candidate() {
+async fn handshake_race_fallback() {
     let password = "test-password";
     let (server_addr, server_handle) = run_mock_server(password).await;
 
@@ -245,4 +254,55 @@ async fn handshake_race_picks_reachable_candidate() {
     server_handle.abort();
     let _ = server_handle.await;
     session.shutdown().expect("shutdown");
+}
+
+/// A real lease change notifies the platform once; transport retries alone do not.
+#[tokio::test]
+async fn reconnect_reports_changed_lease() {
+    let (server, handle) = vault_core::test_utils::run_mock_server_leases(
+        "password",
+        vec!["10.0.0.2".into(), "10.0.0.3".into(), "10.0.0.3".into()],
+    )
+    .await;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = ClientSession::start(
+        ClientConfig {
+            password: "password".into(),
+            hosts: vec!["127.0.0.1".into()],
+            port: server.port(),
+            id: PeerId([5; 16]),
+            device_name: String::new(),
+            platform: "test".into(),
+            socket_protect: None,
+        },
+        Arc::new(TestCallbacks { events: tx }),
+    )
+    .unwrap();
+    assert!(matches!(
+        timeout(Duration::from_secs(5), rx.recv()).await.unwrap(),
+        Some(Event::IpAssigned(..))
+    ));
+    assert!(matches!(
+        timeout(Duration::from_secs(5), rx.recv()).await.unwrap(),
+        Some(Event::Data)
+    ));
+    session.reconnect().unwrap();
+    match timeout(Duration::from_secs(5), rx.recv()).await.unwrap() {
+        Some(Event::IpAssigned(ipv4, ..)) => assert_eq!(ipv4, "10.0.0.3"),
+        other => panic!("expected updated lease, got {other:?}"),
+    }
+    assert!(matches!(
+        timeout(Duration::from_secs(5), rx.recv()).await.unwrap(),
+        Some(Event::Data)
+    ));
+    assert!(session.is_active());
+    session.reconnect().unwrap();
+    // The updated lease is cached too: it must not be reported again.
+    assert!(matches!(
+        timeout(Duration::from_secs(5), rx.recv()).await.unwrap(),
+        Some(Event::Data)
+    ));
+    session.shutdown().unwrap();
+    handle.abort();
+    let _ = handle.await;
 }

@@ -276,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_packet_can_confirm_after_old_key_fails() {
+    fn reconnect_key_confirmation() {
         let _clock = lock_clock(1_000);
         let mut leases = manager();
         let mut replay = HandshakeReplay::default();
@@ -301,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_pending_confirmation_does_not_replace_established_session() {
+    fn failed_confirmation_keeps_peer() {
         let _clock = lock_clock(1_000);
         let mut leases = manager();
         let id = PeerId([1; 16]);

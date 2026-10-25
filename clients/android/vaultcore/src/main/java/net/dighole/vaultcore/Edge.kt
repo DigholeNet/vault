@@ -119,6 +119,8 @@ class Edge(
         }
     }
 
+    fun isConnected(): Boolean = rustEdge.isConnected()
+
     fun getTrafficStats(): TrafficStats {
         return rustEdge.getTrafficStats()
     }

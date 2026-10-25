@@ -28,11 +28,11 @@ import net.dighole.vaultcore.Edge
 import net.dighole.vaultcore.EdgeConfig
 import net.dighole.vaultcore.LogThrottle
 import net.dighole.vaultcore.PeerId
+import net.dighole.vaultcore.uniffi.VpnException
 import net.dighole.vaultcore.uniffi.setFdBlocking
 import java.io.File
 import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
 @SuppressLint("VpnServicePolicy")
@@ -65,25 +65,21 @@ class VaultVpnService : VpnService() {
         const val EXTRA_RECEIVE_SPEED = "receive_speed"
         const val PREFS_NAME = "vault_prefs"
 
-        /**
-         * An active service has a usable TUN or is recovering it. A temporarily
-         * closed TUN during recovery must not look like a killed service to UI.
-         */
+        /** The service stays active during core reconnects and platform IP updates. */
         @Volatile
         private var serviceInstance: VaultVpnService? = null
 
         val isRunning: Boolean
             get() {
                 val instance = serviceInstance ?: return false
-                return instance.serviceRunning.get() &&
-                    (instance.vpnInterface?.fileDescriptor?.valid() == true ||
-                        instance.recoveryState.isRecovering())
+                return instance.serviceRunning.get()
             }
     }
 
     private lateinit var notificationManager: VpnNotificationManager
     private var vpnIoHandler: VpnIoHandler? = null
 
+    @Volatile
     private var edge: Edge? = null
     private var vpnInterface: ParcelFileDescriptor? = null
     private val serviceRunning = AtomicBoolean(false)
@@ -100,22 +96,18 @@ class VaultVpnService : VpnService() {
         val ipv6PrefixLen: Int
     )
 
-    private var assignedAddresses: AssignedAddresses? = null
     private var tunnelMtu: Int = VPN_MTU
     private var lastUnderlyingTransport: Int? = null
 
-    private val networkEventSequence = AtomicLong()
-    private val recoveryState = RecoveryState()
-    @Volatile
-    private var pendingRecoveryConnection: VpnStatusEvent.Connected? = null
+    private var connectedEvent: VpnStatusEvent.Connected? = null
+    private var lastCoreConnected: Boolean? = null
     private var trafficStatsJob: Job? = null
     private var connectJob: Job? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    private var networkReconnectJob: Job? = null
 
     private fun trace(event: String) {
         VaultFileLogger.event(TAG, "service=${System.identityHashCode(this)} " +
-            "running=${serviceRunning.get()} recovering=${recoveryState.isRecovering()} " +
+            "running=${serviceRunning.get()} " +
             "tunValid=${vpnInterface?.fileDescriptor?.valid()} $event")
     }
 
@@ -300,14 +292,14 @@ class VaultVpnService : VpnService() {
         // Prefer literal IPs for the UDP connection so Rust does not need to
         // perform a DNS lookup that could be intercepted by our own VPN interface.
         // The Rust core races all candidates Happy-Eyeballs style (300 ms
-        // stagger, first completed handshake wins). IPv6 is listed first
-        // (RFC 8305); IPv4 follows as fallback.
-        val connectHosts = addrs.sortedBy { if (it.address.size == 4) 1 else 0 }
+        // stagger, first completed handshake wins), including family preference.
+        val connectHosts = addrs.asSequence()
             .map { addr ->
                 val ip = addr.hostAddress
                 if (addr.address.size == 4) ip else "[$ip]"
             }
             .distinct()
+            .toList()
             .ifEmpty { listOf(host) }
 
         val edgeConfig = EdgeConfig(password, connectHosts, port)
@@ -341,24 +333,10 @@ class VaultVpnService : VpnService() {
                 sessionGate.update(sessionToken) {
                     if (error == null) {
                         // Ignore normal completion.
-                    } else if (serviceRunning.get()) {
-                        trace("RUST_RETRY_ERROR reason=${error.message}")
-                        // Runtime error (e.g. heartbeat timeout, DNS failure during reconnect).
-                        // The Rust run loop already retries with exponential backoff; do NOT kill
-                        // the service, otherwise the auto-reconnect logic is interrupted and the
-                        // user has to wait for the old service to die before reconnect works.
-                        Log.w(TAG, "Runtime error, Rust will retry: ${error.message}")
-                        VaultFileLogger.log(Log.WARN, TAG, "Runtime error, Rust will retry: ${error.message}")
-                        // Rust already owns this retry; only synchronize Android status.
-                        pendingRecoveryConnection = null
-                        markRecovering("Rust automatic retry: ${error.message}", restart = true)
                     } else {
-                        // Initial handshake failed before the VPN interface came up.
-                        Log.e(TAG, "Handshake failed: ${error.message}")
-                        connectJob = null
-                        saveVpnState(false, "", "")
-                        emitVpnEvent(VpnStatusEvent.Error(error.message))
-                        stopSelf()
+                        // Transport errors are informational: Rust owns all retries,
+                        // including failures before the first IP assignment.
+                        Log.w(TAG, "Rust client retry: ${error.message}")
                     }
                 }
             },
@@ -387,69 +365,56 @@ class VaultVpnService : VpnService() {
         sessionToken: Long
     ) {
         trace("IP_ASSIGNED_CALLBACK")
-        var configurationSequence = 0L
+        var sequence = 0L
         if (!sessionGate.update(sessionToken) {
             tunnelConfigurationSequence++
-            configurationSequence = tunnelConfigurationSequence
+            sequence = tunnelConfigurationSequence
         }) return
         scope.launch {
             sessionGate.configure {
+                if (!sessionGate.updateIf(sessionToken, { sequence == tunnelConfigurationSequence }) {}) {
+                    return@configure
+                }
                 val (ipv4, ipv4Mask, ipv6, ipv6Prefixlen) = addresses
                 try {
-                    var reused = false
-                    var superseded = false
-                    val current = sessionGate.update(sessionToken) {
-                        trace("IP_ASSIGNED_APPLY")
-                        superseded = configurationSequence != tunnelConfigurationSequence
-                        if (superseded) return@update
-                        if (serviceRunning.get() &&
-                            vpnInterface?.fileDescriptor?.valid() == true &&
-                            vpnIoHandler?.isInterfaceAvailable() == true &&
-                            assignedAddresses == addresses
-                        ) {
-                            vpnIoHandler?.ensureRunning()
-                            onTunnelConfigured(ipv4, ipv6)
-                            startTrafficStats(sessionToken)
-                            reused = true
-                        }
-                    }
-                    if (!current || reused || superseded) return@configure
-
-                    // Keep blocking establish outside the gate so stop stays responsive.
-                    // Retain the old TUN until Android has successfully created the new one.
-                    trace("TUN_HANDOVER_BEGIN")
+                    // Rust only notifies initial or changed IP configuration.
+                    // Same-IP transport reconnects keep this TUN and its I/O.
                     val newInterface = createVpnInterface(ipv4, ipv4Mask, ipv6, ipv6Prefixlen, addrs, dnsList)
                     sessionGate.commit(
                         sessionToken,
                         newInterface,
-                        condition = { configurationSequence == tunnelConfigurationSequence },
-                        // establish() deactivates the old TUN even if we discard
-                        // its replacement. An open old fd is no longer reusable.
-                        onCreated = { assignedAddresses = null }
-                    ) { iface ->
-                        trace("TUN_HANDOVER_ESTABLISHED newFd=${iface.fd}")
-                        val previousInterface = vpnInterface
-                        vpnIoHandler?.releaseInterface()
-                        try {
-                            previousInterface?.close()
-                        } catch (_: Exception) {
+                        condition = { sequence == tunnelConfigurationSequence },
+                        onCreated = {
+                            // establish() supersedes the old Android TUN even
+                            // when a newer IP update has already arrived.
+                            vpnIoHandler?.stop()
+                            vpnIoHandler = null
+                            try {
+                                vpnInterface?.close()
+                            } catch (error: Exception) {
+                                Log.w(TAG, "Could not close previous TUN", error)
+                            }
+                            vpnInterface = null
                         }
+                    ) { iface ->
                         vpnInterface = iface
-                        assignedAddresses = addresses
+                        vpnIoHandler = VpnIoHandler(scope = scope, serviceRunning = serviceRunning,
+                            mtu = tunnelMtu, logTag = TAG,
+                            onUplinkPacket = { packet -> edge?.writeData(packet) })
                         vpnIoHandler?.setVpnInterface(iface)
                         saveVpnState(true, ipv4, ipv6)
                         serviceRunning.set(true)
                         connectJob = null
                         vpnIoHandler?.startReadingAndWriting()
-                        onTunnelConfigured(ipv4, ipv6)
+                        connectedEvent = VpnStatusEvent.Connected(ipv4, ipv6)
+                        lastCoreConnected = null
                         startTrafficStats(sessionToken)
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
-                    sessionGate.updateIf(sessionToken, { configurationSequence == tunnelConfigurationSequence }) {
-                        Log.e(TAG, "Failed to start VPN interface: ${error.message}")
-                        serviceRunning.set(false)
+                    sessionGate.updateIf(sessionToken, { sequence == tunnelConfigurationSequence }) {
+                        Log.e(TAG, "Failed to configure VPN interface", error)
                         connectJob = null
                         saveVpnState(false, "", "")
                         emitVpnEvent(VpnStatusEvent.Error(error.message))
@@ -476,8 +441,8 @@ class VaultVpnService : VpnService() {
         trace("CLEANUP_BEGIN")
         serviceRunning.set(false)
         stopTrafficStats()
-        recoveryState.reset()
-        pendingRecoveryConnection = null
+        connectedEvent = null
+        lastCoreConnected = null
         saveVpnState(false, "", "")
 
         // Each cleanup step is independent; one failure must not skip the others.
@@ -516,7 +481,6 @@ class VaultVpnService : VpnService() {
         } catch (_: Exception) {
         }
 
-        assignedAddresses = null
         lastUnderlyingTransport = null
         emitVpnEvent(VpnStatusEvent.Disconnected)
     }
@@ -537,9 +501,7 @@ class VaultVpnService : VpnService() {
                         Log.d(TAG, "Ignoring our own VPN network")
                         return
                     }
-                    if (serviceRunning.get()) {
-                        scheduleNetworkReconnect("onAvailable network=$network")
-                    }
+                    notifyNetworkChanged("onAvailable network=$network")
                 }
 
                 override fun onLost(network: Network) {
@@ -550,10 +512,7 @@ class VaultVpnService : VpnService() {
                         return
                     }
                     lastUnderlyingTransport = null
-                    if (serviceRunning.get()) {
-                        // Enter recovery without waiting for the core heartbeat timeout.
-                        scheduleNetworkReconnect("onLost network=$network")
-                    }
+                    notifyNetworkChanged("onLost network=$network")
                 }
 
                 override fun onCapabilitiesChanged(
@@ -581,14 +540,12 @@ class VaultVpnService : VpnService() {
                     // Remember loss as well: Wi-Fi -> no network -> the same
                     // Wi-Fi must wake recovery, not look like an unchanged path.
                     lastUnderlyingTransport = transport
-                    if (previous != transport && serviceRunning.get() &&
-                        (previous != null || recoveryState.isRecovering())
-                    ) {
+                    if (previous != null && previous != transport) {
                         Log.i(
                             TAG,
                             "Underlying transport changed $previous -> $transport, scheduling reconnect"
                         )
-                        scheduleNetworkReconnect("onCapabilitiesChanged network=$network transport=$previous->$transport")
+                        notifyNetworkChanged("onCapabilitiesChanged network=$network transport=$previous->$transport")
                     }
                 }
 
@@ -618,24 +575,20 @@ class VaultVpnService : VpnService() {
             }
             networkCallback = null
         }
-        networkReconnectJob?.cancel()
-        networkReconnectJob = null
     }
 
-    /**
-     * Debounced network reconnect. Waits 1.5s for the network to stabilize,
-     * then triggers Edge reconnect and re-protects the new UDP socket.
-     */
-    private fun scheduleNetworkReconnect(source: String) {
-        val request = networkEventSequence.incrementAndGet()
-        trace("NETWORK_RECONNECT_SCHEDULE id=$request source=$source cancelPrevious=${networkReconnectJob?.isActive}")
-        networkReconnectJob?.cancel()
-        networkReconnectJob = scope.launch {
-            delay(1500)
-            trace("NETWORK_RECONNECT_FIRE id=$request source=$source active=$isActive")
-            if (!serviceRunning.get() || !isActive) return@launch
-
-            requestRecovery("Underlying network changed id=$request source=$source", networkChanged = true)
+    /** Report OS path changes even before the first TUN exists; Rust owns retries. */
+    private fun notifyNetworkChanged(source: String) {
+        trace("NETWORK_CHANGED source=$source")
+        val currentEdge = edge ?: return
+        scope.launch {
+            try {
+                if (edge === currentEdge) currentEdge.reconnect()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: VpnException) {
+                Log.w(TAG, "Could not notify Rust of network change", error)
+            }
         }
     }
 
@@ -643,67 +596,6 @@ class VaultVpnService : VpnService() {
         trace("SHOW_CONNECTED")
         notificationManager.updateNotification(getString(R.string.notification_connected, event.ipv4))
         emitVpnEvent(event)
-    }
-
-    private fun onTunnelConfigured(ipv4: String, ipv6: String) {
-        val event = VpnStatusEvent.Connected(ipv4, ipv6)
-        // Publish the addresses before marking configuration complete: the
-        // sampler may observe readiness immediately on another IO thread.
-        pendingRecoveryConnection = event
-        val deferred = recoveryState.onConfigured()
-        trace("TUN_CONFIGURED deferConnected=$deferred")
-        if (!deferred) {
-            pendingRecoveryConnection = null
-            showConnected(event)
-        }
-    }
-
-    /** Mark recovery without restarting an already retrying Rust session. */
-    private fun markRecovering(reason: String, restart: Boolean = false): Boolean {
-        if (!serviceRunning.get() || !recoveryState.begin(restart)) {
-            trace("RECOVERY_SKIPPED reason=$reason")
-            return false
-        }
-        trace("RECOVERY_BEGIN reason=$reason")
-        Log.w(TAG, "Recovering: $reason")
-        VaultFileLogger.log(Log.WARN, TAG, "Recovering: $reason")
-        notificationManager.updateNotification(getString(R.string.notification_connecting))
-        emitVpnEvent(VpnStatusEvent.Reconnecting)
-        return true
-    }
-
-    /** One recovery spans all Rust retries until handshake and TUN I/O succeed. */
-    // Recovery must never crash the service, hence the broad catch below.
-    @Suppress("TooGenericExceptionCaught")
-    private fun requestRecovery(reason: String, networkChanged: Boolean = false) {
-        if (!serviceRunning.get()) return
-        val started = markRecovering(reason, restart = networkChanged)
-        // A real network change must wake the Rust loop even during an
-        // existing recovery. Watchdog ticks stay deduplicated so they cannot
-        // repeatedly interrupt a handshake or reset its retry backoff.
-        if (!started && !networkChanged) return
-        pendingRecoveryConnection = null
-        val currentEdge = edge
-        if (currentEdge == null) {
-            handleDisconnect()
-            return
-        }
-        scope.launch {
-            try {
-                coroutineContext.ensureActive()
-                if (!serviceRunning.get() || edge !== currentEdge) return@launch
-                trace("RECONNECT_NATIVE_BEGIN reason=$reason")
-                currentEdge.reconnect()
-                trace("RECONNECT_NATIVE_RETURN reason=$reason")
-                // Returning only means recovery was requested in the existing session.
-                // onIpAssigned and the sampler finish recovery after I/O is ready.
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "Edge recovery failed", e)
-                if (serviceRunning.get() && edge === currentEdge) handleDisconnect()
-            }
-        }
     }
 
     private fun saveVpnState(connected: Boolean, ipv4: String, ipv6: String) {
@@ -849,6 +741,18 @@ class VaultVpnService : VpnService() {
                         val stats = e.getTrafficStats()
                         // Native calls may finish after disconnect cancelled us.
                         coroutineContext.ensureActive()
+                        sessionGate.update(sessionToken) {
+                            val connected = e.isConnected()
+                            if (lastCoreConnected != connected) {
+                                lastCoreConnected = connected
+                                if (connected) {
+                                    connectedEvent?.let { showConnected(it) }
+                                } else {
+                                    notificationManager.updateNotification(getString(R.string.notification_connecting))
+                                    emitVpnEvent(VpnStatusEvent.Reconnecting)
+                                }
+                            }
+                        }
 
                         emitVpnEvent(
                             VpnStatusEvent.TrafficStats(
@@ -879,13 +783,10 @@ class VaultVpnService : VpnService() {
                         Log.e(TAG, "VPN I/O watchdog check failed")
                         null
                     }
-                    if (recoveryState.completeIfReady(vpnIoHandler?.isRunning() == true)) {
-                        trace("RECOVERY_COMPLETE_IO_READY")
-                        pendingRecoveryConnection?.let { showConnected(it) }
-                        pendingRecoveryConnection = null
-                    }
                     if (ioOk == false) {
-                        requestRecovery("TUN interface unrecoverable")
+                        // A broken platform TUN cannot be repaired by reconnecting UDP.
+                        emitVpnEvent(VpnStatusEvent.Error("TUN interface unavailable"))
+                        handleDisconnect()
                     }
                 }
                 delay(1000)

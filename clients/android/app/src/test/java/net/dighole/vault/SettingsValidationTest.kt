@@ -13,7 +13,7 @@ class SettingsValidationTest {
             assertTrue(it, SettingsValidation.server(it))
         }
     }
-    @Test fun dnsAcceptsOnlyIpLiteralsAndSupportsEmptyDefaults() {
+    @Test fun dnsValidation() {
         assertTrue(SettingsValidation.dns(""))
         assertTrue(SettingsValidation.dns("1.1.1.1, 2606:4700:4700::1111"))
         listOf("example.com", "1.1.1.1,", "999.1.1.1", "1.2.3", "1.1.1.1,,8.8.8.8").forEach {

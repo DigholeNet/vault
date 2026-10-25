@@ -123,7 +123,7 @@ class VaultConfigStoreTest {
     }
 
     @Test(timeout = 15000)
-    fun cancelledCommitPreservesPreviousConfig() = runBlocking {
+    fun cancelledCommit() = runBlocking {
         val f = Fixture()
         try {
             f.store.write(first)
@@ -139,7 +139,7 @@ class VaultConfigStoreTest {
     }
 
     @Test
-    fun legacyEncryptedPasswordMigratesWithExistingHost() = runBlocking {
+    fun encryptedMigration() = runBlocking {
         val f = Fixture()
         try {
             f.legacy = "new encrypted password"
@@ -158,7 +158,7 @@ class VaultConfigStoreTest {
     }
 
     @Test
-    fun fallbackMigratesAfterKeystoreRecovery() = runBlocking {
+    fun keystoreRecoveryMigration() = runBlocking {
         val f = Fixture()
         try {
             f.legacy = "stale credential"
@@ -176,7 +176,7 @@ class VaultConfigStoreTest {
     }
 
     @Test
-    fun failedMigrationCommitPreservesLegacyRecoveryCopy() = runBlocking {
+    fun failedMigrationCommit() = runBlocking {
         val f = Fixture()
         try {
             f.legacy = "recovery"
@@ -213,7 +213,7 @@ class VaultConfigStoreTest {
     }
 
     @Test
-    fun unreadableLegacyCredentialIsNotDeleted() = runBlocking {
+    fun unreadableLegacyCredential() = runBlocking {
         val f = Fixture()
         try {
             f.legacy = "recovery"
@@ -230,7 +230,7 @@ class VaultConfigStoreTest {
     }
 
     @Test
-    fun legacyPlaintextRecoversAfterEncryptionFailure() = runBlocking {
+    fun plaintextRecovery() = runBlocking {
         val f = Fixture()
         try {
             f.disk.edit { it[ConfigKeys.PASSWORD] = "recovery" }

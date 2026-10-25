@@ -119,7 +119,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cli_modes_override_environment_only_when_requested() {
+    fn cli_log_overrides() {
         for (verbose, quiet, expected) in [(true, false, "debug"), (false, true, "warn")] {
             let filter = apply_log_levels(
                 EnvFilter::new("trace,vault_core=trace"),

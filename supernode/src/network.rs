@@ -412,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn routes_accept_virtual_uplinks_and_exclude_unusable_routes() {
+    fn virtual_uplink_routes() {
         let v4 = "Iface Destination Gateway Flags RefCnt Use Metric Mask
 eth0 00000000 0100000A 0003 0 0 0 00000000
 br0 00000000 00000000 0001 0 0 10 00000000
@@ -436,7 +436,7 @@ lan0 0000000A 00000000 0001 0 0 0 00FFFFFF
     }
 
     #[test]
-    fn connected_and_static_routes_work_without_a_default_route() {
+    fn routes_without_default() {
         let v4 = "lan0 0001A8C0 00000000 0001 0 0 0 00FFFFFF\n\
                   lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF\n\
                   vpn0 0000000A 00000000 0001 0 0 0 00FFFFFF\n\
@@ -483,7 +483,7 @@ lan0 0000000A 00000000 0001 0 0 0 00FFFFFF
     }
 
     #[test]
-    fn every_startup_failure_rolls_back_only_owned_changes() {
+    fn startup_failure_rollback() {
         let exits = vec!["eth0".into()];
         let existing = tunnel_rules("iptables", "vpn", "10.0.0.0/24", &exits)[0].clone();
         let probe = fixture();
@@ -533,7 +533,7 @@ lan0 0000000A 00000000 0001 0 0 0 00FFFFFF
     }
 
     #[test]
-    fn rules_are_scoped_and_dual_stack_is_symmetric() {
+    fn dual_stack_rule_scope() {
         let exits = vec!["eth0".into()];
         for (program, cidr) in [("iptables", "10.0.0.0/24"), ("ip6tables", "fd00::/96")] {
             let rules = tunnel_rules(program, "vpn", cidr, &exits);
@@ -559,7 +559,7 @@ lan0 0000000A 00000000 0001 0 0 0 00FFFFFF
     }
 
     #[test]
-    fn forwarding_is_enabled_and_survives_cleanup() {
+    fn forwarding_survives_cleanup() {
         let fake = fixture();
         for key in ["net.ipv4.ip_forward", "net.ipv6.conf.all.forwarding"] {
             fake.0.borrow_mut().sysctls.insert(key.into(), "0".into());
@@ -595,7 +595,7 @@ lan0 0000000A 00000000 0001 0 0 0 00FFFFFF
     }
 
     #[test]
-    fn later_startup_failure_keeps_enabled_forwarding() {
+    fn startup_keeps_forwarding() {
         let fake = fixture();
         fake.0
             .borrow_mut()
@@ -619,7 +619,7 @@ lan0 0000000A 00000000 0001 0 0 0 00FFFFFF
     }
 
     #[test]
-    fn forwarding_write_failure_aborts_startup() {
+    fn forwarding_write_failure() {
         let fake = fixture();
         fake.0
             .borrow_mut()
@@ -638,7 +638,7 @@ lan0 0000000A 00000000 0001 0 0 0 00FFFFFF
     }
 
     #[test]
-    fn ipv6_only_preserves_disabled_ra_and_ipv4_forwarding() {
+    fn ipv6_only_forwarding() {
         let fake = fixture();
         for key in [
             "net.ipv4.ip_forward",
@@ -791,7 +791,7 @@ lan0 0000000A 00000000 0001 0 0 0 00FFFFFF
     }
 
     #[test]
-    fn stopping_one_instance_leaves_other_instance_and_host_untouched() {
+    fn isolated_instance_cleanup() {
         let fake = fixture();
         let host_before = fake.0.borrow().sysctls.clone();
         let exits = vec!["eth0".into()];

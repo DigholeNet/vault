@@ -131,13 +131,13 @@ private func response(_ request: DiagnosticRequest) -> DiagnosticResponse {
   #expect(decoded.lines.contains { $0.contains("route:") })
 }
 
-@Test func sessionClockClampsAndKeepsHoursPastOneDay() {
+@Test func sessionClockBounds() {
   #expect(DiagnosticsPresentation.connectionDuration(-5) == "00:00:00")
   #expect(DiagnosticsPresentation.connectionDuration(1476.9) == "00:24:36")
   #expect(DiagnosticsPresentation.connectionDuration(90061) == "25:01:01")
 }
 
-@Test func logSearchCombinesSourceAndCaseInsensitiveText() {
+@Test func logSearchFilters() {
   let text = "[app] HTTPS ready\n[ne] DNS ready\n[ne] HTTPS failed"
   #expect(
     DiagnosticsPresentation.filteredLogs(text, source: "ne", search: "https") == "[ne] HTTPS failed"
@@ -157,4 +157,12 @@ private func response(_ request: DiagnosticRequest) -> DiagnosticResponse {
     DiagnosticsPresentation.filteredLogs(text, source: "ne", search: "HANDSHAKE")
       == "[rust] handshake failed")
   #expect(DiagnosticsPresentation.filteredLogs(text, source: "app", search: "") == "[app] ready")
+}
+
+@Test func transportGeneration() {
+  let original = context()
+  var reconnected = original
+  reconnected.connectionGeneration += 1
+  #expect(!original.isSameSession(as: reconnected))
+  #expect(original.isSameSession(as: original))
 }

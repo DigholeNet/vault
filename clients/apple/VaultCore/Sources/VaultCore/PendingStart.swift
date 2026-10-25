@@ -4,7 +4,6 @@ import Foundation
 /// Owns the completions for one (possibly repeated) tunnel start. Access only on the provider's main queue.
 public final class PendingStart {
     private var completions: [(Error?) -> Void]
-    private var failureScheduled = false
 
     public init(completion: @escaping (Error?) -> Void) {
         self.completions = [completion]
@@ -16,12 +15,6 @@ public final class PendingStart {
     public func appendCompletion(_ completion: @escaping (Error?) -> Void) -> Bool {
         guard isPending else { return false }
         completions.append(completion)
-        return true
-    }
-
-    public func scheduleFailure() -> Bool {
-        guard isPending, !failureScheduled else { return false }
-        failureScheduled = true
         return true
     }
 

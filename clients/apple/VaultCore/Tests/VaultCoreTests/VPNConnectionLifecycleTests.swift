@@ -24,7 +24,7 @@ import Testing
     }
 }
 
-@Test func cancellationWaitsForPreparationAndSavedProfileCleanup() throws {
+@Test func cancellationCleanup() throws {
     var state = VPNConnectionLifecycle()
     let connect = try #require({ state.beginConnect() }())
     let stop = try #require({ state.beginDisconnect() }())
@@ -47,7 +47,7 @@ import Testing
     #expect({ !state.markStarted(connect) }())
 }
 
-@Test func realDisconnectStillReportsUnexpectedOnce() throws {
+@Test func unexpectedDisconnect() throws {
     var state = VPNConnectionLifecycle()
     #expect({ !state.observedDisconnected() }())
     let token = try #require({ state.beginConnect() }())
@@ -61,7 +61,7 @@ import Testing
     #expect({ state.observedDisconnected() }())
 }
 
-@Test func connectionFailureAllowsRetryButStaleFailureDoesNot() throws {
+@Test func connectionFailureRetry() throws {
     var state = VPNConnectionLifecycle()
     let first = try #require({ state.beginConnect() }())
     #expect({ state.failConnect(first) }())
@@ -71,7 +71,7 @@ import Testing
     #expect({ state.isPreparing }())
 }
 
-@Test func failedDisconnectRestoresRetryAfterAllCleanupJobsFinish() throws {
+@Test func disconnectCleanupRetry() throws {
     var state = VPNConnectionLifecycle()
     let connect = try #require({ state.beginConnect() }())
     let stop = try #require({ state.beginDisconnect() }())
@@ -97,7 +97,7 @@ import Testing
     #expect({ state.completeStopIfReady(tunnelDown: true) }())
 }
 
-@Test func failedDisconnectOfIdleProfileAllowsAnotherAttempt() throws {
+@Test func idleDisconnectRetry() throws {
     var state = VPNConnectionLifecycle()
     let stop = try #require({ state.beginDisconnect() }())
     #expect({ state.beginTeardown(stop) }())
@@ -127,7 +127,7 @@ import Testing
     #expect({ state.beginConnect() != nil }())
 }
 
-@Test func subsequentDisconnectClearsQueuedReconnect() throws {
+@Test func disconnectClearsReconnect() throws {
     var state = VPNConnectionLifecycle()
     let stop = try #require({ state.beginDisconnect() }())
     #expect({ state.beginConnect() == nil }())
@@ -139,7 +139,7 @@ import Testing
     #expect(!state.wantsConnection)
 }
 
-@Test func stopTimeoutReleasesOperationWithoutClaimingDisconnected() throws {
+@Test func stopTimeoutRelease() throws {
     var state = VPNConnectionLifecycle()
     state.observedConnected()
     let stop = try #require({ state.beginDisconnect() }())
@@ -154,7 +154,7 @@ import Testing
     #expect({ state.beginDisconnect() != nil }())
 }
 
-@Test func onDemandNotificationsCannotFinishPreparation() throws {
+@Test func onDemandDuringPreparation() throws {
     var state = VPNConnectionLifecycle()
     let token = try #require({ state.beginConnect() }())
     state.observedConnected()
@@ -169,7 +169,7 @@ import Testing
     #expect(state.phase == .connected)
 }
 
-@Test func cancellationOverridesOnDemandNotificationsDuringPreparation() throws {
+@Test func cancelDuringOnDemand() throws {
     var state = VPNConnectionLifecycle()
     let token = try #require({ state.beginConnect() }())
     state.observedConnected()

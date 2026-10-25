@@ -20,7 +20,7 @@ final class VaultUITests: XCTestCase {
 
     #if os(iOS)
     @MainActor
-    func testDiagnosticsAndAboutNavigationWithoutVPN() throws {
+    func testDiagnosticsAboutNavigation() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()

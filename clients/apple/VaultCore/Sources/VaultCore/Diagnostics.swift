@@ -115,6 +115,7 @@ public struct DiagnosticsResult: Codable, Sendable {
 public struct AppleDiagnosticContext: Codable, Sendable {
   public var provider: String
   public var generation: UInt64
+  public var connectionGeneration: UInt64
   public var ipv4: String
   public var mask: String
   public var ipv6: String?
@@ -124,16 +125,23 @@ public struct AppleDiagnosticContext: Codable, Sendable {
 
   public init(
     provider: String, generation: UInt64, ipv4: String, mask: String,
-    ipv6: String?, mtu: Int, dns: [String], domains: [String]
+    ipv6: String?, mtu: Int, dns: [String], domains: [String], connectionGeneration: UInt64 = 0
   ) {
     self.provider = provider
     self.generation = generation
+    self.connectionGeneration = connectionGeneration
     self.ipv4 = ipv4
     self.mask = mask
     self.ipv6 = ipv6
     self.mtu = mtu
     self.dns = dns
     self.domains = domains
+  }
+
+  public func isSameSession(as other: AppleDiagnosticContext) -> Bool {
+    provider == other.provider && generation == other.generation
+      && connectionGeneration == other.connectionGeneration
+      && ipv4 == other.ipv4 && mask == other.mask && ipv6 == other.ipv6 && mtu == other.mtu
   }
 
   public func makeEngine() throws -> DiagnosticEngine {
@@ -163,6 +171,7 @@ public struct AppleProbeRequest: Codable, Sendable {
   public var run: String
   public var provider: String
   public var generation: UInt64
+  public var connectionGeneration: UInt64
   public var id: UInt64
   public var domain: String
   public var tunnel: Bool
@@ -179,6 +188,7 @@ public struct AppleProbeRequest: Codable, Sendable {
     self.run = run
     provider = context.provider
     generation = context.generation
+    connectionGeneration = context.connectionGeneration
     id = request.id
     domain = request.domain
     tunnel = request.scope == .tunnel

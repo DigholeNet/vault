@@ -31,14 +31,14 @@ final class VaultTests: XCTestCase {
         XCTAssertNil(config.passwordStorageError)
     }
 
-    func testConnectionStatusKeysAreSharedAndIndependentOfLanguage() {
+    func testStatusKeys() {
         XCTAssertEqual(VpnStatusUtil.titleKey(for: .disconnected), "Disconnected")
         XCTAssertEqual(VpnStatusUtil.titleKey(for: .connecting), "Connecting")
         XCTAssertEqual(VpnStatusUtil.titleKey(for: .connected), "Connected")
         XCTAssertEqual(VpnStatusUtil.titleKey(for: .disconnecting), "Disconnecting…")
     }
 
-    func testConnectionToggleDerivesFromPublishedStatus() {
+    func testConnectionToggle() {
         let data = AppData()
         for (status, enabled) in [(VpnStatus.disconnected, false), (.connecting, true), (.connected, true), (.disconnecting, false)] {
             data.vpnStatus = status
@@ -85,7 +85,7 @@ private final class TestTunnelManager: NETunnelProviderManager {
 
 extension VaultTests {
     @MainActor
-    func testDisconnectSaveFailureCanBeRetried() async throws {
+    func testDisconnectSaveRetry() async throws {
         let data = AppData()
         let controller = VpnManager(config: try makeConfig().config, appData: data)
         let profile = TestTunnelManager()
@@ -124,7 +124,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testDisconnectCompletionWaitsForSaveAndTunnelShutdown() async throws {
+    func testDisconnectCompletion() async throws {
         let data = AppData()
         let controller = VpnManager(config: try makeConfig().config, appData: data)
         let profile = TestTunnelManager()
@@ -231,7 +231,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testInvalidConnectPreservesStartupObservation() async throws {
+    func testInvalidConnect() async throws {
         for (host, password) in [("", ""), ("test.invalid", ""), ("", "test-password")] {
             let config = try makeConfig().config
             config.host = host
@@ -259,7 +259,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testStartupThenConnectThenApprovalCancellationAndRetry() async throws {
+    func testApprovalCancellationRetry() async throws {
         let controller = try makeController()
         var startupFinished = false
         controller.startObservingStatus { startupFinished = true }
@@ -288,7 +288,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testConnectDuringStopRunsOnlyAfterDisconnected() async throws {
+    func testConnectDuringStop() async throws {
         let controller = try makeController()
         let profile = TestTunnelManager()
         profile.isOnDemandEnabled = false
@@ -309,7 +309,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testStopTimeoutAllowsRetryAndCompletesOnce() async throws {
+    func testStopTimeout() async throws {
         let controller = try makeController()
         controller.tunnelStopTimeout = 0
         let profile = TestTunnelManager()
@@ -339,7 +339,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testOnDemandDisconnectDuringPreparationRestartsCurrentSession() async throws {
+    func testOnDemandPreparationRestart() async throws {
         let controller = try makeController()
         controller.connect()
         try await activate(controller)
@@ -358,7 +358,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testOnDemandConnectedAfterPreparationDoesNotStartTwice() async throws {
+    func testOnDemandSingleStart() async throws {
         let controller = try makeController()
         controller.connect()
         try await activate(controller)
@@ -373,7 +373,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testOnDemandConnectedDuringFailedReloadStillCleansUp() async throws {
+    func testOnDemandReloadFailure() async throws {
         let controller = try makeController()
         controller.connect()
         try await activate(controller)
@@ -394,7 +394,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testCancelledPreparationWaitsForSavedProfileCleanupBeforeReconnect() async throws {
+    func testPreparationCancelCleanup() async throws {
         let controller = try makeController()
         controller.connect()
         try await activate(controller)
@@ -435,7 +435,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testReloadAndStartFailuresCleanOnDemandBeforeAllowingRetry() async throws {
+    func testFailedStartCleanup() async throws {
         for reloadSucceeded in [false, true] {
             let controller = try makeController()
             controller.connect()
@@ -465,7 +465,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testConnectDisconnectReconnectIgnoresOldStatusNotifications() async throws {
+    func testStaleStatusNotifications() async throws {
         let controller = try makeController()
         controller.connect()
         try await activate(controller)
@@ -502,7 +502,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testActivationFailureAndProfileLoadFailureAllowRetry() async throws {
+    func testActivationAndLoadRetry() async throws {
         let controller = try makeController()
         controller.connect()
         controller.systemExtensionManager.request(
@@ -523,7 +523,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testDisconnectLoadFailureAllowsAnotherDisconnect() async throws {
+    func testDisconnectLoadRetry() async throws {
         let controller = try makeController()
         let failed = expectation(description: "profile lookup failed")
         controller.disconnect { succeeded in XCTAssertFalse(succeeded); failed.fulfill() }
@@ -540,7 +540,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testQuitTimeoutThenLateCleanupAndQuitRetryReplyOnce() async throws {
+    func testQuitTimeoutRetry() async throws {
         let controller = try makeController()
         let profile = TestTunnelManager()
         profile.isOnDemandEnabled = true
@@ -576,7 +576,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testEarlyCancellationWaitsForProviderStartupBeforeStopping() async throws {
+    func testCancelBeforeProviderStart() async throws {
         let controller = try makeController()
         let profile = TestTunnelManager()
         profile.isOnDemandEnabled = true
@@ -616,7 +616,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testCancellationCanSettleWhenStartupConnectsOrFailsWithoutAReply() async throws {
+    func testCancelWithoutStartupReply() async throws {
         for startupSucceeded in [true, false] {
             let controller = try makeController()
             let profile = TestTunnelManager()
@@ -642,7 +642,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testStartupWaitTimeoutReportsFailureWithoutUnsafeStopAndAllowsRetry() async throws {
+    func testStartupWaitTimeout() async throws {
         let controller = try makeController()
         controller.providerStartupTimeout = 0
         let profile = TestTunnelManager()
@@ -671,7 +671,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testOfflineLogReadNeverLoadsProviderManager() async throws {
+    func testOfflineLogRead() async throws {
         let controller = try makeController()
         _ = await controller.collectLogs()
         XCTAssertNil(controller.loaded)
@@ -680,7 +680,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testLogReadDoesNotMessageInactiveRecoveringOrTerminatingProvider() async throws {
+    func testUnavailableProviderLogs() async throws {
         for status in [NEVPNStatus.invalid, .disconnected, .connecting, .disconnecting, .reasserting] {
             let controller = try makeController()
             let profile = TestTunnelManager()
@@ -700,7 +700,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testActiveLogReadRechecksStateAfterAwaitAndRejectsLateData() async throws {
+    func testLateLogRead() async throws {
         let controller = try makeController()
         let profile = TestTunnelManager()
         controller.activeVPN = profile
@@ -726,7 +726,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testQuitBlocksStatusMessagesButKeepsStartupAcknowledgement() async throws {
+    func testQuitStatusMessages() async throws {
         let controller = try makeController()
         let profile = TestTunnelManager()
         controller.activeVPN = profile
@@ -756,7 +756,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testStaleStartupLoadDoesNotReplaceManagerOrRunAutoConnect() async throws {
+    func testStaleStartupLoad() async throws {
         let data = AppData()
         defer { data.stopStatsMonitoring() }
         let controller = DelayedLoadVpnManager(config: try makeConfig().config, appData: data)
@@ -785,7 +785,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testActivationRetryReopensApprovalForBothCallbackOrders() throws {
+    func testActivationApprovalRetry() throws {
         for approvalBeforeCancellation in [true, false] {
             var requests: [OSSystemExtensionRequest] = []
             var prompts = 0
@@ -816,7 +816,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testCancelledActivationCanBeRetriedWithoutAnotherOSRequest() throws {
+    func testCancelledActivationRetry() throws {
         var requests: [OSSystemExtensionRequest] = []
         let activation = SystemExtensionManager(submitRequest: { requests.append($0) })
         var cancelled = false
@@ -835,7 +835,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testLateActivationCompletionDoesNotResumeCancelledConnection() throws {
+    func testLateActivationCompletion() throws {
         var request: OSSystemExtensionRequest?
         let activation = SystemExtensionManager(submitRequest: { request = $0 })
         var replies = 0
@@ -867,7 +867,7 @@ private final class LogControlTestManager: RuntimeLogStore {
 
 extension VaultTests {
     @MainActor
-    func testClearLogsDiscardsInFlightRefresh() async throws {
+    func testClearDuringRefresh() async throws {
         let controller = LogControlTestManager()
         let model = DiagnosticsViewModel()
         let reading = expectation(description: "old logs reading")
@@ -888,7 +888,7 @@ extension VaultTests {
     }
 
     @MainActor
-    func testClearLogsReportsDeferredProviderAndErrors() async throws {
+    func testClearLogsFailure() async throws {
         let controller = LogControlTestManager()
         let model = DiagnosticsViewModel()
         controller.clearComplete = false

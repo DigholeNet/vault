@@ -125,7 +125,7 @@ jobs:
             -resultBundlePath "$RUNNER_TEMP/vault-ios-tests.xcresult" \
             -parallel-testing-enabled NO \
             -only-testing:VaultTests \
-            -only-testing:VaultUITests/VaultUITests/testDiagnosticsAndAboutNavigationWithoutVPN \
+            -only-testing:VaultUITests/VaultUITests/testDiagnosticsAboutNavigation \
             CODE_SIGNING_ALLOWED=NO test
 
       - name: Upload Apple test results

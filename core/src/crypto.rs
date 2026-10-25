@@ -481,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn packet_types_are_authenticated_for_every_cipher() {
+    fn packet_type_authentication() {
         use crate::protocol::{CLOSE, DATA_INTERFACE, HEARTBEAT};
         for algorithm in [
             AlgorithmType::Aes128Gcm,

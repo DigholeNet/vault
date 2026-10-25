@@ -3,7 +3,7 @@ import Testing
 
 @testable import VaultCore
 
-@Test func settingsRejectMalformedValuesBeforeSaving() {
+@Test func settingsValidation() {
   #expect(SettingsValidation.isValidServer("vpn.example.com"))
   #expect(SettingsValidation.isValidServer("2607:8700:5500:d2b6:0:1:0:2"))
   #expect(!SettingsValidation.isValidServer("https://vpn.example.com"))
@@ -23,7 +23,7 @@ import Testing
   #expect(!SettingsValidation.isValidProbeList("google.com,"))
 }
 
-@Test func connectionValidationRejectsInvalidDraftsAndPersistedSettings() {
+@Test func connectionValidation() {
   func error(
     host: String = " vpn.example.com ", port: String = "9527",
     password: String = "secret", dns: String = "", mtu: String = "",

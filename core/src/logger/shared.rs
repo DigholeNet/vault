@@ -211,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn record_format_matches_platform_and_prefixes_multiline_messages() {
+    fn multiline_log_format() {
         let timestamp = "2026-10-24 11:07:49.001Z";
         assert_eq!(
             format_record(timestamp, " INFO Heartbeat ping sent"),

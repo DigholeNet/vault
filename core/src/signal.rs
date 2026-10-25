@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_start_leaves_active_socket_reachable() {
+    fn duplicate_start_keeps_socket() {
         let fixture = Fixture::new();
         let owner = SysSignal::bind(fixture.path()).unwrap();
         let before = std::fs::symlink_metadata(fixture.path()).unwrap();
@@ -231,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn protects_legacy_live_socket_without_a_lock() {
+    fn legacy_socket_protection() {
         let fixture = Fixture::new();
         let old = std::os::unix::net::UnixDatagram::bind(fixture.path()).unwrap();
         assert!(SysSignal::bind(fixture.path()).is_err());
@@ -243,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn only_stale_sockets_are_reclaimed_and_lock_inode_is_preserved() {
+    fn stale_socket_cleanup() {
         let fixture = Fixture::new();
         drop(std::os::unix::net::UnixDatagram::bind(fixture.path()).unwrap());
         let owner = SysSignal::bind(fixture.path()).unwrap();
@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn lock_excludes_other_processes_and_releases_after_exit() {
+    fn lock_process_exclusion() {
         let fixture = Fixture::new();
         let mut child = child(&fixture);
         assert!(SysSignal::bind(fixture.path()).is_err());
@@ -322,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn killed_process_leaves_recoverable_stale_socket() {
+    fn killed_process_recovery() {
         let fixture = Fixture::new();
         let mut child = child(&fixture);
         child.kill().unwrap();

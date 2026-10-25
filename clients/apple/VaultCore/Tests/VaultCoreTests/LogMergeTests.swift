@@ -9,7 +9,7 @@ import Testing
 
 @testable import VaultCore
 
-@Test func mergeChronologicallyInterleavesByTimestamp() {
+@Test func mergeByTimestamp() {
     let app = """
         [2026-10-23 13:26:22.702] [NOTICE] [app] connect() starting
         [2026-10-23 13:26:25.790] [NOTICE] [app] VPN status: connecting -> on
@@ -34,7 +34,7 @@ import Testing
     #expect(merged == "[2026-10-23 13:00:00.000] a")
 }
 
-@Test func mergeConvertsLegacyLocalTimeAndKeepsEqualTimestampOrder() throws {
+@Test func mergeLegacyTimestamps() throws {
     let shanghai = try #require(TimeZone(secondsFromGMT: 8 * 3600))
     let app = """
         [2026-10-24 16:00:00.000] [NOTICE] [app] z-first
@@ -51,7 +51,7 @@ import Testing
     ])
 }
 
-@Test func mergeRepairsDuplicatedTimestampBracketsInsteadOfPinningOldRecordsLast() {
+@Test func mergeTimestampBrackets() {
     let text = """
         [2026-10-24 11:08:08.000Z] [DEBUG] [ne] alive
         [[2026-10-24 10:58:28.234Z] [NOTICE] [ne] [session:first] Init edge successfully
@@ -64,7 +64,7 @@ import Testing
     #expect(lines[2].hasSuffix("alive"))
 }
 
-@Test func mergeNormalizesLegacyRustSeverityWithoutChangingMessage() {
+@Test func mergeRustSeverity() {
     let log = "[2026-10-24 11:07:49.001Z] [rust]  INFO Heartbeat ping sent"
     #expect(FileLogger.mergeChronologically([log]) ==
         "[2026-10-24 11:07:49.001Z] [INFO] [rust] Heartbeat ping sent")
@@ -72,14 +72,14 @@ import Testing
     #expect(FileLogger.mergeChronologically([warning]).contains("[WARNING] [rust] No route to host"))
 }
 
-@Test func swiftRecordsUseUTCAndPrefixEveryMessageLine() {
+@Test func swiftLogFormat() {
     let record = FileLogger.formattedRecord("first\nsecond", level: "WARN", source: "ne",
         timestamp: Date(timeIntervalSince1970: 0))
     #expect(record == "[1970-01-01 00:00:00.000Z] [WARNING] [ne] first\n" +
         "[1970-01-01 00:00:00.000Z] [WARNING] [ne] second\n")
 }
 
-@Test func clearingLogsTruncatesBothFilesAndDrainsQueuedWrites() throws {
+@Test func clearQueuedLogs() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let logger = try FileLogger(logDirectory: directory)
@@ -97,7 +97,7 @@ import Testing
     #expect(logger.readLog()?.contains("queued before clear") == false)
 }
 
-@Test func providerTraceMetadataPreservesCommandsAndLegacyStatus() throws {
+@Test func providerTraceMetadata() throws {
     let raw = Data(#"{"command":"clearLogs","token":"clear-test","futureOption":7}"#.utf8)
     let traced = try ProviderCommandEnvelope.tracedPayload(command: "clearLogs", requestID: "request-test", trace: true, payload: raw)
     let envelope = try JSONDecoder().decode(ProviderCommandEnvelope.self, from: traced)
@@ -113,7 +113,7 @@ import Testing
     #expect(try ProviderCommandEnvelope.tracedPayload(command: "legacy", requestID: "unused", trace: false, payload: opaque) == opaque)
 }
 
-@Test func providerEnvelopeRemainsCompatibleWithOlderMessages() throws {
+@Test func providerEnvelopeCompatibility() throws {
     let old = try JSONDecoder().decode(ProviderCommandEnvelope.self, from: Data(#"{"command":"logs"}"#.utf8))
     #expect(old.requestID == nil && old.trace == nil && old.token == nil)
     let data = try ProviderCommandEnvelope.tracedPayload(command: "logs", requestID: "poll-test", trace: false, payload: nil)

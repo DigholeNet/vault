@@ -183,6 +183,7 @@ pub trait EdgeCallbacks: Send + Sync {
     /// boundary far less often than one callback per packet, which matters
     /// because each FFI callback has a fixed cost.
     fn on_data_batch(&self, packets: Vec<Vec<u8>>);
+    /// Configure the TUN initially or when addresses change, never for same-IP reconnects.
     fn on_ip_assigned(&self, ipv4: String, ipv4_mask: String, ipv6: String, ipv6_prefixlen: i32);
     fn on_error(&self, error: String);
     /// Android `VpnService.protect(fd)` hook, invoked once per (re)connect.
@@ -254,6 +255,12 @@ impl ClientCallbacks for CallbackAdapter {
             );
         }
     }
+}
+
+#[derive(uniffi::Record, Clone, Default)]
+pub struct ConnectionStatus {
+    pub connected: bool,
+    pub generation: u64,
 }
 
 #[derive(uniffi::Record, Clone, Default)]
@@ -368,6 +375,27 @@ impl RustEdge {
         Ok(())
     }
 
+    /// Read readiness and transport generation in one core snapshot.
+    pub fn get_connection_status(&self) -> ConnectionStatus {
+        self.session
+            .lock()
+            .ok()
+            .and_then(|session| {
+                session.as_ref().map(|session| {
+                    let status = session.connection_status();
+                    ConnectionStatus {
+                        connected: status.connected,
+                        generation: status.generation,
+                    }
+                })
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.get_connection_status().connected
+    }
+
     pub fn get_traffic_stats(&self) -> TrafficStats {
         let Ok(guard) = self.session.lock() else {
             return TrafficStats::default();
@@ -376,16 +404,6 @@ impl RustEdge {
             .as_ref()
             .map(|s| s.traffic_stats().into())
             .unwrap_or_default()
-    }
-
-    /// Seconds since the last authenticated packet from the server; the
-    /// Apple provider uses this to publish its recovery state.
-    pub fn get_last_activity_age_secs(&self) -> u64 {
-        self.session
-            .lock()
-            .ok()
-            .and_then(|g| g.as_ref().map(|s| s.last_activity_age_secs()))
-            .unwrap_or(0)
     }
 
     /// Queues an outgoing packet for the tunnel.
@@ -474,7 +492,7 @@ mod tests {
             if self.release.lock().unwrap().recv().unwrap() {
                 let edge = self.edge.lock().unwrap().upgrade().unwrap();
                 let _ = edge.get_traffic_stats();
-                let _ = edge.get_last_activity_age_secs();
+                let _ = edge.is_connected();
                 assert!(matches!(
                     edge.write_data(vec![1]),
                     Err(VpnError::NotConnected)
