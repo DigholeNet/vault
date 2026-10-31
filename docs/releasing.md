@@ -34,6 +34,10 @@ metadata declares libc6/libgcc dependencies even for local musl packages.
 Validate each package on the intended Debian/Ubuntu host; do not assume the
 local script reproduces CI binaries byte for byte.
 
+Release CI writes each Debian package into a runner temporary directory outside
+the Cargo cache and uploads only that matrix component's package. Cached debs
+from previous builds are not collected as release artifacts.
+
 ## Android version-code policy
 
 Local packaging and release CI share the encoder in `scripts/package-android.sh`.
@@ -123,6 +127,12 @@ The script fails fast with a clear error when neither is set.
   The names are referenced by `PROVISIONING_PROFILE_SPECIFIER` in the
   project and by the `provisioningProfiles` mapping in
   `scripts/apple/ExportOptions-developerid.plist`.
+
+  Forks must update both project profile specifiers and the export plist's
+  Bundle ID/profile-name mapping to match their own identifiers and installed
+  profiles. A custom export plist can be selected with `MACOS_EXPORT_OPTIONS`.
+  Setting that variable to empty only skips export; the archive still uses
+  Developer ID signing. Use Xcode's Debug configuration for development signing.
 
 ### Apple signing in CI
 

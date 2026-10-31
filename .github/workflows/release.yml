@@ -94,13 +94,16 @@ jobs:
       - name: Build deb package
         run: |
           scripts/package-linux.sh --manpages-only
-          cargo deb -p ${{ matrix.package }} --locked
+          # Keep release artifacts outside the cached target directory.
+          mkdir -p "$RUNNER_TEMP/deb"
+          cargo deb -p ${{ matrix.package }} --locked --output "$RUNNER_TEMP/deb/"
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v6
         with:
           name: deb-${{ matrix.package }}
-          path: target/debian/*.deb
+          path: ${{ runner.temp }}/deb/${{ matrix.package }}_*.deb
+          if-no-files-found: error
 
   android-apk:
     needs: [version-gate, rust-checks, android-checks, apple-checks]

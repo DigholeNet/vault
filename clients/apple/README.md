@@ -130,6 +130,8 @@ Build and test:
 
 ```bash
 # Generate the Rust XCFramework and UniFFI Swift bindings after cloning or core changes.
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios \
+  aarch64-apple-darwin x86_64-apple-darwin
 VaultCore/Scripts/build-xcframework.sh
 
 # Unsigned builds; choose an installed simulator for UI tests.
@@ -173,6 +175,17 @@ For a fork, change `APP_BUNDLE_ID_PREFIX` and `APP_GROUP_ID` in
 `Config/Shared.xcconfig` to identifiers registered to your team, and supply your
 own provisioning/export profiles. Bundle IDs, entitlements and Mach service names
 derive from those values.
+
+For macOS Release packaging, also update both `PROVISIONING_PROFILE_SPECIFIER`
+values in `Vault.xcodeproj/project.pbxproj` to your installed Developer ID
+profile names (app and system extension). In
+`scripts/apple/ExportOptions-developerid.plist`, replace both Bundle ID keys
+and profile-name values in `provisioningProfiles` to match. Alternatively,
+pass a custom plist through `MACOS_EXPORT_OPTIONS`; the project's profile
+names still need to match your installed profiles.
+
+The packaging script uses macOS Release signing and requires Developer ID.
+For a development-signed macOS app, use the Xcode Debug configuration.
 
 The iOS provider is an embedded app extension; macOS uses a system extension.
 On macOS, install the signed app in `/Applications` and approve the extension in

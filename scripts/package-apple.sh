@@ -5,9 +5,9 @@
 # Prerequisites:
 #   - Full Xcode (iOS SDK); if xcode-select points at the Command Line
 #     Tools, DEVELOPER_DIR is set automatically
-#   - Apple signing identities in the keychain (Apple Development suffices
-#     for development-signed artifacts)
-#   - Rust Apple targets (see rust-toolchain.toml)
+#   - Apple Distribution (default iOS export) and Developer ID Application
+#     (macOS Release archive), with matching provisioning profiles
+#   - Rust Apple targets (see clients/apple/README.md, Build & test)
 #
 # Usage: TEAM_ID=<your-team-id> scripts/package-apple.sh
 #
@@ -24,8 +24,8 @@
 #                         development-signed build)
 #   MACOS_EXPORT_OPTIONS  path to an exportOptions plist for macOS; the app
 #                         is re-signed from the archive with it (default:
-#                         ExportOptions-developerid.plist; set to empty for
-#                         a development-signed app zipped from the archive)
+#                         ExportOptions-developerid.plist; empty skips export
+#                         and zips the Developer ID-signed archive app)
 #   NOTARY_PROFILE        notarytool keychain profile used to notarize and
 #                         staple the macOS app (default: vault-notary;
 #                         set to empty to skip notarization)
@@ -167,9 +167,9 @@ xcodebuild -project "$APPLE_DIR/Vault.xcodeproj" \
     "${XCB_VERSION[@]}" \
     archive
 
-# With MACOS_EXPORT_OPTIONS set (the default), the app is re-signed from the
-# archive (Developer ID) as notarization and Gatekeeper require; with it set
-# to empty, the development-signed .app is taken straight from the archive.
+# The Release archive already uses Developer ID signing. Export re-signs it
+# with the selected export options; an empty MACOS_EXPORT_OPTIONS packages
+# the archive app directly and does not switch to development signing.
 MACOS_APP="$BUILD_DIR/Vault-macOS.xcarchive/Products/Applications/Vault.app"
 if [[ -n "${MACOS_EXPORT_OPTIONS:-}" ]]; then
     echo "==> Exporting macOS app (re-signing)"

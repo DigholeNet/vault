@@ -183,9 +183,21 @@ Fields:
   unique password (SPAKE2 security depends on its entropy)
 - `port`: UDP port for edge client connections
 - `iface`: name of the TUN device to create
-- `ipv4`: IPv4 pool in CIDR notation (network address, not interface IP); the
+- `ipv4`: optional IPv4 pool in CIDR notation (network address, not interface IP); the
   server takes the first pool address for its own TUN device
 - `ipv6`: IPv6 pool in CIDR notation (optional)
+
+Configure at least one of `ipv4` or `ipv6`. For an IPv6-only tunnel, omit
+`ipv4`:
+
+```toml
+password = "change-me-to-a-strong-password"
+port = 9527
+iface = "vpn"
+ipv6 = "fd00::/96"
+```
+
+The server needs working IPv6 egress for clients to reach IPv6 internet targets.
 
 Command line usage:
 
@@ -218,6 +230,11 @@ The project includes systemd unit files:
 ```bash
 # Install a locally built package (adjust the filename to your build)
 dpkg -i target/debian/supernode_0.1.0-1_amd64.deb
+
+# Create the configuration on a fresh installation. Set a strong password
+# and review the address pools before starting the service.
+install -m 600 /etc/vault/supernode.toml.example /etc/vault/supernode.toml
+sudoedit /etc/vault/supernode.toml
 
 # Start the service and enable auto-start
 systemctl enable --now supernode

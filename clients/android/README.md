@@ -211,7 +211,7 @@ Code style: Kotlin coding conventions, 4-space indentation, max line length
 
 - [Shared diagnostics](../../docs/diagnostics-engine.md) — workflow, transport, trust and verification
 - [Protocol specification](../../docs/protocol.md) — wire format, handshake, encryption
-- [Performance measurements](../../docs/performance.md) — indicative benchmarks
+- [Performance](../../docs/performance.md) — protocol costs, timers and measurement guidance
 - [Releasing](../../docs/releasing.md) — release process and signing keys
 - [Changelog](../../CHANGELOG.md) — version history and release notes
 - [Privacy Policy](../../PRIVACY.md) — how we handle your data

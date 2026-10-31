@@ -189,6 +189,8 @@ Debug builds need no signing keys and coexist with a release-build app
 artifacts; build them once after cloning:
 
 ```bash
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios \
+  aarch64-apple-darwin x86_64-apple-darwin
 cd clients/apple && VaultCore/Scripts/build-xcframework.sh && open Vault.xcodeproj
 ```
 
