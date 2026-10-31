@@ -3,7 +3,6 @@ import SwiftUI
 
 struct MacosAboutView: View {
     @EnvironmentObject var languageManager: LanguageManager
-    @State private var showLicenses = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,8 +26,6 @@ struct MacosAboutView: View {
             }
             .font(.system(size: 14))
             .padding(.bottom, 16)
-            Button(languageManager.tr("Open-source licenses")) { showLicenses = true }
-                .sheet(isPresented: $showLicenses) { LicenseView().environmentObject(languageManager) }
             Text(languageManager.tr("A secure VPN client for cross-regional connectivity."))
                 .font(.system(size: 14))
                 .fixedSize(horizontal: false, vertical: true)
@@ -39,7 +36,7 @@ struct MacosAboutView: View {
         }
         .multilineTextAlignment(.center)
         .padding(32)
-        .frame(width: 420, height: 480)
+        .frame(width: 420, height: 440)
     }
 }
 

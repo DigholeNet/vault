@@ -24,8 +24,7 @@ macOS keyboard shortcuts: `⌘,` Settings, `⌘1`–`⌘4` Settings sections, `�
 `⌘W` Close, `⌘Return` Connect/Disconnect, `⌘⇧D` Diagnostics, `⌘Q` Quit.
 Tab / Shift-Tab moves between controls; Space / Return activates an action.
 
-About includes an offline Open-source licenses sheet with the bundled project
-LICENSE and NOTICE.
+Application bundles include the project LICENSE and NOTICE.
 
 ## DNS configuration
 

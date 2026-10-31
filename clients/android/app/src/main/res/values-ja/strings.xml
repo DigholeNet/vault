@@ -111,6 +111,4 @@
 <string name="check_ping">Ping · IPv4</string>
 <string name="check_ping6">Ping · IPv6</string>
 <string name="ping_note">Ping は参考情報です。ICMP が遮断される場合があり、無応答だけでは VPN の障害とは判断できません。平均 RTT は応答のみを含みます。</string>
-    <string name="open_source_licenses">オープンソースライセンス</string>
-    <string name="license_unavailable">ライセンス情報を読み込めません。</string>
 </resources>

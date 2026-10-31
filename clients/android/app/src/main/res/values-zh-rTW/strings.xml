@@ -111,6 +111,4 @@
 <string name="check_ping">Ping · IPv4</string>
 <string name="check_ping6">Ping · IPv6</string>
 <string name="ping_note">Ping 僅供參考。ICMP 可能被過濾，無回應不代表 VPN 故障。平均 RTT 僅計算成功回覆。</string>
-    <string name="open_source_licenses">開源授權</string>
-    <string name="license_unavailable">授權資訊暫時無法使用。</string>
 </resources>

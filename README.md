@@ -236,6 +236,6 @@ release workflow. Release mechanics, signing keys, and provisioning profiles:
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Application bundles include LICENSE and NOTICE
-under About → Open-source licenses. Debian packages include the project license
+MIT — see [LICENSE](LICENSE). Application bundles include LICENSE and NOTICE.
+Debian packages include the project license
 in their copyright file and NOTICE under `/usr/share/doc/<package>/`.

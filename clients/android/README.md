@@ -118,8 +118,7 @@ Debug builds need no signing keys and install alongside a release-build app
 `applicationId` in `app/build.gradle.kts` and configure release signing —
 see [docs/releasing.md](../../docs/releasing.md).
 
-The About tab provides offline Open-source licenses from the bundled LICENSE
-and NOTICE files.
+The APK includes the project LICENSE and NOTICE files.
 
 ## Configuration
 

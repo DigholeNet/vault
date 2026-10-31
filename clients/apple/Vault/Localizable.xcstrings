@@ -1,26 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "Open-source licenses" : {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "开源许可"
-          }
-        }
-      }
-    },
-    "License information unavailable." : {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "许可信息暂不可用。"
-          }
-        }
-      }
-    },
     "IPv4 DNS" : {
       "localizations": {
         "zh-Hans": {

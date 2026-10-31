@@ -31,7 +31,7 @@ release. A dated version section will be added when that release is published.
 - Rust, Android and Apple CI checks required before release packaging, parser fuzz targets and isolated Linux network tests
 - Single-stack-aware shared diagnostics with bypass detection for either unassigned address family
 - Shared Android release-version encoding with ordered alpha, beta, rc and final version codes
-- Offline license notices in mobile/desktop About pages and packaged LICENSE/NOTICE resources
+- Packaged LICENSE/NOTICE resources
 - Explicit manpage generation for Linux packaging, independent of Cargo caches
 - Contributor, security, privacy, protocol, diagnostics and release documentation
 

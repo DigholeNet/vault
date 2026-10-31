@@ -111,6 +111,4 @@
 <string name="check_ping">Ping · IPv4</string>
 <string name="check_ping6">Ping · IPv6</string>
 <string name="ping_note">Ping is informational. ICMP may be filtered; no reply alone does not mean the VPN is broken. Average RTT includes replies only.</string>
-    <string name="open_source_licenses">Open-source licenses</string>
-    <string name="license_unavailable">License information unavailable.</string>
 </resources>

@@ -111,6 +111,4 @@
 <string name="check_ping">Ping · IPv4</string>
 <string name="check_ping6">Ping · IPv6</string>
 <string name="ping_note">Ping es informativo. ICMP puede estar filtrado; la falta de respuesta no implica un fallo de VPN. El RTT medio incluye solo respuestas.</string>
-    <string name="open_source_licenses">Licencias de código abierto</string>
-    <string name="license_unavailable">Información de licencias no disponible.</string>
 </resources>
