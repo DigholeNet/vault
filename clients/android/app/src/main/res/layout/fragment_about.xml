@@ -42,6 +42,13 @@
             android:textSize="14sp"
             android:textColor="?attr/colorPrimary"
             android:layout_marginBottom="16dp"/>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/action_licenses"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/open_source_licenses"
+            android:layout_marginBottom="16dp"/>
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

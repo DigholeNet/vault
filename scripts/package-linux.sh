@@ -14,12 +14,36 @@
 #   - asciidoctor (on macOS: brew install asciidoctor)
 #
 # Usage: scripts/package-linux.sh
+#        scripts/package-linux.sh --manpages-only
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT/dist"
 TARGET="x86_64-unknown-linux-musl"
+
+# Packaging owns these files explicitly; Cargo cache hits must not skip them.
+generate_manpages() {
+    command -v asciidoctor >/dev/null 2>&1 || {
+        echo "error: asciidoctor not found; install it before packaging" >&2
+        return 1
+    }
+    for component in clients/linux/edge supernode/supernode; do
+        local source="$ROOT/$component.adoc"
+        local output="$(dirname "$source")/target/$(basename "$component").1"
+        mkdir -p "$(dirname "$output")"
+        asciidoctor -b manpage -o "$output" "$source"
+        gzip -f "$output"
+    done
+}
+
+if [[ "${1:-}" == --manpages-only && $# == 1 ]]; then
+    generate_manpages
+    exit
+elif (($#)); then
+    echo "Usage: $0 [--manpages-only]" >&2
+    exit 1
+fi
 
 if ! command -v cargo-deb >/dev/null 2>&1; then
     echo "error: cargo-deb not found; install with: cargo install cargo-deb" >&2
@@ -46,6 +70,7 @@ done
 
 cd "$ROOT"
 mkdir -p "$DIST_DIR"
+generate_manpages
 for pkg in edge supernode; do
     echo "==> Building deb: $pkg ($TARGET)"
     cargo zigbuild -p "$pkg" --release --target "$TARGET" --locked

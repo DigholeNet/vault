@@ -112,7 +112,7 @@ class DiagnosticsFragment : Fragment() {
         }
         val rows = root.findViewById<LinearLayout>(R.id.diagnosticRows)
         rows.removeAllViews()
-        labels.forEach { (stage, label) ->
+        labels.filter { snapshot == null || it.key in snapshot.plannedChecks }.forEach { (stage, label) ->
             val check = snapshot?.checks?.firstOrNull { it.stage == stage }
             val active = state.running && snapshot?.activeStage == stage && check == null
             val summary = when {

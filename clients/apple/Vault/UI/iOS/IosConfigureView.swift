@@ -113,14 +113,23 @@ struct IosConfigureView: View {
                     HStack {
                         Image(systemName: "network")
                         TextField(
-                            languageManager.tr("DNS"), text: $draft.dns,
-                            prompt: Text(languageManager.tr("DNS Server"))
+                            languageManager.tr("IPv4 DNS"),
+                            text: $draft.dnsIpv4,
+                            prompt: Text("1.1.1.1, 8.8.8.8")
                         )
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    }
+                    HStack {
+                        Image(systemName: "network")
+                        TextField(
+                            languageManager.tr("IPv6 DNS"),
+                            text: $draft.dnsIpv6,
+                            prompt: Text("2001:4860:4860::8888, 2001:4860:4860::8844")
+                        )
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
                     }
                 } footer: {
-                    Text(languageManager.tr("DNS server address separated by comma."))
+                    Text(languageManager.tr("Leave empty for defaults. Only assigned tunnel families are used."))
                 }
 
                 Section {

@@ -15,7 +15,9 @@ internal object ConfigKeys {
     val PROBE_DOMAINS = stringPreferencesKey("probe_domains")
     val HOST = stringPreferencesKey("host")
     val PORT = intPreferencesKey("port")
-    val DNS = stringPreferencesKey("dns")
+    val DNS = stringPreferencesKey("dns") // Legacy combined field, removed after migration.
+    val DNS_IPV4 = stringPreferencesKey("dns_ipv4")
+    val DNS_IPV6 = stringPreferencesKey("dns_ipv6")
     val ENCRYPTED_PASSWORD = stringPreferencesKey("password_encrypted")
     val PASSWORD = stringPreferencesKey("password")
     val PASSWORD_FALLBACK = booleanPreferencesKey("password_fallback")
@@ -44,10 +46,12 @@ internal class VaultConfigStore(
             // Migration and fallback recovery run under the same transaction
             // as reads/writes. A failed disk commit leaves the old record intact.
             if (encrypted == null && password != null) storePassword(prefs, password)
+            migrateDns(prefs)
             config = VaultConfig(
                 host = prefs[ConfigKeys.HOST] ?: "",
                 port = prefs[ConfigKeys.PORT] ?: VaultConfig().port,
-                dns = prefs[ConfigKeys.DNS] ?: VaultConfig().dns,
+                dnsIpv4 = prefs[ConfigKeys.DNS_IPV4].orEmpty(),
+                dnsIpv6 = prefs[ConfigKeys.DNS_IPV6].orEmpty(),
                 mtu = prefs[ConfigKeys.MTU].orEmpty(),
                 probeDomains = prefs[ConfigKeys.PROBE_DOMAINS].orEmpty(),
                 password = password.orEmpty()
@@ -62,11 +66,21 @@ internal class VaultConfigStore(
             storePassword(prefs, config.password)
             prefs[ConfigKeys.HOST] = config.host
             prefs[ConfigKeys.PORT] = config.port
-            prefs[ConfigKeys.DNS] = config.dns
+            prefs[ConfigKeys.DNS_IPV4] = config.dnsIpv4
+            prefs[ConfigKeys.DNS_IPV6] = config.dnsIpv6
+            prefs.remove(ConfigKeys.DNS)
             prefs[ConfigKeys.MTU] = config.mtu
             prefs[ConfigKeys.PROBE_DOMAINS] = config.probeDomains
         }
         clearLegacyPassword()
+    }
+
+    private fun migrateDns(prefs: MutablePreferences) {
+        val legacy = prefs[ConfigKeys.DNS] ?: return
+        val (ipv4, ipv6) = splitLegacyDns(legacy)
+        if (prefs[ConfigKeys.DNS_IPV4] == null) prefs[ConfigKeys.DNS_IPV4] = ipv4
+        if (prefs[ConfigKeys.DNS_IPV6] == null) prefs[ConfigKeys.DNS_IPV6] = ipv6
+        prefs.remove(ConfigKeys.DNS)
     }
 
     @Suppress("TooGenericExceptionCaught")

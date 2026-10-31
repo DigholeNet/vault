@@ -1,6 +1,76 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Open-source licenses" : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开源许可"
+          }
+        }
+      }
+    },
+    "License information unavailable." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "许可信息暂不可用。"
+          }
+        }
+      }
+    },
+    "IPv4 DNS" : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "IPv4 DNS"
+          }
+        }
+      }
+    },
+    "IPv6 DNS" : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "IPv6 DNS"
+          }
+        }
+      }
+    },
+    "Leave empty for defaults. Only assigned tunnel families are used." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "留空使用默认值，仅应用隧道已分配的地址族。"
+          }
+        }
+      }
+    },
+    "Enter up to 4 IPv4 DNS addresses, separated by commas." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入最多 4 个 IPv4 DNS 地址，以逗号分隔。"
+          }
+        }
+      }
+    },
+    "Enter up to 4 IPv6 DNS addresses, separated by commas." : {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入最多 4 个 IPv6 DNS 地址，以逗号分隔。"
+          }
+        }
+      }
+    },
     "Version %@ (%@)" : {
       "localizations" : {
         "zh-Hans" : {
@@ -581,12 +651,12 @@
         }
       }
     },
-    "Enter domain names separated by commas, without URLs." : {
+    "Enter up to 32 domain names, separated by commas, without URLs." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请输入域名，多个域名用逗号分隔，不要输入 URL。"
+            "value" : "请输入最多 32 个域名，以逗号分隔，不含 URL。"
           }
         }
       }

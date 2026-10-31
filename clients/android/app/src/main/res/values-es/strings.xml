@@ -34,8 +34,8 @@
     <string name="port_default">9527</string>
     <string name="password">Contraseña</string>
     <string name="password_hint">Ingresa contraseña</string>
-    <string name="dns_servers">Servidores DNS (separados por coma)</string>
-    <string name="dns_default">1.1.1.1,8.8.8.8</string>
+    <string name="dns_ipv4_servers">DNS IPv4 (separados por coma)</string>
+    <string name="dns_ipv6_servers">DNS IPv6 (separados por coma)</string>
     <string name="error_host_required">El servidor es requerido</string>
     <string name="error_port_invalid">Número de puerto inválido</string>
     <string name="error_password_required">La contraseña es requerida</string>
@@ -66,13 +66,15 @@
 <string name="device_id">ID del dispositivo</string>
 <string name="mtu">MTU</string>
 <string name="mtu_help">1280–1427. Vacío para automático.</string>
-<string name="dns_help">Direcciones IP DNS separadas por comas. Vacío para valores predeterminados.</string>
+<string name="dns_ipv4_help">Vacío para 1.1.1.1,8.8.8.8. Se usa si el túnel tiene IPv4.</string>
+    <string name="dns_ipv6_help">Vacío para Google DNS: 2001:4860:4860::8888,2001:4860:4860::8844. Se usa si el túnel tiene IPv6.</string>
 <string name="probe_domains">Dominios de prueba</string>
 <string name="probe_help">Dominios separados por comas. Vacío para valores predeterminados.</string>
 <string name="error_host_invalid">Introduce una IP o nombre de servidor sin esquema URL.</string>
 <string name="error_mtu">MTU entre 1280 y 1427, o vacío para automático.</string>
-<string name="error_dns">Introduce IP DNS válidas separadas por comas.</string>
-<string name="error_probe">Introduce dominios separados por comas, sin URL.</string>
+<string name="error_dns_ipv4">Introduce hasta 4 direcciones DNS IPv4 separadas por comas.</string>
+    <string name="error_dns_ipv6">Introduce hasta 4 direcciones DNS IPv6 separadas por comas.</string>
+<string name="error_probe">Introduce hasta 32 dominios válidos separados por comas, sin URL.</string>
 <string name="config_saved_next">Guardado. Los cambios se aplicarán en la próxima conexión.</string>
 <string name="save_hint">Guarda los cambios antes de conectar.</string>
 <string name="config_load_failed">No se pudo cargar la configuración. Vuelve a abrir esta página.</string>
@@ -109,4 +111,6 @@
 <string name="check_ping">Ping · IPv4</string>
 <string name="check_ping6">Ping · IPv6</string>
 <string name="ping_note">Ping es informativo. ICMP puede estar filtrado; la falta de respuesta no implica un fallo de VPN. El RTT medio incluye solo respuestas.</string>
+    <string name="open_source_licenses">Licencias de código abierto</string>
+    <string name="license_unavailable">Información de licencias no disponible.</string>
 </resources>

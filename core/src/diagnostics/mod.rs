@@ -232,6 +232,7 @@ pub struct Snapshot {
     pub active_stage: Option<Stage>,
     pub state: State,
     pub duration_ms: u64,
+    pub planned_checks: Vec<Stage>,
     pub checks: Vec<Check>,
     pub probes: Vec<Probe>,
     pub routes: RouteAssessment,
@@ -318,7 +319,12 @@ impl Engine {
             return Err(EngineError::InvalidConfig);
         }
         if config.dns_servers.is_empty() {
-            config.dns_servers.push("1.1.1.1".parse().unwrap());
+            let default = if config.tunnel_ipv4.is_none() && config.tunnel_ipv6.is_some() {
+                "2001:4860:4860::8888"
+            } else {
+                "1.1.1.1"
+            };
+            config.dns_servers.push(default.parse().unwrap());
         }
         Ok(Self {
             config,
@@ -365,6 +371,14 @@ impl Engine {
         }
         while self.phase < PHASES.len() {
             let stage = PHASES[self.phase];
+            if matches!(
+                stage,
+                Stage::Dns | Stage::Tcp | Stage::Https | Stage::Dns6 | Stage::Tcp6 | Stage::Https6
+            ) && !self.required_stage(stage)
+            {
+                self.phase += 1;
+                continue;
+            }
             if !self.initialized {
                 self.initialize(stage);
             }
@@ -535,16 +549,17 @@ impl Engine {
         let incomplete = self.cancelled
             || !self.routes.unavailable.is_empty()
             || REQUIRED_STAGES.iter().any(|stage| {
-                !self
-                    .checks
-                    .iter()
-                    .any(|c| c.stage == *stage && c.state != State::Incomplete)
+                self.required_stage(*stage)
+                    && !self
+                        .checks
+                        .iter()
+                        .any(|c| c.stage == *stage && c.state != State::Incomplete)
             });
         let failed = !self.routes.issues.is_empty()
             || self
                 .checks
                 .iter()
-                .any(|c| REQUIRED_STAGES.contains(&c.stage) && c.state == State::Failed);
+                .any(|c| self.required_stage(c.stage) && c.state == State::Failed);
         let state = if running || incomplete {
             State::Incomplete
         } else if failed {
@@ -560,6 +575,13 @@ impl Engine {
             active_stage: PHASES.get(self.phase).copied(),
             state,
             duration_ms: self.finished_ms.unwrap_or(self.now_ms) - self.started_ms,
+            planned_checks: PHASES
+                .iter()
+                .copied()
+                .filter(|stage| {
+                    self.required_stage(*stage) || matches!(stage, Stage::Ping | Stage::Ping6)
+                })
+                .collect(),
             checks: self.checks.clone(),
             probes: self.probes.clone(),
             routes: self.routes.clone(),
@@ -569,6 +591,15 @@ impl Engine {
                 .iter()
                 .map(|d| (d.clone(), self.domain_state(d)))
                 .collect(),
+        }
+    }
+
+    fn required_stage(&self, stage: Stage) -> bool {
+        match stage {
+            Stage::Dns | Stage::Tcp | Stage::Https => self.config.tunnel_ipv4.is_some(),
+            Stage::Dns6 | Stage::Tcp6 | Stage::Https6 => self.config.tunnel_ipv6.is_some(),
+            Stage::Application => true,
+            _ => false,
         }
     }
 
@@ -584,6 +615,9 @@ impl Engine {
         });
         let mut missing = false;
         for stage in REQUIRED_STAGES {
+            if !self.required_stage(stage) {
+                continue;
+            }
             if no_aaaa && matches!(stage, Stage::Tcp6 | Stage::Https6) {
                 continue;
             }
@@ -619,15 +653,12 @@ impl Engine {
         match stage {
             Stage::Route => self.queue.push_back((String::new(), Operation::Route)),
             Stage::Dns | Stage::Dns6 => {
-                if stage == Stage::Dns {
+                if stage == Stage::Dns || self.config.tunnel_ipv4.is_none() {
                     self.tunnel_started_ms = self.now_ms;
                 }
                 self.answers.clear();
                 self.selected.clear();
                 self.expected = self.config.domains.len();
-                if stage == Stage::Dns6 && self.config.tunnel_ipv6.is_none() {
-                    return;
-                }
                 for domain in &self.config.domains {
                     for server in &self.config.dns_servers {
                         self.queue.push_back((
@@ -818,20 +849,23 @@ pub fn assess_routes(
     ipv6: Option<IpAddr>,
 ) -> RouteAssessment {
     let mut result = RouteAssessment::default();
-    if let Some(assigned4) = config.tunnel_ipv4 {
-        match ipv4 {
-            Some(ip) if ip != IpAddr::V4(assigned4) => result
-                .issues
-                .push(format!("IPv4 route selects {ip}; expected {assigned4}")),
-            None => result
-                .unavailable
-                .push("IPv4 default route unavailable".into()),
-            _ => {}
-        }
-    } else {
+    if config.tunnel_ipv4.is_none() && config.tunnel_ipv6.is_none() {
         result
             .unavailable
-            .push("Current tunnel IPv4 address unavailable".into());
+            .push("Current tunnel addresses unavailable".into());
+        return result;
+    }
+    match (config.tunnel_ipv4, ipv4) {
+        (Some(expected), Some(actual)) if IpAddr::V4(expected) != actual => result
+            .issues
+            .push(format!("IPv4 route selects {actual}; expected {expected}")),
+        (Some(_), None) => result
+            .unavailable
+            .push("IPv4 default route unavailable".into()),
+        (None, Some(actual)) => result.issues.push(format!(
+            "IPv4 route selects {actual} without a tunnel IPv4 assignment; possible bypass"
+        )),
+        _ => {}
     }
     match (config.tunnel_ipv6, ipv6) {
         (Some(expected), Some(actual)) if IpAddr::V6(expected) != actual => result

@@ -44,9 +44,9 @@ final class ProviderDiagnostics {
         let cancellation = DiagnosticsCancellation()
         self.cancellation = cancellation
         self.runID = request.run
-        let ipv4 = current.ipv4.isEmpty ? nil : current.ipv4
+        let address = current.ipv4.isEmpty ? current.ipv6 : current.ipv4
         DispatchQueue.global(qos: .utility).async {
-            let response = RustDiagnostics.execute(request, tunnelIPv4: ipv4, cancellation: cancellation)
+            let response = RustDiagnostics.execute(request, tunnelAddress: address, cancellation: cancellation)
             DispatchQueue.main.async {
                 let valid = self.cancellation === cancellation && !cancellation.isCancelled
                     && context()?.isSameSession(as: current) == true

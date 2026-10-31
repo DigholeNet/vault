@@ -34,8 +34,8 @@
     <string name="port_default">9527</string>
     <string name="password">密码</string>
     <string name="password_hint">输入密码</string>
-    <string name="dns_servers">DNS 服务器（逗号分隔）</string>
-    <string name="dns_default">1.1.1.1,8.8.8.8</string>
+    <string name="dns_ipv4_servers">IPv4 DNS（逗号分隔）</string>
+    <string name="dns_ipv6_servers">IPv6 DNS（逗号分隔）</string>
     <string name="error_host_required">服务器地址不能为空</string>
     <string name="error_port_invalid">端口号无效</string>
     <string name="error_password_required">密码不能为空</string>
@@ -66,13 +66,15 @@
     <string name="device_id">设备 ID</string>
     <string name="mtu">MTU</string>
     <string name="mtu_help">1280–1427，留空表示自动。</string>
-    <string name="dns_help">DNS IP 地址以逗号分隔，留空使用默认值。</string>
+    <string name="dns_ipv4_help">留空使用 1.1.1.1,8.8.8.8。隧道分配 IPv4 时生效。</string>
+    <string name="dns_ipv6_help">留空使用 Google DNS：2001:4860:4860::8888,2001:4860:4860::8844。隧道分配 IPv6 时生效。</string>
     <string name="probe_domains">探测域名</string>
     <string name="probe_help">域名以逗号分隔，留空使用默认值。</string>
     <string name="error_host_invalid">请输入服务器 IP 或域名，不要包含 URL 协议。</string>
     <string name="error_mtu">MTU 必须为 1280–1427，或留空自动设置。</string>
-    <string name="error_dns">请输入有效 DNS IP 地址，以逗号分隔。</string>
-    <string name="error_probe">请输入域名，以逗号分隔，不要包含 URL。</string>
+    <string name="error_dns_ipv4">请输入最多 4 个 IPv4 DNS 地址，以逗号分隔。</string>
+    <string name="error_dns_ipv6">请输入最多 4 个 IPv6 DNS 地址，以逗号分隔。</string>
+    <string name="error_probe">请输入最多 32 个有效域名，以逗号分隔，不含 URL。</string>
     <string name="config_saved_next">已保存，更改将在下次连接时生效。</string>
     <string name="save_hint">连接前请保存更改。</string>
     <string name="config_load_failed">无法读取配置，请重新打开此页重试。</string>
@@ -109,4 +111,6 @@
 <string name="check_ping">Ping · IPv4</string>
 <string name="check_ping6">Ping · IPv6</string>
 <string name="ping_note">Ping 仅供参考。ICMP 可能被过滤，无响应不代表 VPN 故障。平均 RTT 仅计算成功回复。</string>
+    <string name="open_source_licenses">开源许可</string>
+    <string name="license_unavailable">许可信息暂不可用。</string>
 </resources>

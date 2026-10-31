@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: write
+  checks: write
 
 env:
   ANDROID_USE_ANDROIDX: true
@@ -44,28 +45,28 @@ jobs:
         id: version
         run: |
           VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-          # Same versionCode derivation as scripts/package-android.sh:
-          # strip any pre-release suffix (e.g. 1.0.0-rc1 -> PATCH=0) so the
-          # arithmetic never sees a non-numeric component.
-          PATCH="${PATCH%%[!0-9]*}"
-          for part in MAJOR MINOR PATCH; do
-            if [[ ! "${!part}" =~ ^[0-9]+$ ]]; then
-              echo "Invalid version component $part='${!part}' in version '$VERSION'" >&2
-              exit 1
-            fi
-          done
-          VERSION_CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
-          # Pre-release versions (1.0.0-rc1) must sort below the final
-          # release so an installed rc APK can upgrade to it.
-          if [[ "$VERSION" == *-* && "$VERSION_CODE" -gt 1 ]]; then
-            VERSION_CODE=$((VERSION_CODE - 1))
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "All-platform releases require a numeric major.minor.patch version for Apple packaging." >&2
+            exit 1
           fi
+          VERSION_CODE="$(scripts/package-android.sh --version-code "$VERSION")"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
 
-  linux-packages:
+  rust-checks:
     needs: version-gate
+    uses: ./.github/workflows/rust.yml
+
+  android-checks:
+    needs: version-gate
+    uses: ./.github/workflows/android.yml
+
+  apple-checks:
+    needs: version-gate
+    uses: ./.github/workflows/apple.yml
+
+  linux-packages:
+    needs: [version-gate, rust-checks, android-checks, apple-checks]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -91,7 +92,9 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-release-
 
       - name: Build deb package
-        run: cargo deb -p ${{ matrix.package }} --locked
+        run: |
+          scripts/package-linux.sh --manpages-only
+          cargo deb -p ${{ matrix.package }} --locked
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v6
@@ -100,7 +103,7 @@ jobs:
           path: target/debian/*.deb
 
   android-apk:
-    needs: version-gate
+    needs: [version-gate, rust-checks, android-checks, apple-checks]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -174,13 +177,13 @@ jobs:
         run: rm -f app/build/signing/vault-release.keystore
 
   apple-packages:
-    needs: version-gate
+    needs: [version-gate, rust-checks, android-checks, apple-checks]
     runs-on: macos-latest
     steps:
       # Full history: scripts/package-apple.sh derives the build number from
-      # the git commit count; a shallow clone would reset it to 1 and stall
-      # system-extension upgrades (macOS only swaps a sysex whose bundle
-      # version is strictly higher).
+      # the git commit count. Full history avoids reusing the shallow-clone
+      # build identity; different version identifiers trigger our system
+      # extension replacement delegate.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -336,11 +339,29 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download all artifacts
+      - name: Download deb-edge release artifact
         uses: actions/download-artifact@v7
         with:
+          name: deb-edge
           path: dist
-          merge-multiple: true
+
+      - name: Download deb-supernode release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: deb-supernode
+          path: dist
+
+      - name: Download android-apk release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: android-apk
+          path: dist
+
+      - name: Download apple release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: apple
+          path: dist
 
       - name: Get version
         id: version
@@ -380,4 +401,3 @@ jobs:
           name: Vault ${{ steps.version.outputs.version }}
           files: dist/*
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}

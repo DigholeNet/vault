@@ -12,9 +12,15 @@ tunnel requests; its application and informational probes use default routing.
 Both cancel on session/network changes. No platform implements a second plan,
 protocol, retry loop or verdict calculation.
 
-Apple's UI/IPC adapter is consolidated in
-[`clients/apple/VaultCore/Sources/VaultCore/Diagnostics.swift`](../clients/apple/VaultCore/Sources/VaultCore/Diagnostics.swift). Android's adapter is in
-`DiagnosticsViewModel.kt`; the fragment only renders typed Rust snapshots.
+Apple's Rust adapter is in
+[`RustDiagnostics.swift`](../clients/apple/VaultCore/Sources/VaultCore/RustDiagnostics.swift);
+the app drives runs in [`DiagnosticsViewModel.swift`](../clients/apple/Vault/DiagnosticsViewModel.swift)
+and forwards provider operations through
+[`VpnManager+Diagnostics.swift`](../clients/apple/Vault/VpnManager+Diagnostics.swift)
+and [`ProviderDiagnostics.swift`](../clients/apple/TunnelProvider/ProviderDiagnostics.swift).
+Android's adapter is in
+[`DiagnosticsViewModel.kt`](../clients/android/app/src/main/java/net/dighole/vault/DiagnosticsViewModel.kt);
+the fragment only renders typed Rust snapshots.
 
 `DiagnosticTransport` owns DNS/UDP, TCP, ICMP, rustls handshakes, HTTP/1.1 and
 response validation. It uses synchronous sockets, not another async runtime.
@@ -40,7 +46,11 @@ fails the build instead of breaking shared-library loading on a phone.
 
 1. Create one engine per run using the **live** tunnel session ID and assigned
    addresses, configured resolvers and effective MTU. Empty domains/resolvers
-   select the shared defaults. Addresses are validated numerically.
+   select the shared defaults. Mobile settings accept up to four DNS addresses
+   per family and 32 probe domains; the engine accepts at most eight resolvers
+   and 32 distinct domains. An empty resolver list selects `1.1.1.1`, or
+   `2001:4860:4860::8888` for an IPv6-only tunnel; adapters normally supply
+   the effective configured resolvers. Addresses are validated numerically.
 2. Call `next_request()` on a background worker. Execute its operation through
    `DiagnosticTransport` in the correct process/network, outside the engine lock.
    Only one request may be outstanding per engine.
@@ -87,7 +97,8 @@ fallback to an unbound socket.
   TCP 4s and HTTPS 6s, capped by the remaining phase window.
 - DNS falls back through configured resolvers. TCP tries at most two addresses
   per domain; HTTPS uses the first successful TCP target.
-- Without a live tunnel IPv6 assignment, IPv6 checks remain unmeasured. Empty
+- Tunnel DNS/TCP/HTTPS checks run only for assigned address families. Checks
+  for an unassigned family are omitted rather than marked incomplete. Empty
   successful AAAA answers do not fabricate TCP/HTTPS probes. If no domains have
   IPv6 targets, the corresponding transport checks remain incomplete.
 - Optional gateway ICMP: two samples each at 64, min(1200, MTU), and MTU bytes;
@@ -112,13 +123,19 @@ binding is implemented in the Rust bridge.
 
 ## Result interpretation
 
-Seven required checks: DNS/TCP/HTTPS for both families and application HTTPS.
-All must have completed successfully, and route assessment must be available
-without mismatches, for the run to pass. Missing required work is incomplete;
+Required checks are DNS/TCP/HTTPS for each assigned tunnel address family,
+plus application HTTPS: four for a single-stack tunnel, seven for dual stack.
+Unassigned-family checks are omitted from the check list and domain verdicts.
+Snapshots include `planned_checks` for UI rows and progress; this includes the
+applicable tunnel checks, application HTTPS and two informational Ping checks.
+All required checks must complete successfully, and route assessment must be
+available without mismatches, for the run to pass. Missing required work is incomplete;
 explicit failures remain visible in checks and probes even when the overall
 state is incomplete. Route mismatch is a failure; missing live metadata is
-incomplete. IPv6 default routing without a tunnel IPv6 assignment is a possible
-bypass, never inferred from cached addresses.
+incomplete. A default route for an unassigned family (IPv4 or IPv6) is a possible
+bypass, never inferred from cached addresses. No live tunnel address in either
+family makes the route assessment incomplete. Informational application Ping
+may still probe both families and does not change the required-check verdict.
 
 DNS/TCP/HTTPS success counts domains, not candidate attempts. Failed candidates
 remain in details and timing samples but do not fail a domain if a retry

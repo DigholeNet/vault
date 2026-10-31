@@ -116,6 +116,10 @@ enum DiagnosticsPresentation {
     static let checkIDs = [
         "dns", "tcp", "https", "dns6", "tcp6", "https6", "application", "ping", "ping6"
     ]
+    static func visibleChecks(_ result: DiagnosticsResult?) -> [String] {
+        result?.snapshot?.plannedChecks.map { String(describing: $0) } ?? checkIDs
+    }
+
     static let pingCheckIDs = ["ping", "ping6"]
     static let pingNote =
         "Ping is informational. ICMP may be filtered; no reply alone does not mean the VPN is broken. RTT averages replies only."

@@ -52,6 +52,12 @@ MACOS_EXPORT_OPTIONS="${MACOS_EXPORT_OPTIONS-$ROOT/scripts/apple/ExportOptions-d
 NOTARY_PROFILE="${NOTARY_PROFILE-vault-notary}"
 TEAM_ID="${TEAM_ID:-}"
 
+VERSION="$(grep -m1 '^version = ' "$ROOT/Cargo.toml" | cut -d'"' -f2)"
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "error: Apple packaging requires a numeric major.minor.patch version; prerelease suffixes are not supported." >&2
+    exit 1
+fi
+
 # Fail fast with a clear message when no team is available: the committed
 # Shared.xcconfig ships with an empty TEAM_ID, so signing needs TEAM_ID
 # from the environment or from Config/Local.xcconfig (git-ignored).
@@ -73,14 +79,11 @@ if ! curl -sS -o /dev/null --connect-timeout 5 --max-time 10 \
     exit 1
 fi
 
-# Single version source: the workspace package version in the root
-# Cargo.toml; injected as MARKETING_VERSION into both archives.
-VERSION="$(grep -m1 '^version = ' "$ROOT/Cargo.toml" | cut -d'"' -f2)"
-# Monotonic build number: macOS only replaces an installed system extension
-# when the new bundle's version is higher, so a static CFBundleVersion would
-# keep the old (buggy) sysex running forever. Clean tree: git commit count;
-# dirty tree: append a timestamp so local test builds still bump the version
-# (14.20261013 > 14, and the next clean build 15 > 14.x).
+# Cargo supplies the marketing version. Git history and tracked local edits
+# supply the build identity. Different version identifiers trigger the system
+# extension replacement delegate; our delegate requests replacement.
+# Dirty builds append a minute timestamp. This is a development build identity,
+# not a promise of a globally monotonic counter across branches or machines.
 COMMITS="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
 if git -C "$ROOT" diff-index --quiet HEAD -- 2>/dev/null; then
     BUILD_NUMBER="$COMMITS"

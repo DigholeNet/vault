@@ -6,6 +6,7 @@ name: Apple checks
 # required signing secrets.
 
 on:
+  workflow_call:
   push:
     branches: [main, develop]
     paths:

@@ -19,7 +19,7 @@ enum ConfigurationError: Error {
 }
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
-    private var dns: [String] = ["1.1.1.1", "8.8.8.8"]
+    private var launchConfiguration: TunnelLaunchConfiguration?
     /// Domains the on-demand diagnostics suite probes; overridable from the
     /// app's configure page via the "probeDomains" provider configuration.
     private var probeDomains: [String] = []
@@ -162,7 +162,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let port = launch.port
         let password = launch.password
         let id = launch.peerID
-        dns = launch.dns
+        launchConfiguration = launch
         probeDomains = launch.probeDomains
         mtuCap = launch.mtuCap
 
@@ -413,6 +413,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         settingsTimeoutWorkItem?.cancel()
         settingsTimeoutWorkItem = nil
         tunnelSettings.reset()
+        launchConfiguration = nil
         let completion = pendingStart?.takeCompletion()
         pendingStart = nil
         releaseStart()
@@ -529,7 +530,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             mtu: TunnelNetworkSettings.mtu(
                 cap: mtuCap,
                 sessionID: sessionID
-            )
+            ),
+            dns: launchConfiguration?.effectiveDNS(ipv4: !ipv4.isEmpty, ipv6: !ipv6.isEmpty) ?? []
         )
         if let update = tunnelSettings.enqueue(configuration) { applySettings(update) }
     }
@@ -540,7 +542,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             configuration,
             remoteAddress: superNodeIp,
             candidates: serverCandidates,
-            dns: dns
+            dns: configuration.dns
         )
         Logger.network.noticeAndFile("[session:\(sessionID)] Applying tunnel settings revision=\(update.revision)")
         let token = sessionToken
@@ -603,7 +605,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             mask: configuration.mask,
             ipv6: configuration.ipv6.isEmpty ? nil : configuration.ipv6,
             mtu: configuration.mtu,
-            dns: dns,
+            dns: configuration.dns,
             domains: probeDomains,
             connectionGeneration: connection.generation
         )

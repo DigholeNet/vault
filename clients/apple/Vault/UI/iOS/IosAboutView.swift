@@ -3,6 +3,7 @@ import SwiftUI
 #if os(iOS)
 struct IosAboutView: View {
     @EnvironmentObject var languageManager: LanguageManager
+    @State private var showLicenses = false
 
     /// Read the icon files emitted from the existing AppIcon asset catalog.
     private var appIcon: UIImage? {
@@ -40,6 +41,8 @@ struct IosAboutView: View {
                     }
                     .font(.system(size: 14))
                     .padding(.bottom, 16)
+                    Button(languageManager.tr("Open-source licenses")) { showLicenses = true }
+                        .sheet(isPresented: $showLicenses) { LicenseView().environmentObject(languageManager) }
                     Text(languageManager.tr("A secure VPN client for cross-regional connectivity."))
                         .font(.system(size: 14))
                         .padding(.bottom, 16)

@@ -20,6 +20,22 @@ class SettingsValidationTest {
             assertFalse(it, SettingsValidation.dns(it))
         }
     }
+    @Test fun dnsFamilies() {
+        assertTrue(SettingsValidation.dns("", ipv6 = false))
+        assertTrue(SettingsValidation.dns("", ipv6 = true))
+        assertTrue(SettingsValidation.dns("1.1.1.1,8.8.8.8", ipv6 = false))
+        assertTrue(SettingsValidation.dns("2001:4860:4860::8888,2001:4860:4860::8844", ipv6 = true))
+        assertFalse(SettingsValidation.dns("1.1.1.1", ipv6 = true))
+        assertFalse(SettingsValidation.dns("2001:4860:4860::8888", ipv6 = false))
+        assertFalse(SettingsValidation.dns("1.1.1.1,2001:4860:4860::8888", ipv6 = false))
+        assertFalse(SettingsValidation.dns("example.com", ipv6 = true))
+    }
+    @Test fun listLimits() {
+        assertTrue(SettingsValidation.dns(List(4) { "1.1.1.1" }.joinToString(","), ipv6 = false))
+        assertFalse(SettingsValidation.dns(List(5) { "1.1.1.1" }.joinToString(","), ipv6 = false))
+        assertTrue(SettingsValidation.domains(List(32) { "d$it.example" }.joinToString(",")))
+        assertFalse(SettingsValidation.domains(List(33) { "d$it.example" }.joinToString(",")))
+    }
     @Test fun probeDomainsRejectMalformedLists() {
         assertTrue(SettingsValidation.domains("github.com, www.google.com"))
         assertTrue(SettingsValidation.domains(""))

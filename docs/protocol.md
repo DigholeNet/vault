@@ -7,6 +7,20 @@ The wire protocol is implemented once in `vault-core`
 schemas). All clients and the supernode share this implementation. This
 document is a prose overview; the source is authoritative.
 
+## Protocol compatibility
+
+The current protocol version is `1` (`vault_core::PROTOCOL_VERSION`).
+The supernode accepts only an exactly matching request version; it
+drops unsupported-version requests without establishing a session. There is
+no version negotiation or legacy-protocol fallback.
+
+Changes within one wire version must preserve framing, authentication and
+message semantics. Breaking changes must increment `PROTOCOL_VERSION`, update
+this document and the changelog, and coordinate client/server upgrades. Rebuild
+and deploy all affected peers for such an upgrade; the current handshake does
+not support rolling upgrades across wire versions. Optional protobuf fields
+may evolve without a bump only when omitted/default values remain compatible.
+
 ## Packet types
 
 Every UDP datagram starts with a single type byte:

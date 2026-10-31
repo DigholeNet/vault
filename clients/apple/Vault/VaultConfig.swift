@@ -20,7 +20,8 @@ class VaultConfig: ObservableObject {
     @AppStorage var id: String
     @AppStorage var host: String
     @AppStorage var port: Int
-    @AppStorage var dns: String
+    @AppStorage var dnsIpv4: String
+    @AppStorage var dnsIpv6: String
     /// Comma-separated domains for the on-demand diagnostics probes; empty
     /// selects the Rust diagnostic engine's defaults.
     @AppStorage var probeDomains: String
@@ -41,7 +42,8 @@ class VaultConfig: ObservableObject {
         defaults.removeObject(forKey: "ip")
         _host = AppStorage(wrappedValue: "", "host", store: defaults)
         _port = AppStorage(wrappedValue: 9527, "port", store: defaults)
-        _dns = AppStorage(wrappedValue: "", "dns", store: defaults)
+        _dnsIpv4 = AppStorage(wrappedValue: "", "dnsIpv4", store: defaults)
+        _dnsIpv6 = AppStorage(wrappedValue: "", "dnsIpv6", store: defaults)
         _probeDomains = AppStorage(wrappedValue: "", "probeDomains", store: defaults)
         _mtu = AppStorage(wrappedValue: "", "mtu", store: defaults)
         self.passwords = passwords ?? PasswordPersistence(
@@ -107,7 +109,8 @@ class VaultConfig: ObservableObject {
         draft.host = host
         draft.port = String(port)
         draft.password = password
-        draft.dns = dns
+        draft.dnsIpv4 = dnsIpv4
+        draft.dnsIpv6 = dnsIpv6
         draft.mtu = mtu
         draft.probeDomains = probeDomains
         return draft
@@ -123,7 +126,10 @@ class VaultConfig: ObservableObject {
                 return passwordStorageError ?? "Password could not be saved or loaded. Please try again."
             }
         }
-        if section == .all || section == .network { dns = draft.dns }
+        if section == .all || section == .network {
+            dnsIpv4 = draft.dnsIpv4
+            dnsIpv6 = draft.dnsIpv6
+        }
         if section == .all || section == .advanced {
             mtu = draft.mtu
             probeDomains = draft.probeDomains
@@ -140,7 +146,8 @@ struct ConnectionDraft: Equatable, Sendable {
     var host = ""
     var port = ""
     var password = ""
-    var dns = ""
+    var dnsIpv4 = ""
+    var dnsIpv6 = ""
     var mtu = ""
     var probeDomains = ""
 
@@ -149,7 +156,8 @@ struct ConnectionDraft: Equatable, Sendable {
     var normalized: Self {
         var draft = self
         draft.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        draft.dns = dns.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.dnsIpv4 = dnsIpv4.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.dnsIpv6 = dnsIpv6.trimmingCharacters(in: .whitespacesAndNewlines)
         draft.mtu = mtu.trimmingCharacters(in: .whitespacesAndNewlines)
         draft.probeDomains = probeDomains.trimmingCharacters(in: .whitespacesAndNewlines)
         return draft
@@ -166,12 +174,17 @@ struct ConnectionDraft: Equatable, Sendable {
             guard !password.isEmpty else { return "Enter the server password." }
         }
         if section == .all || section == .network {
-            guard SettingsValidation.isValidDNSList(dns) else { return "Enter valid DNS IP addresses, separated by commas." }
+            guard SettingsValidation.isValidDNSList(dnsIpv4, ipv6: false) else {
+                return "Enter up to 4 IPv4 DNS addresses, separated by commas."
+            }
+            guard SettingsValidation.isValidDNSList(dnsIpv6, ipv6: true) else {
+                return "Enter up to 4 IPv6 DNS addresses, separated by commas."
+            }
         }
         if section == .all || section == .advanced {
             guard SettingsValidation.isValidMTU(mtu) else { return "MTU must be between 1280 and 1427, or empty for automatic." }
             guard SettingsValidation.isValidProbeList(probeDomains) else {
-                return "Enter domain names separated by commas, without URLs."
+                return "Enter up to 32 domain names, separated by commas, without URLs."
             }
         }
         return nil
@@ -185,7 +198,7 @@ extension TunnelLaunchConfiguration {
         guard let port = UInt16(draft.port), port > 0 else { throw TunnelLaunchConfiguration.InvalidField.port }
         try self.init(providerConfiguration: [
             "host": draft.host, "port": port, "password": draft.password, "id": Data(bytes),
-            "dns": draft.dns, "probeDomains": draft.probeDomains, "mtu": draft.mtu
+            "dnsIpv4": draft.dnsIpv4, "dnsIpv6": draft.dnsIpv6, "probeDomains": draft.probeDomains, "mtu": draft.mtu
         ], clearLogsToken: clearLogsToken)
     }
 }

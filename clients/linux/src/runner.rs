@@ -62,12 +62,13 @@ fn run_inner(
     // gateways. A family without a default route contributes no exit; its
     // candidates simply lose the core's handshake race.
     let physical_exits = Arc::new(Mutex::new(probe_exits(&hosts, &tun)?));
-    let mut dns = DnsGuard::setup_for_interface(
-        Path::new(RESOLV_CONF_PATH),
-        Path::new(RESOLV_CONF_BACKUP_PATH),
-        config.get_dns(),
-        &tun,
-    )?;
+    // DNS is selected only after the handshake assigns tunnel addresses.
+    let mut dns: Option<DnsGuard> = None;
+    let dns_v4 = config.dns_for(true, false);
+    let dns_v6 = config.dns_for(false, true);
+    let dns_dual = config.dns_for(true, true);
+    let assigned_dns = Arc::new(Mutex::new(None::<Vec<String>>));
+    let assignment_dns = assigned_dns.clone();
     let routes = RouteGuard::new(
         config.get_iface(),
         hosts.iter().map(|addr| addr.ip()).collect(),
@@ -86,6 +87,11 @@ fn run_inner(
         physical_exits.clone(),
         hosts.clone(),
         move |exits, device, _, ipv4, ipv6| {
+            // Serialize assignment routes with DNS application. A poll must not
+            // apply an old list after a newer assignment changed the routes.
+            let mut selected = assignment_dns
+                .lock()
+                .map_err(|_| anyhow::anyhow!("DNS state lock poisoned"))?;
             let mut routes = assignment_routes
                 .lock()
                 .map_err(|_| anyhow::anyhow!("route state lock poisoned"))?;
@@ -95,6 +101,13 @@ fn run_inner(
                 }
                 return Err(e);
             }
+            let servers = match (ipv4.is_some(), ipv6.is_some()) {
+                (true, true) => &dns_dual,
+                (true, false) => &dns_v4,
+                (false, true) => &dns_v6,
+                (false, false) => anyhow::bail!("no tunnel address assigned"),
+            };
+            *selected = Some(servers.clone());
             Ok(())
         },
     )?;
@@ -161,7 +174,13 @@ fn run_inner(
             // handshake. Keep checking while active so that ordering does
             // not leave the restored tunnel using the physical network DNS.
             if network_available && edge.is_active() {
-                match dns.ensure_applied() {
+                let servers = assigned_dns
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("DNS state lock poisoned"))?;
+                match servers
+                    .as_ref()
+                    .map_or(Ok(false), |servers| update_dns(&mut dns, servers, &tun))
+                {
                     Ok(true) => info!("VPN DNS configuration restored after external change"),
                     Ok(false) => {}
                     Err(e) => warn!("Could not restore VPN DNS configuration: {e:#}"),
@@ -187,8 +206,27 @@ fn run_inner(
     edge.shutdown();
     drop(edge);
     routes.restore()?;
-    dns.restore()?;
+    if let Some(mut dns) = dns {
+        dns.restore()?;
+    }
     Ok(())
+}
+
+fn update_dns(dns: &mut Option<DnsGuard>, servers: &[String], tun: &str) -> anyhow::Result<bool> {
+    if let Some(guard) = dns {
+        guard.set_servers(servers)?;
+        guard.ensure_applied()
+    } else {
+        let mut guard = DnsGuard::setup_for_interface(
+            Path::new(RESOLV_CONF_PATH),
+            Path::new(RESOLV_CONF_BACKUP_PATH),
+            servers,
+            tun,
+        )?;
+        guard.ensure_applied()?;
+        *dns = Some(guard);
+        Ok(true)
+    }
 }
 
 fn required_command(program: &str, args: &[&str]) -> anyhow::Result<()> {

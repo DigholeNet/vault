@@ -1,6 +1,8 @@
 name: Rust checks
 
 on:
+  workflow_call:
+  workflow_dispatch:
   push:
     branches: [main, develop]
   pull_request:

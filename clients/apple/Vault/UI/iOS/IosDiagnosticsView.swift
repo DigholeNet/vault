@@ -56,7 +56,7 @@ struct IosDiagnosticsView: View {
                 }
             }
             Section {
-                ForEach(DiagnosticsPresentation.checkIDs, id: \.self) { id in
+                ForEach(DiagnosticsPresentation.visibleChecks(model.result), id: \.self) { id in
                     let probes = (model.result?.probes ?? []).filter { $0.stage == id }
                     if probes.isEmpty { checkRow(id) }
                     else {
@@ -137,7 +137,10 @@ struct IosDiagnosticsView: View {
                         Text(tr("Elapsed") + "  \(max(0, Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))) ms")
                             .monospacedDigit().foregroundStyle(.secondary)
                     }
-                    ProgressView(value: Double(model.result?.checks?.count ?? 0), total: Double(DiagnosticsPresentation.checkIDs.count))
+                    ProgressView(
+                        value: Double(model.result?.checks?.count ?? 0),
+                        total: Double(DiagnosticsPresentation.visibleChecks(model.result).count)
+                    )
                 } else if let duration = model.result?.durationMs {
                     Text(tr("Total duration") + "  \(duration) ms").monospacedDigit().foregroundStyle(.secondary)
                 }

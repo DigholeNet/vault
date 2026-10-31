@@ -22,8 +22,8 @@ above.
 ring — Apache-2.0 AND ISC (with portions derived from BoringSSL/OpenSSL)
 https://github.com/briansmith/ring
 
-Provides the cryptographic primitives (X25519, Ed25519, AES-GCM,
-ChaCha20-Poly1305, PBKDF2) used by core/.
+Provides X25519, AES-GCM, ChaCha20-Poly1305, HKDF, HMAC and random
+generation used by core/.
 
 ================================================================================
 

@@ -22,6 +22,7 @@ vault-core = {path = "../../core", features = ["client"]}
 
 [package.metadata.deb]
 assets = [
+  ["../../NOTICE", "/usr/share/doc/edge/NOTICE", "644"],
   ["target/release/edge", "/usr/bin/edge", "755"],
   ["assets/edge.toml.example", "/etc/vault/edge.toml.example", "600"],
   ["assets/edge.service", "/lib/systemd/system/edge.service", "644"],

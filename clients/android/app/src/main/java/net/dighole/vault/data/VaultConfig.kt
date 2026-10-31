@@ -5,7 +5,15 @@ data class VaultConfig(
     val host: String = "",
     val port: Int = 9527,
     val password: String = "",
-    val dns: String = "1.1.1.1,8.8.8.8",
+    val dnsIpv4: String = "",
+    val dnsIpv6: String = "",
     val mtu: String = "",
     val probeDomains: String = ""
 )
+
+/** Preserve legacy DNS entries and their order within each address family. */
+internal fun splitLegacyDns(value: String): Pair<String, String> {
+    val entries = value.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+    return entries.filter { ':' !in it }.joinToString(",") to
+        entries.filter { ':' in it }.joinToString(",")
+}

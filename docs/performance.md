@@ -1,30 +1,46 @@
 # Performance
 
-Informal measurements collected during development. These numbers are
-indicative only — they depend on hardware, network conditions and server
-load, and no reproducible benchmark harness is published yet.
+There is no reproducible throughput, latency, CPU or battery benchmark suite
+published yet. Historical development notes lacked the exact source revision,
+tool versions, commands, sampling method and raw results; their numerical
+estimates are omitted until those conditions can be recorded and reproduced.
+No throughput, connection-time or battery-life guarantee is made.
 
-## Cryptographic benchmarks
+## Protocol costs and timers
 
-Measured on Pixel 6 (Tensor G1):
+These values describe implementation behavior, not measured performance:
 
-| Algorithm | Throughput | Latency (1KB) |
-|---|---|---|
-| AES-128-GCM | 850 MB/s | 1.2 µs |
-| AES-256-GCM | 720 MB/s | 1.4 µs |
-| ChaCha20-Poly1305 | 580 MB/s | 1.7 µs |
-
-## Network performance
-
-| Metric | Value |
+| Item | Value |
 |---|---|
-| Handshake time | < 100ms (LAN), < 500ms (WAN) |
-| Packet overhead | 25 bytes (1 type byte + 8 extra + 16 tag) |
-| Reconnection time | Exponential backoff (max 60s) |
+| Encrypted packet framing | 25 bytes: 1 type byte + 8 counter bytes + 16 AEAD tag bytes |
+| Outer network overhead | UDP adds 8 bytes; IP adds at least 20 bytes for IPv4 or 40 for IPv6 |
 | Heartbeat interval | 10 seconds |
+| Downstream inactivity timeout | 30 seconds without an authenticated data packet or pong |
+| Automatic retry delay | Exponential backoff from 1 to 60 seconds |
 
-## Battery impact (Android)
+The 60-second value limits the retry delay, not total reconnection time. DNS,
+handshake attempts, network availability and platform lifecycle also affect
+recovery. OS network-change notifications can interrupt the retry delay.
 
-- Idle: < 1% CPU usage
-- Active browsing: ~3-5% CPU
-- Video streaming: ~5-8% CPU
+## Measuring an actual deployment
+
+For repeated HTTPS exchanges and optional comparison with a physical interface:
+
+```bash
+scripts/test-https-vpn.sh -n 20 --vpn-interface vpn0
+scripts/test-https-vpn.sh -n 20 --vpn-interface vpn0 --direct-interface eth0
+# IPv6:
+scripts/test-https-vpn.sh -6 -n 20 --vpn-interface vpn0
+```
+
+Use the actual interface names. The script reports transport success and
+p50/p95/max timings, retaining raw TSV results and curl errors in its report
+directory. Its direct-interface option binds the HTTPS socket; system DNS
+routing is independent. See `scripts/test-https-vpn.sh --help` for defaults and
+requirements. These HTTPS checks do not measure bulk tunnel throughput.
+
+For publishable results, record the commit, release/debug profile, device and
+server hardware, OS/toolchain versions, link type, IP family, tunnel MTU,
+negotiated cipher, workload, duration and sample count alongside raw data.
+Measure CPU utilization and battery energy separately: CPU percentage alone is
+not a battery-impact measurement. Avoid including credentials in shared reports.

@@ -11,8 +11,8 @@ edge - Vault VPN linux client
 
 == Description
 edge is a Linux VPN client compatible with the Vault VPN protocol.
-It connects to a super node server over an encrypted UDP tunnel (X25519 ECDH
-key exchange, AEAD encryption), takes over the system default route via a TUN
+It connects to a supernode server over an encrypted UDP tunnel (SPAKE2 password
+authentication, X25519 ECDH key exchange, HKDF-SHA256 and AEAD encryption), takes over the system default route via a TUN
 device and keeps the connection alive with periodic heartbeats and automatic
 reconnect with exponential backoff.
 
@@ -53,7 +53,7 @@ reconnect with exponential backoff.
 == Files
 */etc/vault/edge.toml*::
     Configuration file. See *edge.toml.example* for the available options
-    (password, host, port, iface, dns, storage).
+    (password, host, port, iface, dns_ipv4, dns_ipv6, storage).
 
 */run/edge.socket*::
     Unix datagram socket used to deliver the quit signal to a running

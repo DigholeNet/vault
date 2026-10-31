@@ -6,6 +6,11 @@ plugins {
     alias(libs.plugins.detekt)
 }
 
+val licenseAssets = tasks.register<Sync>("copyLicenseNotices") {
+    from(rootProject.file("../..")) { include("LICENSE", "NOTICE") }
+    into(layout.buildDirectory.dir("generated/licenseAssets"))
+}
+
 // Same build identity as Apple: commit count, with a timestamp for tracked local changes.
 val gitBuildId = providers.exec {
     workingDir(rootProject.file("../.."))
@@ -21,6 +26,9 @@ val gitBuildId = providers.exec {
 
 android {
     namespace = "net.dighole.vault"
+    sourceSets.getByName("main").assets.directories.add(
+        layout.buildDirectory.dir("generated/licenseAssets").get().asFile.absolutePath
+    )
     compileSdk = libs.versions.compile.sdk.get().toInt()
 
     defaultConfig {
@@ -28,7 +36,7 @@ android {
         minSdk = libs.versions.min.sdk.get().toInt()
         targetSdk = libs.versions.target.sdk.get().toInt()
         versionCode = providers.gradleProperty("versionCode").map(String::toInt).orElse(1).get()
-        versionName = providers.gradleProperty("versionName").orElse("1.0.0").get()
+        versionName = providers.gradleProperty("versionName").orElse("0.1.0").get()
         buildConfigField("String", "GIT_BUILD_ID", "\"$gitBuildId\"")
     }
 
@@ -166,3 +174,5 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.junit)
 }
+
+tasks.named("preBuild").configure { dependsOn(licenseAssets) }

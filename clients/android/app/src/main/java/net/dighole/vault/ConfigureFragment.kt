@@ -15,6 +15,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import net.dighole.vault.data.VaultConfig
 import net.dighole.vault.data.readVaultConfig
+import net.dighole.vault.data.splitLegacyDns
 import net.dighole.vault.data.writeVaultConfig
 
 class ConfigureFragment : Fragment() {
@@ -29,7 +30,7 @@ class ConfigureFragment : Fragment() {
 
     override fun onViewCreated(view: View, state: Bundle?) {
         fields = listOf(R.id.edtHost, R.id.edtPort, R.id.edtPassword, R.id.edtMtu,
-            R.id.edtDns, R.id.edtProbeDomains).map { view.findViewById(it) }
+            R.id.edtDnsIpv4, R.id.edtDnsIpv6, R.id.edtProbeDomains).map { view.findViewById(it) }
         val prefs = requireContext().getSharedPreferences(VaultVpnService.PREFS_NAME, 0)
         val id = prefs.getString("device_id", null) ?: java.util.UUID.randomUUID().toString()
             .replace("-", "").also { value -> prefs.edit(commit = true) { putString("device_id", value) } }
@@ -48,8 +49,12 @@ class ConfigureFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val config = requireContext().readVaultConfig()
-                val values = state?.getStringArrayList("draft") ?: arrayListOf(config.host,
-                    config.port.toString(), config.password, config.mtu, config.dns, config.probeDomains)
+                val draft = state?.getStringArrayList("draft")
+                val values = if (draft?.size == 6) {
+                    val (ipv4, ipv6) = splitLegacyDns(draft[4])
+                    ArrayList(draft.take(4) + listOf(ipv4, ipv6, draft[5]))
+                } else draft?.takeIf { it.size == fields.size } ?: arrayListOf(config.host,
+                    config.port.toString(), config.password, config.mtu, config.dnsIpv4, config.dnsIpv6, config.probeDomains)
                 fields.zip(values).forEach { (field, value) -> field.setText(value) }
                 loaded = true
                 updateValidation()
@@ -69,8 +74,9 @@ class ConfigureFragment : Fragment() {
             if (v[1].toIntOrNull() in 1..65535) null else R.string.error_port_invalid,
             if (v[2].isNotEmpty()) null else R.string.error_password_required,
             if (v[3].isBlank() || v[3].trim().toIntOrNull() in 1280..1427) null else R.string.error_mtu,
-            if (SettingsValidation.dns(v[4])) null else R.string.error_dns,
-            if (SettingsValidation.domains(v[5])) null else R.string.error_probe
+            if (SettingsValidation.dns(v[4], ipv6 = false)) null else R.string.error_dns_ipv4,
+            if (SettingsValidation.dns(v[5], ipv6 = true)) null else R.string.error_dns_ipv6,
+            if (SettingsValidation.domains(v[6])) null else R.string.error_probe
         )
         fields.zip(errors).forEach { (field, error) ->
             (field.parent.parent as? com.google.android.material.textfield.TextInputLayout)?.error =
@@ -86,7 +92,7 @@ class ConfigureFragment : Fragment() {
         if (saving || !updateValidation()) return
         val v = fields.map { it.text.toString() }
         val config = VaultConfig(host = v[0].trim(), port = v[1].toInt(), password = v[2],
-            mtu = v[3].trim(), dns = v[4].trim(), probeDomains = v[5].trim())
+            mtu = v[3].trim(), dnsIpv4 = v[4].trim(), dnsIpv6 = v[5].trim(), probeDomains = v[6].trim())
         saving = true
         updateValidation()
         viewLifecycleOwner.lifecycleScope.launch {

@@ -7,6 +7,9 @@ lives in the shared Rust core ([`vault-core`](../../core/) via
 [`vault-bridge`](../bridge/), loaded through UniFFI/JNA). Kotlin provides UI,
 configuration storage, Android lifecycle and VPN interface/socket callbacks. Diagnostic network binding lives in the Rust bridge.
 
+Runtime requirement: **Android API 36 or newer**, matching the app's `minSdk`.
+This is a device installation requirement, separate from the build SDK.
+
 Features:
 
 - Encrypted client-to-server tunnels (SPAKE2 PAKE handshake, X25519 key exchange, AEAD ciphers); the supernode decrypts and relays traffic
@@ -18,8 +21,8 @@ Features:
 
 The four tabs follow the iOS client: Status, Configure, Diagnostics, and About.
 Android uses Material 3 controls and light/dark surfaces. Configuration groups
-and field order match iOS; language selection lives in Configure. Saving keeps
-the page open, and connection changes apply on the next connection. Drafts
+follow iOS, including separate IPv4 and IPv6 DNS fields; language selection
+lives in Configure. Saving keeps the page open, and connection changes apply on the next connection. Drafts
 survive tab switches, rotation, and language changes.
 
 Diagnostics uses the shared [Rust engine and transport](../../docs/diagnostics-engine.md).
@@ -81,13 +84,20 @@ Requirements:
 
 - Android SDK (API 36+) and an NDK. Point Gradle at the SDK via `ANDROID_HOME` or `sdk.dir` in `local.properties` (Android Studio writes it automatically). Set `ANDROID_NDK_HOME` to use a specific NDK; otherwise the build selects the highest installed version from the SDK's `ndk/` directory or legacy `ndk-bundle`. If no NDK is installed, AGP downloads **NDK 27.3.13750724**
 - Any JDK 17+ to run Gradle — the compile JDK (24) is auto-provisioned via the foojay resolver
-- Rust toolchain + `cargo-ndk` (`cargo install cargo-ndk`) for the shared `vault-core` / `vault-bridge` native library
+- Rust 1.98 or newer and `cargo-ndk` for the shared native library
+- `protoc` on PATH (Debian/Ubuntu: `sudo apt-get install protobuf-compiler`;
+  macOS: `brew install protobuf`)
+- Rust Android targets: `aarch64-linux-android`, `armv7-linux-androideabi`,
+  `x86_64-linux-android`
 
 Gradle (wrapper) and Kotlin are pinned by the project — no manual install needed.
 
 ```bash
 git clone https://github.com/DigholeNet/vault.git
 cd vault/clients/android
+
+cargo install cargo-ndk --locked
+rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
 
 # Build debug APK
 ./gradlew :app:assembleDebug
@@ -99,10 +109,17 @@ cd vault/clients/android
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Debug builds need no signing keys and install alongside the release app
+Direct Gradle builds default to version `0.1.0` / code `1`. For versioned
+release artifacts, run `scripts/package-android.sh` from the repository root;
+it injects the workspace version and derived Android version code.
+
+Debug builds need no signing keys and install alongside a release-build app
 (`applicationId` gets a `.debug` suffix). To publish your own build, change
 `applicationId` in `app/build.gradle.kts` and configure release signing —
 see [docs/releasing.md](../../docs/releasing.md).
+
+The About tab provides offline Open-source licenses from the bundled LICENSE
+and NOTICE files.
 
 ## Configuration
 
@@ -115,12 +132,25 @@ Server settings in the app:
 | Port | Server UDP port | 9527 |
 | Password | Authentication password | Required |
 | MTU | 1280–1427; empty uses link-based automatic sizing | Automatic |
-| DNS | Comma-separated DNS IP addresses; empty uses defaults | 1.1.1.1,8.8.8.8 |
+| IPv4 DNS | Comma-separated IPv4 resolver addresses; empty uses defaults | 1.1.1.1,8.8.8.8 |
+| IPv6 DNS | Comma-separated IPv6 resolver addresses; empty uses Google IPv6 defaults | 2001:4860:4860::8888,2001:4860:4860::8844 |
 | Probe domains | Comma-separated diagnostic domains; empty uses defaults | www.google.com,github.com,t.co |
 | Language | App language; takes effect immediately | System |
 
-The server assigns the client's virtual IP address (IPv4 and/or IPv6) in the
-handshake response.
+The server assigns the client's virtual IP address (IPv4, IPv6-only or dual-stack)
+in the handshake response. Each DNS field accepts up to four addresses of its own family; probe domains
+are limited to 32 entries.
+Empty fields use the defaults above. IPv4-only tunnels apply only IPv4 DNS;
+IPv6-only tunnels apply only IPv6 DNS; dual-stack tunnels combine both lists.
+The Android resolver chooses which configured server to use; list order does
+not guarantee query order. Both IPv4 and IPv6 resolvers can answer A and AAAA
+queries. Settings for an unassigned family are retained but not applied.
+
+Existing combined DNS settings migrate into the two fields by address family,
+preserving custom values and their order within each family. The migration
+commits both fields and removes the old key in one DataStore transaction; a
+failed commit keeps the old record intact. Each field can be cleared independently
+to restore its defaults. Connection-setting changes apply on the next connection.
 
 Credentials are encrypted with an Android Keystore key; their ciphertext is
 committed in the same DataStore transaction as host, port, and DNS settings.

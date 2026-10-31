@@ -46,14 +46,14 @@ public final class DiagnosticsCancellation: @unchecked Sendable {
 public enum RustDiagnostics {
     /// All network execution is Rust-owned. Swift only forwards IPC and cancellation.
     public static func execute(
-        _ request: AppleProbeRequest, tunnelIPv4: String?,
+        _ request: AppleProbeRequest, tunnelAddress: String?,
         cancellation: DiagnosticsCancellation
     ) -> AppleProbeResponse {
-        if request.tunnel && tunnelIPv4 == nil {
+        if request.tunnel && tunnelAddress == nil {
             return .failed(kind: .unavailable, detail: "current tunnel address unavailable")
         }
         do {
-            let transport = try DiagnosticTransport(tunnelIpv4: request.tunnel ? tunnelIPv4 : nil)
+            let transport = try DiagnosticTransport(tunnelAddress: request.tunnel ? tunnelAddress : nil)
             let token = cancellation.onCancel { transport.cancel() }
             defer { cancellation.removeHandler(token) }
             let operation: DiagnosticOperation

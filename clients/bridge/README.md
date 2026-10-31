@@ -10,10 +10,11 @@ to the mobile clients of the [Vault VPN](../../README.md) system. Shared by:
   `clients/apple/VaultCore/Scripts/build-xcframework.sh`, together with the
   UniFFI-generated Swift bindings.
 
-All VPN client logic (handshake, heartbeat, reconnect, crypto, data pump)
-lives in [`vault-core`](../../core) (`client` feature); this crate only maps
-the API to UniFFI and adds small platform glue (shared file logger, TUN fd
-blocking mode).
+VPN session logic (handshake, heartbeat, reconnect, crypto and data pump) and
+the diagnostic engine/transport live in [`vault-core`](../../core). This crate
+exports them through UniFFI and implements platform glue: shared file logging,
+TUN fd blocking mode, Apple interface binding and Android VPN Network binding.
+See the [shared diagnostics contract](../../docs/diagnostics-engine.md).
 
 ## Exported API
 
@@ -22,6 +23,11 @@ blocking mode).
 - `EdgeCallbacks` — packet delivery, status and error callbacks into the app
 - `ConnectionStatus`, `TrafficStats`, `VpnError` — connection snapshots, statistics and errors
 - `set_log_file_path` — point the Rust logger at the app's shared log file
+- `DiagnosticEngine` — diagnostic requests, completion, snapshots and cancellation
+- `DiagnosticTransport` — synchronous Rust probes with default, Apple interface
+  or Android VPN Network binding; execute on a worker and cancel on session changes
+- Typed diagnostic config, requests, responses, snapshots and errors, plus
+  `diagnostic_dns_query` for settings-domain validation
 
 ## Client/platform boundary
 

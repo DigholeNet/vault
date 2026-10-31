@@ -2,7 +2,7 @@
 //! Entry point; the client uses Linux-only mechanisms (/proc, `ip`,
 //! resolv.conf), so other platforms get a stub main.
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 mod config;
 #[cfg(any(target_os = "linux", test))]
 mod dns;

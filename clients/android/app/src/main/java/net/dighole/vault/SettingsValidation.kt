@@ -16,6 +16,11 @@ internal object SettingsValidation {
         parts.size == 4 && parts.all { it.isNotEmpty() && it.all(Char::isDigit) && it.toIntOrNull() in 0..255 }
     }
     fun server(value: String): Boolean = address(value) || domain(value)
-    fun dns(value: String): Boolean = value.isBlank() || value.split(',').all { address(it.trim()) }
-    fun domains(value: String): Boolean = value.isBlank() || value.split(',').all { domain(it.trim()) }
+    fun dns(value: String, ipv6: Boolean? = null): Boolean = value.isBlank() ||
+        (value.split(',').size <= 4 && value.split(',').all {
+            val literal = it.trim()
+            address(literal) && (ipv6 == null || (java.net.InetAddress.getByName(literal) is java.net.Inet6Address) == ipv6)
+        })
+    fun domains(value: String): Boolean = value.isBlank() ||
+        (value.split(',').size <= 32 && value.split(',').all { domain(it.trim()) })
 }

@@ -88,7 +88,8 @@ class VaultVpnService : VpnService() {
     private var serviceJob = SupervisorJob()
     private var scope = CoroutineScope(Dispatchers.IO + serviceJob)
     private var serverHost: String = ""
-    private var dnsList: List<String> = listOf("1.1.1.1", "8.8.8.8")
+    private var dnsIpv4List: List<String> = emptyList()
+    private var dnsIpv6List: List<String> = emptyList()
     private data class AssignedAddresses(
         val ipv4: String,
         val ipv4Mask: String,
@@ -239,7 +240,6 @@ class VaultVpnService : VpnService() {
                 val host = config.host
                 val port = config.port
                 val password = config.password
-                val dnsServers = config.dns.ifBlank { "1.1.1.1,8.8.8.8" }.split(",").map { it.trim() }
                 if (!sessionGate.update(sessionToken) {
                     config.mtu.toIntOrNull()?.takeIf { it in MIN_VPN_MTU..VPN_MTU }?.let {
                         tunnelMtu = it
@@ -252,7 +252,8 @@ class VaultVpnService : VpnService() {
 
                 if (!sessionGate.update(sessionToken) {
                     serverHost = host
-                    dnsList = dnsServers
+                    dnsIpv4List = config.dnsIpv4.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    dnsIpv6List = config.dnsIpv6.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                     (application as VaultApplication).diagnosticDomains = config.probeDomains
                         .split(',').map { it.trim() }.filter { it.isNotEmpty() }
                 }) return@launch
@@ -379,7 +380,7 @@ class VaultVpnService : VpnService() {
                 try {
                     // Rust only notifies initial or changed IP configuration.
                     // Same-IP transport reconnects keep this TUN and its I/O.
-                    val newInterface = createVpnInterface(ipv4, ipv4Mask, ipv6, ipv6Prefixlen, addrs, dnsList)
+                    val newInterface = createVpnInterface(ipv4, ipv4Mask, ipv6, ipv6Prefixlen, addrs)
                     sessionGate.commit(
                         sessionToken,
                         newInterface,
@@ -594,7 +595,7 @@ class VaultVpnService : VpnService() {
 
     private fun showConnected(event: VpnStatusEvent.Connected) {
         trace("SHOW_CONNECTED")
-        notificationManager.updateNotification(getString(R.string.notification_connected, event.ipv4))
+        notificationManager.updateNotification(getString(R.string.notification_connected, event.ipv4.ifBlank { event.ipv6 }))
         emitVpnEvent(event)
     }
 
@@ -607,16 +608,6 @@ class VaultVpnService : VpnService() {
         }
 
         Log.d(TAG, "Saved VPN state: connected=$connected, ipv4=$ipv4, ipv6=$ipv6")
-    }
-
-    private fun maskToPrefixLength(mask: String): Int {
-        return try {
-            mask.split(".").mapNotNull { it.toIntOrNull() }.sumOf {
-                Integer.bitCount(it)
-            }
-        } catch (_: Exception) {
-            24 // fallback to default /24
-        }
     }
 
     /**
@@ -651,14 +642,13 @@ class VaultVpnService : VpnService() {
         ipv4Mask: String,
         assignedIpv6: String,
         ipv6Prefixlen: Int,
-        addrs: Array<out InetAddress>,
-        dnsList: List<String>
+        addrs: Array<out InetAddress>
     ): ParcelFileDescriptor {
         try {
-            val prefixLength = maskToPrefixLength(ipv4Mask)
+            val addresses = TunnelAddresses.parse(assignedIp, ipv4Mask, assignedIpv6, ipv6Prefixlen)
+            val resolvers = addresses.dns(dnsIpv4List, dnsIpv6List)
             val builder = Builder()
                 .setMtu(tunnelMtu)
-                .addAddress(assignedIp, prefixLength)
                 .setSession(getString(R.string.vpn_service_name))
                 .setConfigureIntent(
                     PendingIntent.getActivity(
@@ -669,27 +659,11 @@ class VaultVpnService : VpnService() {
                     )
                 )
 
-            dnsList.forEach { dns ->
-                if (dns.isNotEmpty()) {
-                    builder.addDnsServer(dns)
-                }
-            }
-
-            // Add default route (all traffic through VPN)
-            builder.addRoute("0.0.0.0", 0)
-
-            // Route IPv6 into the tunnel only when the server actually
-            // assigned an IPv6 address. Without one the supernode drops IPv6
-            // packets (anti-spoofing source check), which would silently
-            // black-hole IPv6 traffic on dual-stack devices.
-            if (assignedIpv6.isNotEmpty()) {
-                builder.addAddress(assignedIpv6, ipv6Prefixlen)
-                try {
-                    builder.addRoute("::", 0)
-                } catch (_: Exception) {
-                    Log.w(TAG, "Failed to add IPv6 default route")
-                }
-            }
+            addresses.ipv4?.let { builder.addAddress(it, requireNotNull(addresses.ipv4Prefix)) }
+            addresses.ipv6?.let { builder.addAddress(it, requireNotNull(addresses.ipv6Prefix)) }
+            resolvers.forEach { builder.addDnsServer(it) }
+            if (addresses.ipv4 != null) builder.addRoute("0.0.0.0", 0)
+            if (addresses.ipv6 != null) builder.addRoute("::", 0)
 
             // Exclude server IP from VPN routing (API 33+ only)
             try {

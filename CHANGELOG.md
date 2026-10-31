@@ -1,42 +1,38 @@
 # Changelog
 
-All notable changes to Vault are documented in this file.
+Notable changes to Vault are recorded here using the
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/) structure.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+No version has been released. `0.1.0` is the current development version.
+The entries below describe the functionality being prepared for the initial
+release. A dated version section will be added when that release is published.
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-21
+### Added
 
-### Security
+- Shared Rust VPN core, Linux supernode, and Linux, Android, iOS and macOS clients
+- SPAKE2 password authentication, ephemeral X25519 key exchange and HKDF-SHA256 session keys
+- AES-128-GCM, AES-256-GCM and ChaCha20-Poly1305 with automatic cipher selection based on measured speed
+- Authenticated packet types, role-separated counter nonces, data replay protection and handshake confirmation
+- IPv4/IPv6 address assignment, lease management and traffic relay through the supernode
+- Shared client heartbeat, IPv4/IPv6 connection racing, automatic recovery with exponential backoff and traffic statistics
+- Linux route and DNS configuration with rollback, systemd-resolved support and physical-network recovery
+- Separate Linux IPv4/IPv6 DNS fields, with two IPv6 resolvers and one IPv4 resolver selected for dual-stack tunnels
+- Scoped supernode firewall/NAT rules, automatic host forwarding and IPv6 Router Advertisement preservation
+- Android and Apple connection settings, diagnostics and runtime log interfaces
+- Separate Apple IPv4/IPv6 DNS fields and IPv6-only diagnostic interface binding
+- Android IPv4, IPv6-only and dual-stack tunnel configuration, with separate IPv4/IPv6 DNS settings, per-family defaults and migration of existing DNS settings
+- Shared mobile DNS, TCP, HTTPS, ICMP and route diagnostics, with Rust-owned TLS verification and platform network binding
+- Android Keystore-backed credential encryption with an app-private plaintext fallback; Apple Keychain storage with a password copy in the OS VPN profile
+- English and Simplified Chinese mobile interfaces; Traditional Chinese, Japanese and Spanish additionally on Android
+- Apple apps for iOS 18.5+ and macOS 15.5+; the shared Swift package supports iOS 18+ and macOS 15+
+- Debian, Android APK and Apple packaging scripts, plus release automation that excludes Ad Hoc iOS IPAs from public artifacts
+- Rust, Android and Apple CI checks required before release packaging, parser fuzz targets and isolated Linux network tests
+- Single-stack-aware shared diagnostics with bypass detection for either unassigned address family
+- Shared Android release-version encoding with ordered alpha, beta, rc and final version codes
+- Offline license notices in mobile/desktop About pages and packaged LICENSE/NOTICE resources
+- Explicit manpage generation for Linux packaging, independent of Cargo caches
+- Contributor, security, privacy, protocol, diagnostics and release documentation
 
-- Handshake authentication rebuilt on SPAKE2 (password-authenticated key exchange): no password-derived verifier ever crosses the wire, so captured handshakes do not enable offline dictionary attacks; an active attacker gets exactly one password guess per handshake, and the supernode temporarily bans source IPs after repeated handshake failures
-- Session keys are derived with HKDF-SHA256 from the X25519 shared secret (previously truncated and used directly as the AEAD key), salted with the PAKE handshake key and bound to both sides' ephemeral public keys
-- Root-privileged system configuration commands (`sysctl`, `iptables`, `ip route`) now run through argv arrays instead of `sh -c` string interpolation, eliminating shell injection risk
-- A poisoned mutex no longer cascades into a process-wide panic in the decrypt hot path or client session loops
-- AEAD nonces switched from 56-bit random values to role-separated 64-bit counters, eliminating nonce reuse under a session key
-- Data channel gains replay protection: counters double as sequence numbers checked against a 2048-bit sliding window on receive
-- Handshake messages carry timestamps (±120s acceptance window), and responses echo the request's ephemeral public key and carry a PAKE-keyed confirmation MAC, making captured handshakes unreplayable; the server deduplicates confirmed handshakes by (client ID, ephemeral public key) for 600s
-- The unauthenticated REJECTED packet no longer tears down a client session on its own; the client probes the server with a ping first and reconnects only if it stays silent
-- The daemon control sockets (`/run/supernode.socket`, `/run/edge.socket`) are not world-writable (0o660) and are per-service, so the two daemons no longer share one path
-
-### Features
-
-- VPN Connection: One-tap connect/disconnect to Vault server
-- Dual Stack: IPv4 and IPv6 network support
-- Auto Reconnect: Automatic recovery on network changes
-- X25519 key exchange (perfect forward secrecy)
-- AES-128-GCM / AES-256-GCM / ChaCha20-Poly1305 with automatic cipher negotiation
-- Traffic Stats: Real-time upload/download speed and data usage
-- Server Config: Customizable host, port, password, and DNS
-- Multi-language: English and Simplified Chinese on all platforms; Traditional Chinese, Japanese, and Spanish additionally on Android
-
-### Platform Support
-
-- Android
-- iOS 18+ and macOS 15+
-- Linux
-
-[Unreleased]: https://github.com/DigholeNet/vault/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/DigholeNet/vault/releases/tag/v0.1.0
+[Unreleased]: https://github.com/DigholeNet/vault/commits/main

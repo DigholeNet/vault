@@ -156,3 +156,16 @@ private func response(_ request: DiagnosticRequest) -> DiagnosticResponse {
         try RustDiagnostics.run(context: invalid, cancellation: DiagnosticsCancellation(), execute: { _, _ in nil })
     }
 }
+
+@Test func ipv6Diagnostics() throws {
+    var value = context()
+    value.ipv4 = ""
+    value.mask = ""
+    value.dns = ["2001:4860:4860::8888"]
+    let result = try RustDiagnostics.run(context: value, cancellation: DiagnosticsCancellation(), execute: { request, _ in
+        if case .route = request.operation { return .route(ipv4: nil, ipv6: "fd00::2") }
+        return response(request)
+    })
+    #expect(result.state == .passed)
+    #expect(!result.probes.contains { [.dns, .tcp, .https].contains($0.request.stage) })
+}

@@ -1,14 +1,76 @@
 # Releasing
 
+## Current status and build versions
+
+There are no formal releases yet. `0.1.0` in the workspace manifest is the
+current development version; all existing changes are recorded under
+`Unreleased` in `CHANGELOG.md`. Do not treat development snapshots as a
+supported release series.
+
+The root `Cargo.toml` is the version source for Rust and packaged artifacts.
+Android packaging and release CI inject `versionName`/`versionCode`; direct
+Gradle builds default to `0.1.0` / `1` unless those properties are supplied.
+Direct Xcode builds default to `MARKETING_VERSION=1.0` (the app version) and
+`CURRENT_PROJECT_VERSION=1` (the build number), unless overridden. Apple
+packaging replaces the app version with the Cargo version and derives the build
+number from the Git commit count, appending a timestamp for tracked local
+changes. Direct app builds are therefore not substitutes for the versioned
+packaging entry points.
+
+`rust-toolchain.toml` selects rolling `stable`, with Rust 1.98 as the declared
+minimum. Cargo.lock fixes Rust dependency resolution, not the compiler or all
+external tools. Record compiler, SDK, NDK, Xcode and packaging-tool versions
+when diagnosing or reproducing a build.
+
+Linux packaging regenerates manpages explicitly before `cargo deb`; it does
+not rely on Cargo build-script side effects or cached generated files. For
+direct `cargo deb` use, first run `scripts/package-linux.sh --manpages-only`.
+
+Local `scripts/package-linux.sh` cross-builds x86_64 musl binaries with Zig;
+the release workflow builds native GNU/Linux binaries on Ubuntu after all
+platform checks pass. Both produce
+Debian packages, but libc/linking requirements can differ. The current Debian
+metadata declares libc6/libgcc dependencies even for local musl packages.
+Validate each package on the intended Debian/Ubuntu host; do not assume the
+local script reproduces CI binaries byte for byte.
+
+## Android version-code policy
+
+Local packaging and release CI share the encoder in `scripts/package-android.sh`.
+Use `scripts/package-android.sh --version-code [VERSION]` to print the code
+without building; omitting VERSION reads the workspace manifest.
+For Android-only packaging, supported versions are `major.minor.patch`, optionally followed by
+`-alpha.N`, `-beta.N` or `-rc.N`. Each numeric release component is 0–99;
+`N` is 1–499. Leading zeroes, other suffixes and build metadata are rejected.
+
+The code is `(major*10000 + minor*100 + patch)*2000 + rank`, where alpha uses
+`N`, beta `500+N`, rc `1000+N`, and a final release `1999`. Thus alpha, beta,
+rc and final versions sort in order, including consecutive prereleases; the
+maximum code is 1,999,999,999. `0.1.0` encodes to `201999`, above the previous
+development code `100`. Direct Gradle builds still default to code `1` and are
+not versioned release artifacts.
+
+Apple packaging and the all-platform release gate accept only numeric
+`major.minor.patch` versions. Pre-release suffixes are rejected before packaging;
+they are not passed into Apple's marketing-version field.
+
 ## Release process
 
-1. Bump `version` in the root `Cargo.toml` (the single version source;
+1. Choose the release version in the root `Cargo.toml` (the packaged version source;
    `scripts/package-android.sh` injects it into the Gradle build as
    `-PversionName`/`-PversionCode`).
-2. Update the root `CHANGELOG.md` with the new version details.
+2. Move completed entries from `Unreleased` into a dated version section in
+   `CHANGELOG.md`. For the first release, create the first version section then;
+   there is no historical `0.1.0` release to preserve.
 3. Commit and push the changes.
-4. Create a git tag: `git tag -a v0.2.0 -m "Release v0.2.0"`
-5. Push the tag: `git push origin v0.2.0`
+4. Review device/network validation for affected paths, then create a tag
+   matching the chosen manifest version. Release CI invokes the Rust, Android
+   and Apple check workflows on that exact commit, including the Linux network
+   namespace check, before any platform packaging job can run. Failed checks
+   block packaging and publication. Check workflows also support manual runs
+   without PR/push path filters. For an initial
+   `0.1.0` release: `git tag -a v0.1.0 -m "Release v0.1.0"`
+5. Push the tag (using the same version): `git push origin v0.1.0`
 6. Tagging `v*.*.*` triggers `.github/workflows/release.yml`, which publishes
    the Linux client deb, Linux supernode deb, signed Android APK, and
    notarized macOS app zip in one release. The signed iOS IPA is built in the

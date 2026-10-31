@@ -289,6 +289,7 @@ pub struct DiagnosticSnapshot {
     pub active_stage: Option<DiagnosticStage>,
     pub state: DiagnosticState,
     pub duration_ms: u64,
+    pub planned_checks: Vec<DiagnosticStage>,
     pub checks: Vec<DiagnosticCheck>,
     pub probes: Vec<DiagnosticProbe>,
     pub route_issues: Vec<String>,
@@ -365,6 +366,7 @@ impl DiagnosticEngine {
             active_stage: s.active_stage.map(Into::into),
             state: s.state.into(),
             duration_ms: s.duration_ms,
+            planned_checks: s.planned_checks.into_iter().map(Into::into).collect(),
             checks: s
                 .checks
                 .into_iter()
@@ -442,8 +444,8 @@ pub struct DiagnosticTransport {
 #[uniffi::export]
 impl DiagnosticTransport {
     #[uniffi::constructor]
-    pub fn new(tunnel_ipv4: Option<String>) -> Result<Arc<Self>, DiagnosticError> {
-        let network: Box<dyn core::transport::NetworkBinding> = match tunnel_ipv4 {
+    pub fn new(tunnel_address: Option<String>) -> Result<Arc<Self>, DiagnosticError> {
+        let network: Box<dyn core::transport::NetworkBinding> = match tunnel_address {
             Some(address) => {
                 #[cfg(target_vendor = "apple")]
                 {

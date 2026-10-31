@@ -34,8 +34,8 @@
     <string name="port_default">9527</string>
     <string name="password">パスワード</string>
     <string name="password_hint">パスワードを入力</string>
-    <string name="dns_servers">DNS サーバー（カンマ区切り）</string>
-    <string name="dns_default">1.1.1.1,8.8.8.8</string>
+    <string name="dns_ipv4_servers">IPv4 DNS（カンマ区切り）</string>
+    <string name="dns_ipv6_servers">IPv6 DNS（カンマ区切り）</string>
     <string name="error_host_required">サーバーアドレスを入力してください</string>
     <string name="error_port_invalid">ポート番号が無効です</string>
     <string name="error_password_required">パスワードを入力してください</string>
@@ -66,13 +66,15 @@
 <string name="device_id">デバイス ID</string>
 <string name="mtu">MTU</string>
 <string name="mtu_help">1280–1427。空欄で自動設定。</string>
-<string name="dns_help">DNS IP アドレスをカンマで区切ります。空欄で既定値。</string>
+<string name="dns_ipv4_help">空欄で 1.1.1.1,8.8.8.8。トンネルに IPv4 がある場合に使用。</string>
+    <string name="dns_ipv6_help">空欄で Google DNS：2001:4860:4860::8888,2001:4860:4860::8844。トンネルに IPv6 がある場合に使用。</string>
 <string name="probe_domains">診断ドメイン</string>
 <string name="probe_help">ドメインをカンマで区切ります。空欄で既定値。</string>
 <string name="error_host_invalid">URL ではなく、サーバーの IP またはホスト名を入力してください。</string>
 <string name="error_mtu">MTU は 1280–1427、または空欄で自動設定。</string>
-<string name="error_dns">有効な DNS IP アドレスをカンマで区切ってください。</string>
-<string name="error_probe">URL ではなく、ドメイン名をカンマで区切ってください。</string>
+<string name="error_dns_ipv4">IPv4 DNS アドレスはカンマ区切りで最大 4 個です。</string>
+    <string name="error_dns_ipv6">IPv6 DNS アドレスはカンマ区切りで最大 4 個です。</string>
+<string name="error_probe">URL を含めず、有効なドメインをカンマ区切りで最大 32 個入力してください。</string>
 <string name="config_saved_next">保存しました。次回の接続から適用されます。</string>
 <string name="save_hint">接続前に変更を保存してください。</string>
 <string name="config_load_failed">設定を読み込めません。ページを開き直してください。</string>
@@ -109,4 +111,6 @@
 <string name="check_ping">Ping · IPv4</string>
 <string name="check_ping6">Ping · IPv6</string>
 <string name="ping_note">Ping は参考情報です。ICMP が遮断される場合があり、無応答だけでは VPN の障害とは判断できません。平均 RTT は応答のみを含みます。</string>
+    <string name="open_source_licenses">オープンソースライセンス</string>
+    <string name="license_unavailable">ライセンス情報を読み込めません。</string>
 </resources>

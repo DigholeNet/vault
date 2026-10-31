@@ -17,7 +17,7 @@ final class WindowManager {
             makeWindow(
                 id: "configure",
                 title: "Vault Settings",
-                size: NSSize(width: 660, height: 480),
+                size: NSSize(width: 720, height: 540),
                 minimum: NSSize(width: 600, height: 430),
                 content:
                 MacosConfigureView(config: config)

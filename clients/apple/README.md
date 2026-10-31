@@ -24,6 +24,24 @@ macOS keyboard shortcuts: `⌘,` Settings, `⌘1`–`⌘4` Settings sections, `�
 `⌘W` Close, `⌘Return` Connect/Disconnect, `⌘⇧D` Diagnostics, `⌘Q` Quit.
 Tab / Shift-Tab moves between controls; Space / Return activates an action.
 
+About includes an offline Open-source licenses sheet with the bundled project
+LICENSE and NOTICE.
+
+## DNS configuration
+
+Both iOS Configure and macOS Settings → Network have separate IPv4 DNS and
+IPv6 DNS fields. Each accepts up to four comma-separated addresses of its own family.
+Empty IPv4 DNS uses `1.1.1.1,8.8.8.8`; empty IPv6 DNS uses Google IPv6 DNS
+`2001:4860:4860::8888,2001:4860:4860::8844`. IPv4-only tunnels apply the first
+group, IPv6-only tunnels the second, and dual-stack tunnels combine both groups.
+The effective list is recorded with the successfully applied tunnel settings
+and supplied to diagnostics. Changes apply on the next connection.
+
+The new App Group/profile keys are `dnsIpv4` and `dnsIpv6`. Old `dns` settings
+are ignored and are not migrated; re-enter custom DNS values and reconnect to
+save the new VPN profile. Diagnostic interface binding accepts either a live
+IPv4 or IPv6 tunnel address, including IPv6-only assignments.
+
 ## Connection lifecycle
 
 The app serializes preparation and teardown on the main queue. The four states
@@ -96,7 +114,7 @@ macOS also offers search, source filters, optional auto-scroll and Copy. macOS
 fetches the system extension's log over provider messages and caches it for
 viewing after disconnecting. Both platforms refresh visible logs every two seconds.
 
-Probe domains are configurable under macOS Settings → Advanced or iOS Configure.
+Up to 32 probe domains are configurable under macOS Settings → Advanced or iOS Configure.
 Empty uses `www.google.com, github.com, t.co`.
 
 ## Build & test
@@ -148,7 +166,9 @@ from the repository root:
 TEAM_ID=ABCDE12345 scripts/package-apple.sh
 ```
 
-Outputs go to `dist/`. Signing profiles, notarization and CI setup are documented
+Outputs go to `dist/`. Packaging takes the marketing version from the root
+Cargo manifest; direct Xcode builds retain the project development default
+`1.0` unless `MARKETING_VERSION` is overridden. Signing profiles, notarization and CI setup are documented
 in [Releasing](../../docs/releasing.md#apple-packaging-and-signing).
 For a fork, change `APP_BUNDLE_ID_PREFIX` and `APP_GROUP_ID` in
 `Config/Shared.xcconfig` to identifiers registered to your team, and supply your
@@ -206,7 +226,7 @@ status request and the existing probe payload format. Message replies enter the
 app asynchronously on the main queue. Profile loading, saving and reloading also
 complete on main before the next lifecycle operation proceeds.
 
-A shared `TunnelLaunchConfiguration` converts settings into the existing OS VPN
+A shared `TunnelLaunchConfiguration` converts settings into the OS VPN
 profile keys and validates the provider's startup input. The password changes
 only through explicit save/load/retry operations; a read retry never writes the
 placeholder value back to Keychain.

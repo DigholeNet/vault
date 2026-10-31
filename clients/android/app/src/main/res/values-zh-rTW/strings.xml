@@ -34,8 +34,8 @@
     <string name="port_default">9527</string>
     <string name="password">密碼</string>
     <string name="password_hint">輸入密碼</string>
-    <string name="dns_servers">DNS 伺服器（逗號分隔）</string>
-    <string name="dns_default">1.1.1.1,8.8.8.8</string>
+    <string name="dns_ipv4_servers">IPv4 DNS（逗號分隔）</string>
+    <string name="dns_ipv6_servers">IPv6 DNS（逗號分隔）</string>
     <string name="error_host_required">伺服器位址不能為空</string>
     <string name="error_port_invalid">連接埠號無效</string>
     <string name="error_password_required">密碼不能為空</string>
@@ -66,13 +66,15 @@
     <string name="device_id">裝置 ID</string>
     <string name="mtu">MTU</string>
     <string name="mtu_help">1280–1427，留空表示自動。</string>
-    <string name="dns_help">DNS IP 位址以逗號分隔，留空使用預設值。</string>
+    <string name="dns_ipv4_help">留空使用 1.1.1.1,8.8.8.8。通道分配 IPv4 時生效。</string>
+    <string name="dns_ipv6_help">留空使用 Google DNS：2001:4860:4860::8888,2001:4860:4860::8844。通道分配 IPv6 時生效。</string>
     <string name="probe_domains">探測網域</string>
     <string name="probe_help">網域以逗號分隔，留空使用預設值。</string>
     <string name="error_host_invalid">請輸入伺服器 IP 或網域，不要包含 URL 協定。</string>
     <string name="error_mtu">MTU 必須為 1280–1427，或留空自動設定。</string>
-    <string name="error_dns">請輸入有效 DNS IP 位址，以逗號分隔。</string>
-    <string name="error_probe">請輸入網域，以逗號分隔，不要包含 URL。</string>
+    <string name="error_dns_ipv4">請輸入最多 4 個 IPv4 DNS 位址，以逗號分隔。</string>
+    <string name="error_dns_ipv6">請輸入最多 4 個 IPv6 DNS 位址，以逗號分隔。</string>
+    <string name="error_probe">請輸入最多 32 個有效網域，以逗號分隔，不含 URL。</string>
     <string name="config_saved_next">已儲存，變更將於下次連線時生效。</string>
     <string name="save_hint">連線前請儲存變更。</string>
     <string name="config_load_failed">無法讀取設定，請重新開啟此頁重試。</string>
@@ -109,4 +111,6 @@
 <string name="check_ping">Ping · IPv4</string>
 <string name="check_ping6">Ping · IPv6</string>
 <string name="ping_note">Ping 僅供參考。ICMP 可能被過濾，無回應不代表 VPN 故障。平均 RTT 僅計算成功回覆。</string>
+    <string name="open_source_licenses">開源授權</string>
+    <string name="license_unavailable">授權資訊暫時無法使用。</string>
 </resources>

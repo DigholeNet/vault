@@ -21,3 +21,17 @@ import Testing
     #expect(!SettingsValidation.isValidProbeList("https://google.com"))
     #expect(!SettingsValidation.isValidProbeList("google.com,"))
 }
+
+@Test func dnsFamilies() {
+    #expect(SettingsValidation.isValidDNSList("1.1.1.1", ipv6: false))
+    #expect(SettingsValidation.isValidDNSList("2001:4860:4860::8888", ipv6: true))
+    #expect(!SettingsValidation.isValidDNSList("::1", ipv6: false))
+    #expect(!SettingsValidation.isValidDNSList("1.1.1.1", ipv6: true))
+}
+
+@Test func listLimits() {
+    #expect(SettingsValidation.isValidDNSList(Array(repeating: "1.1.1.1", count: 4).joined(separator: ","), ipv6: false))
+    #expect(!SettingsValidation.isValidDNSList(Array(repeating: "1.1.1.1", count: 5).joined(separator: ","), ipv6: false))
+    #expect(SettingsValidation.isValidProbeList((0 ..< 32).map { "d\($0).example" }.joined(separator: ",")))
+    #expect(!SettingsValidation.isValidProbeList((0 ..< 33).map { "d\($0).example" }.joined(separator: ",")))
+}

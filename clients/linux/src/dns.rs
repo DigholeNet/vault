@@ -252,6 +252,25 @@ impl DnsGuard {
         Ok(guard)
     }
 
+    /// Change the active assignment without replacing the original recovery copy.
+    pub fn set_servers(&mut self, servers: &[String]) -> anyhow::Result<()> {
+        anyhow::ensure!(!servers.is_empty(), "no DNS servers selected");
+        for server in servers {
+            server.parse::<IpAddr>().context("invalid DNS server")?;
+        }
+        if let Some(resolved) = &mut self.resolved {
+            resolved.servers = servers.to_vec();
+        } else {
+            anyhow::ensure!(self.original.is_some(), "DNS guard is not configured");
+            let mut content = String::from("search .\n");
+            for server in servers {
+                content.push_str(&format!("nameserver {server}\n"));
+            }
+            self.configured = Some(content);
+        }
+        Ok(())
+    }
+
     /// Network managers can rewrite resolv.conf after Wi-Fi reconnects.
     /// Repair our active configuration without replacing the startup backup.
     pub fn ensure_applied(&mut self) -> anyhow::Result<bool> {
@@ -329,6 +348,24 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[test]
+    fn dns_switch() {
+        let fixture = Fixture::new();
+        let original = std::fs::read_to_string(&fixture.live).unwrap();
+        let mut guard =
+            DnsGuard::setup(&fixture.live, &fixture.backup, &["1.1.1.1".into()]).unwrap();
+        guard.set_servers(&["2001:4860:4860::8888".into()]).unwrap();
+        assert!(guard.ensure_applied().unwrap());
+        assert!(
+            std::fs::read_to_string(&fixture.live)
+                .unwrap()
+                .contains("2001:4860:4860::8888")
+        );
+        assert_eq!(std::fs::read_to_string(&fixture.backup).unwrap(), original);
+        guard.restore().unwrap();
+        assert_eq!(std::fs::read_to_string(&fixture.live).unwrap(), original);
     }
 
     #[test]
@@ -489,6 +526,18 @@ mod tests {
             applied: false,
             flush_pending: false,
         }
+    }
+
+    #[test]
+    fn resolved_switch() {
+        let mut dns = resolved_fixture();
+        let mut system = FakeResolved::default();
+        dns.ensure_with(|args| system.run(args)).unwrap();
+        dns.servers = vec!["2001:4860:4860::8888".into()];
+        assert!(dns.ensure_with(|args| system.run(args)).unwrap());
+        assert_eq!(system.servers, "2001:4860:4860::8888");
+        dns.restore_with(|args| system.run(args)).unwrap();
+        assert!(system.servers.is_empty());
     }
 
     #[test]

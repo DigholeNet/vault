@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		02A1CD7981894BD9947E2020 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 620483BAC4C8457DB3E0C2EE /* LICENSE */; };
+		93A37C838D6049C2985F2973 /* NOTICE in Resources */ = {isa = PBXBuildFile; fileRef = 820BE8511B974D5E8253A39A /* NOTICE */; };
 		F48710332E73C39D0038D7CC /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F48710322E73C39D0038D7CC /* NetworkExtension.framework */; };
 		F487103B2E73C39D0038D7CC /* VaultNetworkExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F48710302E73C39D0038D7CC /* VaultNetworkExtension.appex */; platformFilters = (ios, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F48710412E73C39D0038D7CC /* VaultSystemExtension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = F48710422E73C39D0038D7CC /* VaultSystemExtension.systemextension */; platformFilters = (macos, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -73,6 +75,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		620483BAC4C8457DB3E0C2EE /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = "../../LICENSE"; sourceTree = SOURCE_ROOT; };
+		820BE8511B974D5E8253A39A /* NOTICE */ = {isa = PBXFileReference; lastKnownFileType = text; path = "../../NOTICE"; sourceTree = SOURCE_ROOT; };
 		F4870FB42E73C2AC0038D7CC /* Vault.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Vault.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F4870FC22E73C2AD0038D7CC /* VaultTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VaultTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F4870FCC2E73C2AD0038D7CC /* VaultUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VaultUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -195,6 +199,8 @@
 		F4870FAB2E73C2AC0038D7CC = {
 			isa = PBXGroup;
 			children = (
+				620483BAC4C8457DB3E0C2EE /* LICENSE */,
+				820BE8511B974D5E8253A39A /* NOTICE */,
 				F48710622E82A0B00038D7CC /* Config */,
 				F4870FB62E73C2AC0038D7CC /* Vault */,
 				F4870FC52E73C2AD0038D7CC /* VaultTests */,
@@ -420,6 +426,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				02A1CD7981894BD9947E2020 /* LICENSE in Resources */,
+				93A37C838D6049C2985F2973 /* NOTICE in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

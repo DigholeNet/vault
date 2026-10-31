@@ -172,8 +172,11 @@ struct MacosStatusView: View {
                             .tr("Elapsed") + "  \(max(0, Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))) ms")
                             .font(.body).monospacedDigit().foregroundStyle(.secondary)
                     }
-                    ProgressView(value: Double(result?.checks?.count ?? 0), total: Double(DiagnosticsPresentation.checkIDs.count))
-                        .frame(maxWidth: 300)
+                    ProgressView(
+                        value: Double(result?.checks?.count ?? 0),
+                        total: Double(DiagnosticsPresentation.visibleChecks(result).count)
+                    )
+                    .frame(maxWidth: 300)
                 } else {
                     HStack(spacing: 10) {
                         if let completedAt { Text(completedAt, style: .time) }
@@ -211,7 +214,7 @@ struct MacosStatusView: View {
                 Text(languageManager.tr("Result")).frame(width: 80)
                 Text(languageManager.tr("Average duration")).frame(width: 100, alignment: .trailing)
             }.font(.body).foregroundStyle(.secondary).padding(12).background(.quaternary.opacity(0.4))
-            ForEach(DiagnosticsPresentation.checkIDs, id: \.self) { id in
+            ForEach(DiagnosticsPresentation.visibleChecks(result), id: \.self) { id in
                 let check = result?.checks?.first { $0.id == id }
                 let active = running && (result?.activeCheck ?? "dns") == id && check == nil
                 HStack(spacing: 8) {
@@ -239,7 +242,7 @@ struct MacosStatusView: View {
                         }.frame(width: 100, alignment: .trailing)
                     } else { Text("—").foregroundStyle(.secondary).frame(width: 100, alignment: .trailing) }
                 }.padding(12)
-                if id != DiagnosticsPresentation.checkIDs.last { Divider() }
+                if id != DiagnosticsPresentation.visibleChecks(result).last { Divider() }
             }
         }.clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))

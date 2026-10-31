@@ -30,7 +30,7 @@ struct MacosConfigureView: View {
     @State private var loaded = false
     @State private var confirmReset = false
     private enum Control: Hashable {
-        case section(Page), about, host, port, password, revealedPassword, reveal, dns, mtu, domains
+        case section(Page), about, host, port, password, revealedPassword, reveal, dnsIpv4, dnsIpv6, mtu, domains
         case launch, autoConnect, dock, language, copyV4, copyV6, copyID, retryPassword, restore, save
     }
 
@@ -233,9 +233,16 @@ struct MacosConfigureView: View {
     private var network: some View {
         Group {
             Section(languageManager.tr("DNS Servers")) {
-                TextField(languageManager.tr("DNS"), text: $draft.dns, prompt: Text("1.1.1.1, 8.8.8.8"))
-                    .autocorrectionDisabled().focused($focusedControl, equals: .dns).onSubmit(save)
-                Text(languageManager.tr("DNS server address separated by comma.")).font(.body).foregroundStyle(.secondary)
+                TextField(languageManager.tr("IPv4 DNS"), text: $draft.dnsIpv4, prompt: Text("1.1.1.1, 8.8.8.8"))
+                    .autocorrectionDisabled().focused($focusedControl, equals: .dnsIpv4).onSubmit(save)
+                TextField(
+                    languageManager.tr("IPv6 DNS"),
+                    text: $draft.dnsIpv6,
+                    prompt: Text("2001:4860:4860::8888, 2001:4860:4860::8844")
+                )
+                .autocorrectionDisabled().focused($focusedControl, equals: .dnsIpv6).onSubmit(save)
+                Text(languageManager.tr("Leave empty for defaults. Only assigned tunnel families are used."))
+                    .font(.body).foregroundStyle(.secondary)
             }
             Section(languageManager.tr("Tunnel Addresses")) {
                 if appData.vpnStatus == .connected || appData.isRecovering {
@@ -297,7 +304,7 @@ struct MacosConfigureView: View {
         switch page {
         case .general: return .launch
         case .connection: return .host
-        case .network: return .dns
+        case .network: return .dnsIpv4
         case .advanced: return .mtu
         }
     }
@@ -311,7 +318,7 @@ struct MacosConfigureView: View {
             if config.passwordStorageError != nil { order.append(.retryPassword) }
             order.append(.save)
         case .network:
-            order.append(.dns)
+            order.append(contentsOf: [.dnsIpv4, .dnsIpv6])
             if appData.vpnStatus == .connected || appData.isRecovering {
                 let ip = appData.assignedIp.parsedIPv4AndIPv6()
                 if ip.ipv4 != nil { order.append(.copyV4) }
@@ -339,7 +346,7 @@ struct MacosConfigureView: View {
     }
 
     private func isTextControl(_ control: Control) -> Bool {
-        [.host, .port, .password, .revealedPassword, .dns, .mtu, .domains].contains(control)
+        [.host, .port, .password, .revealedPassword, .dnsIpv4, .dnsIpv6, .mtu, .domains].contains(control)
     }
 
     private func moveKeyboardFocus(_ control: Control?, window: NSWindow?) {

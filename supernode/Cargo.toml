@@ -22,6 +22,7 @@ vault-core = {path = "../core"}
 
 [package.metadata.deb]
 assets = [
+  ["../NOTICE", "/usr/share/doc/supernode/NOTICE", "644"],
   ["target/release/supernode", "/usr/bin/supernode", "755"],
   ["assets/supernode.toml.example", "/etc/vault/supernode.toml.example", "600"],
   ["assets/supernode.service", "/lib/systemd/system/supernode.service", "644"],

@@ -149,3 +149,24 @@ private func configuration(_ ip: String) -> TunnelConfiguration {
     #expect(state.isApplying)
     #expect(state.outstanding == nil)
 }
+
+@Test func dnsRevision() throws {
+    var state = TunnelSettingsState()
+    let first = TunnelConfiguration(ipv4: "10.0.0.2", mask: "255.255.255.0", ipv6: "", prefix: 0, mtu: 1427, dns: ["1.1.1.1"])
+    let second = TunnelConfiguration(ipv4: first.ipv4, mask: first.mask, ipv6: "", prefix: 0, mtu: first.mtu, dns: ["8.8.8.8"])
+    let initialRequest = state.enqueue(first)
+    let initial = try #require(initialRequest)
+    let committed = state.complete(initial, succeeded: true)
+    #expect(committed)
+    let updateRequest = state.enqueue(second)
+    let update = try #require(updateRequest)
+    #expect(state.applied?.dns == first.dns)
+    let failed = state.complete(update, succeeded: false)
+    #expect(failed)
+    #expect(state.applied?.dns == first.dns)
+    let retryRequest = state.enqueue(second)
+    let retry = try #require(retryRequest)
+    let retried = state.complete(retry, succeeded: true)
+    #expect(retried)
+    #expect(state.applied?.dns == second.dns)
+}

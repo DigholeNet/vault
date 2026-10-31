@@ -13,17 +13,20 @@ public enum SettingsValidation {
             && (try? diagnosticDnsQuery(domain: value.hasSuffix(".") ? String(value.dropLast()) : value, id: 0, ipv6: false)) != nil
     }
 
-    public static func isValidDNSList(_ value: String) -> Bool {
+    public static func isValidDNSList(_ value: String, ipv6: Bool? = nil) -> Bool {
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
-        return value.split(separator: ",", omittingEmptySubsequences: false).allSatisfy {
+        let values = value.split(separator: ",", omittingEmptySubsequences: false)
+        return values.count <= 4 && values.allSatisfy {
             let address = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let ipv6 { return ipv6 ? IPv6Address(address) != nil : IPv4Address(address) != nil }
             return IPv4Address(address) != nil || IPv6Address(address) != nil
         }
     }
 
     public static func isValidProbeList(_ value: String) -> Bool {
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
-        return value.split(separator: ",", omittingEmptySubsequences: false).allSatisfy {
+        let values = value.split(separator: ",", omittingEmptySubsequences: false)
+        return values.count <= 32 && values.allSatisfy {
             isValidProbeDomain($0.trimmingCharacters(in: .whitespacesAndNewlines))
         }
     }

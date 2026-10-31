@@ -169,7 +169,7 @@ fn ping_reply_average() {
 }
 
 #[test]
-fn missing_ipv6() {
+fn ipv4_only() {
     let mut cfg = config();
     cfg.tunnel_ipv6 = None;
     let mut engine = Engine::new(cfg, 0).unwrap();
@@ -188,7 +188,13 @@ fn missing_ipv6() {
             .iter()
             .any(|r| matches!(r.stage, Stage::Dns6 | Stage::Tcp6 | Stage::Https6))
     );
-    assert_eq!(engine.snapshot().state, State::Incomplete);
+    assert_eq!(engine.snapshot().state, State::Passed);
+    assert_eq!(
+        engine.snapshot().domain_states["example.com"],
+        State::Passed
+    );
+    assert_eq!(engine.snapshot().checks.len(), 6);
+    assert_eq!(engine.snapshot().planned_checks.len(), 6);
 }
 
 #[test]
@@ -646,13 +652,14 @@ fn route_metadata() {
     assert_eq!(assess_routes(&cfg, v4, v6), RouteAssessment::default());
     assert_eq!(assess_routes(&cfg, None, None).unavailable.len(), 2);
     cfg.tunnel_ipv4 = None;
-    let partial = assess_routes(&cfg, v4, v6);
-    assert!(partial.issues.is_empty());
-    assert_eq!(partial.unavailable.len(), 1);
+    assert_eq!(assess_routes(&cfg, None, v6), RouteAssessment::default());
+    let bypass = assess_routes(&cfg, v4, v6);
+    assert_eq!(bypass.issues.len(), 1);
+    assert!(bypass.unavailable.is_empty());
     let mismatch = assess_routes(&cfg, v4, Some("fd00::3".parse().unwrap()));
-    assert_eq!(mismatch.issues.len(), 1);
+    assert_eq!(mismatch.issues.len(), 2);
     cfg.tunnel_ipv6 = None;
-    assert!(assess_routes(&cfg, v4, v6).issues.is_empty());
+    assert!(!assess_routes(&cfg, v4, v6).unavailable.is_empty());
 }
 
 #[test]
@@ -675,4 +682,67 @@ fn retry_timing() {
         ),
         (1, 1, 2, 50)
     );
+}
+
+#[test]
+fn ipv6_only() {
+    let mut cfg = config();
+    cfg.tunnel_ipv4 = None;
+    cfg.tunnel_ipv4_prefix = None;
+    cfg.dns_servers.clear();
+    let mut engine = Engine::new(cfg, 0).unwrap();
+    let requests = drive(&mut engine, &mut 0, |r| {
+        if r.stage == Stage::Route {
+            Observation::Route {
+                ipv4: None,
+                ipv6: Some("fd00::2".parse().unwrap()),
+            }
+        } else {
+            success(r)
+        }
+    });
+    assert!(!requests.iter().any(|r| matches!(
+        r.stage,
+        Stage::Dns | Stage::Tcp | Stage::Https | Stage::Gateway
+    )));
+    assert!(requests.iter().any(
+        |r| matches!(r.operation, Operation::Dns { server, ipv6: true }
+        if server == "2001:4860:4860::8888".parse::<IpAddr>().unwrap())
+    ));
+    assert_eq!(engine.snapshot().state, State::Passed);
+    assert_eq!(
+        engine.snapshot().domain_states["example.com"],
+        State::Passed
+    );
+    assert_eq!(engine.snapshot().checks.len(), 6);
+    assert_eq!(engine.snapshot().planned_checks.len(), 6);
+}
+
+#[test]
+fn single_stack_failures() {
+    for ipv6 in [false, true] {
+        let mut cfg = config();
+        if ipv6 {
+            cfg.tunnel_ipv4 = None;
+            cfg.tunnel_ipv4_prefix = None;
+        } else {
+            cfg.tunnel_ipv6 = None;
+        }
+        for bypass in [false, true] {
+            let mut engine = Engine::new(cfg.clone(), 0).unwrap();
+            drive(&mut engine, &mut 0, |r| {
+                if r.stage == Stage::Route && !bypass {
+                    Observation::Route {
+                        ipv4: cfg.tunnel_ipv4.map(IpAddr::V4),
+                        ipv6: cfg.tunnel_ipv6.map(IpAddr::V6),
+                    }
+                } else if !bypass && r.stage == if ipv6 { Stage::Https6 } else { Stage::Https } {
+                    failed()
+                } else {
+                    success(r)
+                }
+            });
+            assert_eq!(engine.snapshot().state, State::Failed);
+        }
+    }
 }

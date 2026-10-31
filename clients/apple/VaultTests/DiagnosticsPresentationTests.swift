@@ -37,6 +37,7 @@ final class DiagnosticsPresentationTests: XCTestCase {
             activeStage: nil,
             state: .passed,
             durationMs: 12,
+            plannedChecks: [.https],
             checks: [check],
             probes: [probe],
             routeIssues: [],
@@ -55,6 +56,7 @@ final class DiagnosticsPresentationTests: XCTestCase {
         XCTAssertEqual(result.summary, "OK")
         XCTAssertEqual(DiagnosticsPresentation.domainState(result, domain: "example.com"), .passed)
         XCTAssertEqual(result.checks, native.checks)
+        XCTAssertEqual(DiagnosticsPresentation.visibleChecks(result), ["https"])
         let probe = try XCTUnwrap(result.probes?.first)
         XCTAssertEqual(probe.id, 42)
         XCTAssertEqual(probe.stage, "https")

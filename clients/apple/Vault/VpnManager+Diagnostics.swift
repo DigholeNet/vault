@@ -58,7 +58,7 @@ extension VpnManager {
                             if request.scope == .application {
                                 return RustDiagnostics.execute(
                                     native,
-                                    tunnelIPv4: nil,
+                                    tunnelAddress: nil,
                                     cancellation: cancellation
                                 ).rust
                             }

@@ -20,7 +20,8 @@ Before creating a bug report, please:
 
 1. Check if the issue already exists in
    the [issue tracker](https://github.com/DigholeNet/vault/issues)
-2. Update to the latest version to see if the bug is already fixed
+2. Try the current `main` development snapshot to see if the bug is already fixed;
+   there is no formal release yet
 3. Collect relevant information: platform, OS version, vault version
 
 When reporting bugs, include:
@@ -62,7 +63,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 ### Prerequisites
 
-- Rust (stable; `rust-toolchain.toml` pins the channel)
+- Rust 1.98 or newer (`rust-toolchain.toml` selects rolling `stable`; it does not pin a compiler version)
 - `protoc` (required by the protobuf build script in `core/`)
 - For the Android client: Android SDK + NDK and `cargo-ndk`
 - For the Apple client: full Xcode and the Rust Apple targets
@@ -101,9 +102,11 @@ Client apps follow the conventions of their platform:
 
 - Rust unit tests live next to the code (`#[cfg(test)]` modules); integration tests are in
   `core/tests/` and run against a mock server
-- Protocol changes must keep client and server compatible — the wire protocol is versioned
-  by the deployed supernodes, so treat protocol compatibility as frozen unless you are
-  deliberately rolling a protocol upgrade
+- There is no formal release yet. The current development wire version is `1`;
+  supernodes reject other versions. Preserve compatibility within a wire version.
+  Breaking framing, authentication or message-semantics changes must increment
+  `PROTOCOL_VERSION`, update the protocol documentation, and require a coordinated
+  client/server upgrade. See [protocol compatibility](docs/protocol.md#protocol-compatibility).
 - Test on real devices/networks when possible (mobile data switching, backgrounding, NAT)
 
 ### Fuzzing

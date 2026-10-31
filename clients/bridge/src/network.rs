@@ -2,7 +2,7 @@
 //! Platform network binding for the portable diagnostic transport.
 use std::io;
 #[cfg(target_vendor = "apple")]
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use vault_core::diagnostics::transport::NetworkBinding;
 
 // Android's NDK equivalent of Network.bindSocket; only tunnel requests use it.
@@ -65,10 +65,10 @@ impl NetworkBinding for InterfaceNetwork {
     }
 }
 
-/// Find the live interface by its assigned IPv4. Apple must never silently
+/// Find the live interface by an assigned IPv4 or IPv6 address. Apple must never silently
 /// substitute an unbound socket if a utun interface has disappeared.
 #[cfg(target_vendor = "apple")]
-pub fn tunnel_interface(address: Ipv4Addr) -> io::Result<u32> {
+pub fn tunnel_interface(address: IpAddr) -> io::Result<u32> {
     let mut list = std::ptr::null_mut();
     // SAFETY: getifaddrs initializes the pointer; every success is freed below.
     if unsafe { libc::getifaddrs(&mut list) } != 0 {
@@ -85,12 +85,25 @@ pub fn tunnel_interface(address: Ipv4Addr) -> io::Result<u32> {
     while !cursor.is_null() {
         // SAFETY: cursor and its addresses are owned by the live getifaddrs list.
         let entry = unsafe { &*cursor };
-        if !entry.ifa_addr.is_null()
-            && unsafe { (*entry.ifa_addr).sa_family as i32 } == libc::AF_INET
-        {
+        if !entry.ifa_addr.is_null() {
             let name = unsafe { std::ffi::CStr::from_ptr(entry.ifa_name) };
-            let ipv4 = unsafe { &*(entry.ifa_addr.cast::<libc::sockaddr_in>()) };
-            let matches = Ipv4Addr::from(ipv4.sin_addr.s_addr.to_ne_bytes()) == address;
+            let family = unsafe { (*entry.ifa_addr).sa_family as i32 };
+            // SAFETY: the family check selects the matching sockaddr layout;
+            // the getifaddrs allocation remains live until the guard is dropped.
+            let found = match family {
+                libc::AF_INET => {
+                    let ipv4 = unsafe { &*(entry.ifa_addr.cast::<libc::sockaddr_in>()) };
+                    Some(IpAddr::V4(Ipv4Addr::from(
+                        ipv4.sin_addr.s_addr.to_ne_bytes(),
+                    )))
+                }
+                libc::AF_INET6 => {
+                    let ipv6 = unsafe { &*(entry.ifa_addr.cast::<libc::sockaddr_in6>()) };
+                    Some(IpAddr::V6(Ipv6Addr::from(ipv6.sin6_addr.s6_addr)))
+                }
+                _ => None,
+            };
+            let matches = found == Some(address);
             let platform_match =
                 !cfg!(target_vendor = "apple") || name.to_bytes().starts_with(b"utun");
             if matches && platform_match {

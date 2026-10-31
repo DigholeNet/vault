@@ -27,6 +27,7 @@ import net.dighole.vaultcore.uniffi.DiagnosticScope
 import net.dighole.vaultcore.uniffi.DiagnosticSnapshot
 import net.dighole.vaultcore.uniffi.DiagnosticState
 import net.dighole.vaultcore.uniffi.DiagnosticTransport
+import java.net.InetAddress
 
 internal data class DiagnosticsState(
     val running: Boolean = false,
@@ -69,7 +70,7 @@ internal class DiagnosticsViewModel : ViewModel() {
             try {
                 val generation = app.vpnGeneration
                 val connected = app.currentVpnStatus as? VpnStatusEvent.Connected ?: error("VPN disconnected")
-                val network = vpnNetwork(manager, connected.ipv4) ?: error("Live VPN network unavailable")
+                val network = vpnNetwork(manager, connected) ?: error("Live VPN network unavailable")
                 val properties = manager.getLinkProperties(network) ?: error("VPN properties unavailable")
                 callback = watchNetwork(manager, network, properties)
                 monitor = launch {
@@ -98,13 +99,16 @@ internal class DiagnosticsViewModel : ViewModel() {
     private suspend fun runEngine(app: VaultApplication, generation: Long, network: Network,
         properties: LinkProperties, connected: VpnStatusEvent.Connected) =
         withContext(Dispatchers.IO) {
-            val ipv4 = properties.linkAddresses.firstOrNull { it.address.hostAddress == connected.ipv4 }
-                ?: error("Live tunnel IPv4 address unavailable")
+            val assigned = assignedAddresses(connected)
+            val live = properties.linkAddresses.filter { it.address in assigned }
+            check(live.map { it.address }.toSet() == assigned.toSet()) { "Live tunnel addresses unavailable" }
+            val ipv4 = live.firstOrNull { it.address is java.net.Inet4Address }
+            val ipv6 = live.firstOrNull { it.address is java.net.Inet6Address }
             val core = DiagnosticEngine(DiagnosticConfig(
                 sessionId = generation.toULong(), domains = app.diagnosticDomains,
                 dnsServers = properties.dnsServers.mapNotNull { it.hostAddress },
-                tunnelIpv4 = ipv4.address.hostAddress, tunnelIpv4Prefix = ipv4.prefixLength.toUByte(),
-                tunnelIpv6 = connected.ipv6.ifBlank { null }, tunnelMtu = properties.mtu.toUShort()
+                tunnelIpv4 = ipv4?.address?.hostAddress, tunnelIpv4Prefix = ipv4?.prefixLength?.toUByte(),
+                tunnelIpv6 = ipv6?.address?.hostAddress, tunnelMtu = properties.mtu.toUShort()
             ))
             synchronized(lifetime) { engine = core }
             try {
@@ -162,8 +166,17 @@ internal class DiagnosticsViewModel : ViewModel() {
     }
 
     @Suppress("DEPRECATION")
-    private fun vpnNetwork(manager: ConnectivityManager, ipv4: String): Network? = manager.allNetworks.firstOrNull { network ->
-        manager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true &&
-            manager.getLinkProperties(network)?.linkAddresses?.any { it.address.hostAddress == ipv4 } == true
+    private fun vpnNetwork(manager: ConnectivityManager, connected: VpnStatusEvent.Connected): Network? {
+        val assigned = assignedAddresses(connected)
+        return manager.allNetworks.firstOrNull { network ->
+            manager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true &&
+                manager.getLinkProperties(network)?.linkAddresses?.map { it.address }?.containsAll(assigned) == true
+        }
     }
+
+    private fun assignedAddresses(connected: VpnStatusEvent.Connected): List<InetAddress> =
+        listOf(connected.ipv4, connected.ipv6).filter { it.isNotEmpty() }.map {
+            check(SettingsValidation.address(it)) { "Invalid assigned address" }
+            InetAddress.getByName(it)
+        }.also { check(it.isNotEmpty()) { "No tunnel address assigned" } }
 }
