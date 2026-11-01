@@ -5,6 +5,13 @@ The app requires iOS 18.5+ or macOS 15.5+; the Swift package supports iOS 18+
 and macOS 15+. Build with full Xcode, a Swift 6 toolchain (Swift 5 language mode),
 Rust and `protoc`.
 
+Running the iOS VPN on a physical device requires Apple Developer Program
+membership and signing profiles with Network Extension and App Group
+entitlements. Unsigned simulator builds are for UI development and tests,
+not for establishing an iOS VPN tunnel. See Apple’s
+[Network Extension configuration](https://developer.apple.com/documentation/xcode/configuring-network-extensions/)
+and [supported iOS capabilities](https://developer.apple.com/help/account/reference/supported-capabilities-ios).
+
 ## Usage
 
 - **iOS:** Status shows the connection button, session clock, assigned IPv4/IPv6

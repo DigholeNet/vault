@@ -249,8 +249,11 @@ rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios \
 cd clients/apple && VaultCore/Scripts/build-xcframework.sh && open Vault.xcodeproj
 ```
 
-Simulator builds work without an Apple Developer account. Device and
-distribution builds are signed by your own team, and the shipped bundle IDs
+Unsigned simulator builds can be used for UI development and tests; this does
+not provide a working iOS VPN. Running Vault’s Network Extension on an iOS
+device requires Apple Developer Program membership and correctly provisioned
+Network Extension and App Group entitlements. Device and distribution builds
+are signed by your own team, and the shipped bundle IDs
 and app group are registered under the Dighole team (another account cannot
 provision them), so point them at your own identifiers first:
 
@@ -280,6 +283,8 @@ release workflow. Release mechanics, signing keys, and provisioning profiles:
 [docs/releasing.md](docs/releasing.md).
 
 ## Documentation
+
+- [Project website source and GitHub Pages deployment](website/README.md) — bilingual static site, light/dark themes and local preview
 
 - Component READMEs: [supernode](supernode/README.md) ·
   [Apple client](clients/apple/README.md) ·
