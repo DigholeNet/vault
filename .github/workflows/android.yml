@@ -84,5 +84,5 @@ jobs:
       - name: Create local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
-      - name: Run app unit tests and build debug APK
-        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon
+      - name: Check NDK selection, run app unit tests and build debug APK
+        run: ./gradlew :vaultcore:testNdkPlatformSelection :app:testDebugUnitTest :app:assembleDebug --no-daemon

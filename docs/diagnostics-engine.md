@@ -38,9 +38,12 @@ connect/local-address query without sending packets.
 
 OS-specific network implementations and native library declarations live in
 `clients/bridge/src/network.rs`; core exposes the `NetworkBinding` interface.
-Android's cargo-ndk platform is taken from the same minSdk as Gradle. The final
-bridge link rejects unresolved symbols, so a missing native library dependency
-fails the build instead of breaking shared-library loading on a phone.
+Android's cargo-ndk platform is the highest native API at or below Gradle's
+minSdk present in the selected NDK sysroot for all packaged ABIs. This allows
+NDKs whose libraries stop below the app's minSdk without changing the APK's
+installation requirement. The final bridge link rejects unresolved symbols,
+so a missing native library dependency fails the build instead of breaking
+shared-library loading on a phone.
 
 ## Host contract
 

@@ -26,6 +26,38 @@ fun compareNdkVersions(left: String, right: String): Int {
     return 0
 }
 
+// NDKs need not provide native libraries for every Android API. For example,
+// an API-36 app can use an NDK whose newest sysroot libraries target API 35.
+// Use the closest available API at or below minSdk, common to all our ABIs.
+fun resolveNdkPlatform(ndkHome: File, minSdk: Int, triples: Collection<String>): Int {
+    val prebuilt = ndkHome.resolve("toolchains/llvm/prebuilt")
+        .listFiles().orEmpty().singleOrNull { it.resolve("sysroot").isDirectory }
+        ?: throw GradleException("Expected one NDK host sysroot under $ndkHome/toolchains/llvm/prebuilt")
+    val libraries = prebuilt.resolve("sysroot/usr/lib")
+    val platforms = triples.map { triple ->
+        libraries.resolve(triple).listFiles().orEmpty()
+            .filter { it.isDirectory }
+            .mapNotNull { it.name.toIntOrNull() }
+            .filter { it <= minSdk }
+            .toSet()
+    }
+    val platform = platforms.reduce { common, available -> common intersect available }.maxOrNull()
+        ?: throw GradleException("NDK $ndkHome has no common native API <= $minSdk for $triples")
+    for (triple in triples) {
+        for (name in listOf("crtbegin_so.o", "crtend_so.o", "libandroid.so", "liblog.so")) {
+            val library = libraries.resolve("$triple/$platform/$name")
+            if (!library.isFile) throw GradleException("Incomplete NDK sysroot: missing $library")
+        }
+    }
+    return platform
+}
+
+val androidTargets = linkedMapOf(
+    "arm64-v8a" to "aarch64-linux-android",
+    "armeabi-v7a" to "arm-linux-androideabi",
+    "x86_64" to "x86_64-linux-android"
+)
+
 // Use one NDK for AGP and cargo-ndk: ANDROID_NDK_HOME first, then the
 // highest installed version. If none exists, ndkVersion lets AGP download
 // the pinned fallback.
@@ -63,9 +95,8 @@ val androidNdkHome = selectedNdk?.second?.absolutePath
 android {
     namespace = "net.dighole.vaultcore"
     compileSdk = libs.versions.compile.sdk.get().toInt()
-    if (selectedNdk == null) {
-        ndkVersion = vaultcoreNdkVersion
-    } else {
+    ndkVersion = vaultcoreNdkVersion
+    if (selectedNdk != null) {
         ndkPath = androidNdkHome
     }
 
@@ -73,7 +104,7 @@ android {
         minSdk = libs.versions.min.sdk.get().toInt()
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += androidTargets.keys
         }
     }
 
@@ -196,15 +227,60 @@ tasks.register<Exec>("cargoNdkBuild") {
     environment("RUSTFLAGS", "-Cforce-frame-pointers=yes")
     environment("PATH", pathWithCargo)
     environment("CARGO_TARGET_DIR", rustDir.resolve("target").absolutePath)
-    commandLine(
-        cargoExecutable, "ndk",
-        "--platform", libs.versions.min.sdk.get(),
-        "-t", "arm64-v8a",
-        "-t", "armeabi-v7a",
-        "-t", "x86_64",
-        "-o", "../android/vaultcore/src/main/jniLibs",
-        "build", "--release"
-    )
+    doFirst {
+        // Resolve lazily so AGP can provision the fallback NDK if necessary.
+        val ndkHome = androidComponents.sdkComponents.ndkDirectory.get().asFile
+        val minSdk = libs.versions.min.sdk.get().toInt()
+        val nativePlatform = resolveNdkPlatform(ndkHome, minSdk, androidTargets.values)
+        logger.lifecycle("cargo-ndk: NDK ${ndkHome.absolutePath}, native API $nativePlatform (app minSdk $minSdk)")
+        environment("ANDROID_NDK_HOME", ndkHome.absolutePath)
+        commandLine(
+            listOf(cargoExecutable, "ndk", "--platform", nativePlatform.toString()) +
+                androidTargets.keys.flatMap { listOf("-t", it) } +
+                listOf("-o", "../android/vaultcore/src/main/jniLibs", "build", "--release")
+        )
+    }
+}
+
+tasks.register("testNdkPlatformSelection") {
+    group = "verification"
+    description = "Checks native API selection against representative NDK sysroot layouts."
+    doLast {
+        val fixtureRoot = temporaryDir.resolve("run-${System.nanoTime()}")
+        fun fixture(name: String, apis: List<Int>): File {
+            val home = fixtureRoot.resolve(name)
+            for (triple in androidTargets.values) {
+                for (api in apis) {
+                    val directory = home.resolve("toolchains/llvm/prebuilt/test-host/sysroot/usr/lib/$triple/$api")
+                    directory.mkdirs()
+                    for (library in listOf("crtbegin_so.o", "crtend_so.o", "libandroid.so", "liblog.so")) {
+                        directory.resolve(library).writeText("")
+                    }
+                }
+            }
+            return home
+        }
+        val older = fixture("older", listOf(21, 24, 35))
+        check(resolveNdkPlatform(older, 36, androidTargets.values) == 35)
+        check(resolveNdkPlatform(older, 25, androidTargets.values) == 24)
+        check(resolveNdkPlatform(fixture("newer", listOf(35, 36, 37)), 36, androidTargets.values) == 36)
+        val mixed = fixture("mixed", listOf(35, 36))
+        check(
+            mixed.resolve("toolchains/llvm/prebuilt/test-host/sysroot/usr/lib/arm-linux-androideabi/36")
+                .renameTo(mixed.resolve("arm-api-36"))
+        )
+        check(resolveNdkPlatform(mixed, 36, androidTargets.values) == 35)
+        check(runCatching { resolveNdkPlatform(older, 20, androidTargets.values) }.exceptionOrNull() is GradleException)
+        val incomplete = fixture("incomplete", listOf(35))
+        check(
+            incomplete.resolve("toolchains/llvm/prebuilt/test-host/sysroot/usr/lib/aarch64-linux-android/35/liblog.so")
+                .delete()
+        )
+        check(runCatching { resolveNdkPlatform(incomplete, 36, androidTargets.values) }.exceptionOrNull() is GradleException)
+        check(runCatching { resolveNdkPlatform(fixtureRoot.resolve("missing"), 36, androidTargets.values) }.exceptionOrNull() is GradleException)
+        fixtureRoot.deleteRecursively()
+        logger.lifecycle("NDK native API selection checks passed")
+    }
 }
 
 tasks.named("preBuild").configure {

@@ -98,6 +98,21 @@ Requirements:
 
 Gradle (wrapper) and Kotlin are pinned by the project — no manual install needed.
 
+The app still requires API 36 or newer, but its Rust native API is selected
+from the actual NDK sysroot: the highest API at or below `minSdk` available
+for all three ABIs. For example, an NDK with libraries through API 35 uses
+`cargo ndk --platform 35` for this API-36 app. This also handles API levels
+with no separate native library directory. AGP's NDK version and path are
+kept consistent, and AGP and cargo-ndk use the same NDK;
+the build logs its path and selected API. Missing startup objects or Android
+system libraries fail early with the exact missing path. Lowering the native
+API does not lower the APK's installation requirement or disable unresolved-
+symbol checks.
+
+Run `./gradlew :vaultcore:testNdkPlatformSelection --no-daemon` to check
+selection against older/newer NDK layouts, missing API directories and
+incomplete installations. Android CI runs this before app tests and packaging.
+
 ```bash
 git clone https://github.com/DigholeNet/vault.git
 cd vault/clients/android
