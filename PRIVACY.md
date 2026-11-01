@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last Updated:** October 22, 2026
+**Last Updated:** October 31, 2026
 
 ## Introduction
 
@@ -40,6 +40,29 @@ successful migration, and plaintext fallback entries are encrypted when Keystore
 recovers. Linux configuration files
 contain the password in plaintext and should be readable only by the administrator.
 
+### Active diagnostics and settings validation
+
+On Apple and Android, starting diagnostics manually sends DNS, TCP, HTTPS and
+ICMP probes. The default diagnostic domains are `www.google.com`, `github.com`
+and `t.co`; users can change them in settings. Tunnel DNS uses the configured
+resolvers. Apple and Android default to `1.1.1.1,8.8.8.8` for IPv4 DNS and
+Google `2001:4860:4860::8888,2001:4860:4860::8844` for IPv6 DNS when each
+field is empty. Only assigned families are applied; dual-stack tunnels use
+both resolver lists. Linux uses the same per-family defaults; for dual stack
+it selects two IPv6 resolvers and one IPv4 resolver. Application Ping targets
+`1.1.1.1` and `2606:4700:4700::1111`; optional gateway probes target the VPN
+gateway. Domain validation in settings checks syntax without sending DNS
+queries; the exported query builder constructs bytes for validation only.
+
+Tunnel probes bind to the live VPN interface/network. Application probes use
+the app process's system DNS and default routing, which may select a path
+outside the tunnel; optional host-default probes run in the VPN host process.
+Resolvers and target operators can observe the queries or connections and
+the source IP visible on the selected route. These requests are connectivity
+checks, not analytics reports to the software authors. HTTPS response samples
+remain in Rust; only validated metadata is returned to the app.
+See [shared diagnostics](docs/diagnostics-engine.md) for probe scopes and defaults.
+
 ### Server (supernode)
 
 The supernode decrypts tunnel packets and reads their IP headers to route traffic.
@@ -50,6 +73,11 @@ include **connection metadata** needed to operate and debug the service:
 - Client device ID, reported device name/model or hostname, and platform
 - The tunnel IP address assigned to each client
 - Handshake and disconnect events with timestamps
+
+Handshake-request metadata is logged before client authentication. Device names
+and platform labels are client-reported, truncated and escaped for display;
+they are not verified device identities. Logs distinguish pending handshakes
+from authenticated connections.
 
 Debug-level packet logs additionally include source/destination IP addresses and
 packet sizes. Warning logs can include addresses for rejected or unroutable packets,

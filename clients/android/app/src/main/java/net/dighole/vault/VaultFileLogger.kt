@@ -18,11 +18,11 @@ import java.util.concurrent.Executors
  *
  * Mirrors the Apple FileLogger design: a single current file (`vault.log`)
  * appended with O_APPEND semantics, rotated to one backup file
- * (`vault.prev.log`) once it exceeds [MAX_LOG_SIZE], so the lines just
- * before a disconnect or crash survive.
+ * (`vault.prev.log`) when a Kotlin write observes [MAX_LOG_SIZE] exceeded.
+ * Rust writes do not run this check, so this is not a strict file-size limit.
  *
- * All writes are serialized on a single background thread so logging never
- * blocks the caller (e.g. the VPN packet path or the main thread).
+ * Kotlin writes are queued on a background thread. Rust appends separately
+ * and synchronously; those writes can block on filesystem I/O.
  */
 object VaultFileLogger {
     private const val TAG = "VaultFileLogger"
@@ -125,6 +125,26 @@ object VaultFileLogger {
                 file.appendText(entry + "\n")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to write diagnostic event", e)
+            }
+        }
+    }
+
+    /** Queue UI reads/clears behind Kotlin writes; append-only native writes remain safe. */
+    suspend fun readLogs(): String = queuedLogs(false)
+    suspend fun clearAndRead(): String = queuedLogs(true)
+
+    private suspend fun queuedLogs(clear: Boolean): String = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+        writerThread.execute {
+            try {
+                if (clear) {
+                    logFile?.let { FileOutputStream(it, false).use { stream -> stream.flush() } }
+                    prevLogFile?.delete()
+                }
+                val content = listOfNotNull(prevLogFile, logFile).filter { it.exists() }
+                    .joinToString("\n") { it.readText() }
+                if (continuation.isActive) continuation.resumeWith(Result.success(content))
+            } catch (error: java.io.IOException) {
+                if (continuation.isActive) continuation.resumeWith(Result.failure(error))
             }
         }
     }

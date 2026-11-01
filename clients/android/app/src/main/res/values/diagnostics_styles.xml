@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="TextAppearance.Vault.Diagnostics.Body" parent="TextAppearance.Vault.Body" />
+    <style name="TextAppearance.Vault.Diagnostics.Title" parent="TextAppearance.Vault.Body" />
+    <style name="TextAppearance.Vault.Diagnostics.Secondary" parent="TextAppearance.Vault.Supporting" />
+</resources>

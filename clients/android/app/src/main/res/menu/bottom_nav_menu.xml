@@ -11,6 +11,8 @@
         android:icon="@drawable/ic_settings"
         android:title="@string/nav_configure" />
 
+    <item android:id="@+id/nav_diagnostics" android:icon="@drawable/ic_diagnostics" android:title="@string/nav_diagnostics" />
+
     <item
         android:id="@+id/nav_about"
         android:icon="@drawable/ic_info"

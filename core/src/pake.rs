@@ -5,9 +5,10 @@
 //! authentication. A passive observer of a SPAKE2 exchange cannot verify
 //! password guesses offline (the handshake carries no password-derived
 //! verifier), and an active attacker gets exactly one guess per protocol
-//! run — which the supernode's per-IP handshake rate limit makes
-//! impractical. Both sides finish with the same 32-byte key only when they
-//! configured the same password; that key is mixed into the session-key
+//! run. The supernode bounds INIT attempts with a per-IP rate limit;
+//! abandoned attempts do not trigger authentication-failure bans. Both sides
+//! finish with the same 32-byte key only when they configured the same password;
+//! that key is mixed into the session-key
 //! HKDF and keys the server's confirmation MAC.
 
 use spake2::{Ed25519Group, Identity, Password, Spake2};

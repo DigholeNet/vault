@@ -296,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn heartbeat_cannot_be_retyped_as_close() {
+    fn heartbeat_type_auth() {
         let (sender, receiver) = crypto_pair();
         let id = PeerId([7; 16]);
         let mut packet = Buffer::new(128);

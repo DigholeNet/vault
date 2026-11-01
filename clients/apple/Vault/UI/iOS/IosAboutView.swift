@@ -1,122 +1,60 @@
-//
-//  IosAboutView.swift
-//  Vault
-//
-//
-
 import SwiftUI
-import VaultCore
 
 #if os(iOS)
-    struct IosAboutView: View {
+struct IosAboutView: View {
+    @EnvironmentObject var languageManager: LanguageManager
 
-        @Binding var selectedTab: Int
-        @State private var showLogSheet = false
-        @State private var logText = ""
-        @State private var isLoadingLogs = false
-        @State private var errorMessage: String?
-        @State private var showError = false
-        @EnvironmentObject var languageManager: LanguageManager
-
-        var body: some View {
-            VStack(spacing: 20) {
-                Text(languageManager.tr("Vault version : %@", Bundle.main.appVersionShort))
-
-                HStack {
-                    Text(languageManager.tr("Language"))
-                    Picker(selection: $languageManager.language) {
-                        ForEach(AppLanguage.allCases) { language in
-                            Text(language.displayName).tag(language)
-                        }
-                    } label: {
-                        EmptyView()
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                }
-
-                Button(action: viewLogs) {
-                    Label(languageManager.tr("View Logs"), systemImage: "doc.text.magnifyingglass")
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .padding(50.0)
-            .navigationBarBackButtonHidden(true)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: {
-                        selectedTab = 0
-                    }) {
-                        HStack {
-                            Image(systemName: "chevron.left")
-                        }
-                        .foregroundColor(.blue)
-                    }
-                }
-            }
-            .sheet(isPresented: $showLogSheet) {
-                NavigationView {
-                    ZStack {
-                        if isLoadingLogs {
-                            ProgressView(languageManager.tr("Loading logs..."))
-                        } else {
-                            ScrollView {
-                                Text(logText)
-                                    .font(.system(.footnote, design: .monospaced))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding()
-                            }
-                        }
-                    }
-                    .navigationTitle(languageManager.tr("Logs"))
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button(languageManager.tr("Done")) {
-                                showLogSheet = false
-                            }
-                        }
-                        ToolbarItem(placement: .navigationBarLeading) {
-                            Button(languageManager.tr("Copy")) {
-                                UIPasteboard.general.string = logText
-                            }
-                            .disabled(logText.isEmpty)
-                        }
-                    }
-                }
-            }
-            .alert(languageManager.tr("No Logs"), isPresented: $showError, presenting: errorMessage) { _ in
-                Button(languageManager.tr("OK")) {}
-            } message: { message in
-                Text(message)
-            }
-        }
-
-        private func viewLogs() {
-            showLogSheet = true
-            isLoadingLogs = true
-            logText = ""
-
-            Task {
-                let text = await FileLogger.shared.readLogAsync() ?? ""
-                await MainActor.run {
-                    isLoadingLogs = false
-                    if text.isEmpty {
-                        errorMessage = LanguageManager.shared.tr("No log content found.")
-                        showError = true
-                        showLogSheet = false
-                    } else {
-                        logText = text
-                    }
-                }
-            }
-        }
+    /// Read the icon files emitted from the existing AppIcon asset catalog.
+    private var appIcon: UIImage? {
+        let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any]
+        let primary = icons?["CFBundlePrimaryIcon"] as? [String: Any]
+        let names = primary?["CFBundleIconFiles"] as? [String] ?? []
+        return names.reversed().compactMap { UIImage(named: $0) }.first
     }
 
-    #Preview {
-        @Previewable @State var selectedTab: Int = 0
-        IosAboutView(selectedTab: $selectedTab)
-            .environmentObject(LanguageManager.shared)
-    }
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    if let icon = appIcon {
+                        Image(uiImage: icon)
+                            .resizable().scaledToFit().frame(width: 80, height: 80)
+                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                            .accessibilityHidden(true)
+                            .padding(.bottom, 16)
+                    }
+                    Text("Vault")
+                        .font(.system(size: 24, weight: .bold))
+                        .padding(.bottom, 12)
+                    Text(languageManager.tr(
+                        "Version %@ (%@)",
+                        Bundle.main.appVersionShort,
+                        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+                    ))
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 32)
 
+                    Link(destination: URL(string: "https://github.com/DigholeNet/vault")!) {
+                        Text(verbatim: "https://github.com/DigholeNet/vault")
+                    }
+                    .font(.system(size: 14))
+                    .padding(.bottom, 16)
+                    Text(languageManager.tr("A secure VPN client for cross-regional connectivity."))
+                        .font(.system(size: 14))
+                        .padding(.bottom, 16)
+                    Text(verbatim: "© 2026 Dighole Team")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .multilineTextAlignment(.center)
+                .padding(32)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: geometry.size.height)
+            }
+        }
+        .navigationTitle(languageManager.tr("About"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
 #endif

@@ -1,6 +1,8 @@
 name: Rust checks
 
 on:
+  workflow_call:
+  workflow_dispatch:
   push:
     branches: [main, develop]
   pull_request:
@@ -44,6 +46,14 @@ jobs:
       - name: Test
         run: cargo test --locked --workspace --features vault-core/test
 
+      - name: Test ICMP loopback with ping socket permission
+        run: |
+          ping_test_gid="$(id -g)"
+          previous_ping_groups="$(sysctl -n net.ipv4.ping_group_range)"
+          trap 'sudo sysctl -w "net.ipv4.ping_group_range=$previous_ping_groups"' EXIT
+          sudo sysctl -w "net.ipv4.ping_group_range=$ping_test_gid $ping_test_gid"
+          cargo test --locked -p vault-core --features test diagnostics::transport::tests::ping_loopback -- --exact --ignored
+
       - name: Verify server network setup in an isolated Linux namespace
         run: scripts/test-network-namespace.sh
 
@@ -82,3 +92,6 @@ jobs:
 
       - name: Test
         run: cargo test --locked --workspace --features vault-core/test
+
+      - name: Test ICMP loopback
+        run: cargo test --locked -p vault-core --features test diagnostics::transport::tests::ping_loopback -- --exact --ignored

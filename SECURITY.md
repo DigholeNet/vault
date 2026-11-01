@@ -2,11 +2,10 @@
 
 ## Supported Versions
 
-We release security updates for the following versions:
-
-| Version | Supported          |
-|---------|--------------------|
-| 0.1.x   | :white_check_mark: |
+There are no formal releases yet. `0.1.0` is the current development version.
+Security fixes currently land on `main`; development snapshots have no supported
+release series or backport guarantee. A supported-version table will be added
+when the first version is released.
 
 ## Reporting a Vulnerability
 
@@ -44,8 +43,10 @@ Vault is implemented in Rust. All protocol and cryptographic logic lives in the 
 `core/` crate (`vault-core`); clients and the supernode server exchange messages over a
 custom UDP-based protocol.
 
-Cryptographic primitives are provided by the [ring](https://github.com/briansmith/ring)
-library:
+X25519, AEAD, HKDF, confirmation MACs and their random generation use
+[ring](https://github.com/briansmith/ring). SPAKE2 uses the
+[spake2](https://github.com/RustCrypto/PAKEs) crate with its Ed25519 group
+implementation; it is not implemented by ring:
 
 | Component              | Algorithm                            | Purpose                  |
 |------------------------|--------------------------------------|--------------------------|
@@ -73,8 +74,8 @@ Security properties:
 - **Handshake Authentication**: Both sides run SPAKE2, a password-authenticated key
   exchange (PAKE). No password-derived verifier ever crosses the wire, so a passive
   observer cannot verify password guesses offline; an active attacker gets exactly
-  one guess per handshake, and the supernode temporarily bans source IPs after
-  repeated handshake failures.
+  one guess per handshake. The supernode rate-limits INIT requests and separately
+  bans source IPs after repeated invalid encrypted confirmations.
   The server proves it holds the password with a confirmation MAC before the client
   sends any traffic, and the PAKE output salts the session-key HKDF, binding the
   encrypted channel to the authenticated exchange.
@@ -82,7 +83,7 @@ Security properties:
 ## Known Limitations
 
 We believe in being upfront about the weak spots of the current protocol. These are
-known, accepted limitations of the 0.1.x protocol:
+known limitations of the current development protocol:
 
 1. **Symmetric, network-level trust model.** Clients and the supernode authenticate to
    each other with the *same* password-derived key. Anyone who holds the password can
@@ -92,10 +93,13 @@ known, accepted limitations of the 0.1.x protocol:
 
 2. **Passwords remain guessable online in principle.** PAKE removes the offline
    dictionary attack entirely, but an active attacker can still test one password
-   per handshake against the live supernode (source IPs are banned after repeated
-   failures). A weak
-   human-chosen password can eventually fall to a patient online attack, so use a
-   strong, high-entropy password.
+   per handshake against the live supernode. The per-IP INIT limit is 60 requests
+   per 60 seconds. A guess can be checked against the server confirmation MAC
+   without sending an encrypted confirmation; abandoned attempts do not count
+   toward authentication-failure bans. Those bans cover repeated invalid
+   encrypted confirmations, not every wrong-password guess. A weak human-chosen
+   password can eventually fall to an online attack, so use a strong,
+   high-entropy password.
 
 3. **Clock-synchronized handshake freshness.** Replay protection for handshakes relies
    on timestamps, so clients and servers need roughly correct clocks
@@ -124,10 +128,15 @@ known, accepted limitations of the 0.1.x protocol:
 6. **Handshake rate limiting and banning can be weaponized with spoofed source IPs.**
    INIT packets are unauthenticated UDP datagrams, and the supernode's rate limiting
    and failure-based banning key on the source IP. An attacker who can spoof source
-   addresses can therefore get an arbitrary victim IP banned by flooding INIT packets
-   from it — and sustain the ban by continuing to send. The 32 pending-handshake
-   slots can likewise be exhausted with spoofed INITs, denying service to legitimate
-   clients until the entries expire. Deployments that face untrusted networks should
+   addresses can consume a victim IP's INIT rate-limit budget with spoofed requests.
+   INIT flooding alone does not count as failed authentication: abandoned and
+   expired attempts release their reservations without a failure penalty.
+   Failure-based bans require repeated invalid encrypted confirmations against
+   pending sessions; a spoofing attacker able to target those sessions can also
+   cause failures for the victim IP. Separately, the 32 pending-handshake slots
+   can be exhausted with spoofed INITs, denying service to legitimate clients
+   until entries expire. These controls are shared by clients behind one NAT.
+   Deployments that face untrusted networks should
    mitigate this at the firewall by restricting which source addresses may reach the
    supernode's UDP port.
 
@@ -136,12 +145,15 @@ known, accepted limitations of the 0.1.x protocol:
 - Use strong, unique passwords for each VPN network you deploy (see limitation 2)
 - Keep clients and the supernode updated to receive security patches
 - Restrict network access to the supernode's UDP port where possible (firewall rules)
-- Only connect to VPN servers operated by parties you trust — all traffic is relayed
-  through the supernode by design
+- Only connect to VPN servers operated by parties you trust — tunnel traffic is
+  decrypted and relayed through the supernode by design
+- Review [traffic protection scope](README.md#traffic-routing-and-protection-scope):
+  server-route exclusions, unassigned address families and OS teardown can leave
+  traffic outside the VPN. Vault has no cross-platform persistent kill switch
 
 ## Security Updates
 
-Security updates will be released as:
+Once formal releases begin, the target security-update schedule is:
 
 - **Critical**: Immediate patch release
 - **High**: Next scheduled release (within 2 weeks)

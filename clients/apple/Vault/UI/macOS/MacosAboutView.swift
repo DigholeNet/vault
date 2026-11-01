@@ -1,107 +1,43 @@
-//
-//  MacosAboutView.swift
-//  Vault
-//
-//
-
-import SwiftUI
-import VaultCore
-
 #if os(macOS)
-    struct MacosAboutView: View {
-        @State private var showLogSheet = false
-        @State private var logText = ""
-        @State private var isLoadingLogs = false
-        @State private var errorMessage: String?
-        @State private var showError = false
-        @EnvironmentObject var languageManager: LanguageManager
+import SwiftUI
 
-        var body: some View {
-            VStack(spacing: 20) {
-                Text(languageManager.tr("Vault version : %@", Bundle.main.appVersionShort))
+struct MacosAboutView: View {
+    @EnvironmentObject var languageManager: LanguageManager
 
-                HStack {
-                    Text(languageManager.tr("Language"))
-                    Picker(selection: $languageManager.language) {
-                        ForEach(AppLanguage.allCases) { language in
-                            Text(language.displayName).tag(language)
-                        }
-                    } label: {
-                        EmptyView()
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                }
+    var body: some View {
+        VStack(spacing: 0) {
+            MacosAppIcon(size: 80)
+                .accessibilityHidden(true)
+                .padding(.bottom, 16)
+            Text("Vault")
+                .font(.system(size: 24, weight: .bold))
+                .padding(.bottom, 12)
+            Text(languageManager.tr(
+                "Version %@ (%@)",
+                Bundle.main.appVersionShort,
+                Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+            ))
+            .font(.system(size: 16))
+            .foregroundStyle(.secondary)
+            .padding(.bottom, 32)
 
-                Button(action: viewLogs) {
-                    Label(languageManager.tr("View Logs"), systemImage: "doc.text.magnifyingglass")
-                }
-                .buttonStyle(.borderedProminent)
+            Link(destination: URL(string: "https://github.com/DigholeNet/vault")!) {
+                Text(verbatim: "https://github.com/DigholeNet/vault")
             }
-            .padding(50.0)
-            .sheet(isPresented: $showLogSheet) {
-                VStack(spacing: 0) {
-                    HStack {
-                        Text(languageManager.tr("Logs"))
-                            .font(.headline)
-                        Spacer()
-                        Button(languageManager.tr("Copy")) {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(logText, forType: .string)
-                        }
-                        .disabled(logText.isEmpty)
-                        Button(languageManager.tr("Close")) {
-                            showLogSheet = false
-                        }
-                    }
-                    .padding()
-
-                    Divider()
-
-                    ZStack {
-                        if isLoadingLogs {
-                            ProgressView(languageManager.tr("Loading logs..."))
-                        } else {
-                            ScrollView {
-                                Text(logText)
-                                    .font(.system(.footnote, design: .monospaced))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding()
-                            }
-                        }
-                    }
-                }
-                .frame(width: 700, height: 450)
-            }
-            .alert(languageManager.tr("No Logs"), isPresented: $showError, presenting: errorMessage) { _ in
-                Button(languageManager.tr("OK")) {}
-            } message: { message in
-                Text(message)
-            }
+            .font(.system(size: 14))
+            .padding(.bottom, 16)
+            Text(languageManager.tr("A secure VPN client for cross-regional connectivity."))
+                .font(.system(size: 14))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 16)
+            Text(verbatim: "© 2026 Dighole Team")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
-
-        private func viewLogs() {
-            showLogSheet = true
-            isLoadingLogs = true
-            logText = ""
-
-            Task {
-                let text = await FileLogger.shared.readLogAsync() ?? ""
-                await MainActor.run {
-                    isLoadingLogs = false
-                    if text.isEmpty {
-                        errorMessage = LanguageManager.shared.tr("No log content found.")
-                        showError = true
-                        showLogSheet = false
-                    } else {
-                        logText = text
-                    }
-                }
-            }
-        }
+        .multilineTextAlignment(.center)
+        .padding(32)
+        .frame(width: 420, height: 440)
     }
+}
 
-    #Preview {
-        MacosAboutView()
-    }
 #endif

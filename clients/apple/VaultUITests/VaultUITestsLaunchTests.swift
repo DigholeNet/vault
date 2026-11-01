@@ -7,7 +7,6 @@
 import XCTest
 
 final class VaultUITestsLaunchTests: XCTestCase {
-
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true
     }

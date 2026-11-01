@@ -81,8 +81,56 @@ class VaultConfigStoreTest {
             dir.deleteRecursively()
         }
     }
-    private val first = VaultConfig("first.example", 1001, "first-password", "1.1.1.1")
-    private val second = VaultConfig("second.example", 1002, "second-password", "8.8.8.8")
+    private val first = VaultConfig(host = "first.example", port = 1001, password = "first-password",
+        dnsIpv4 = "1.1.1.1", dnsIpv6 = "2001:4860:4860::8888")
+    private val second = VaultConfig(host = "second.example", port = 1002, password = "second-password",
+        dnsIpv4 = "8.8.8.8", dnsIpv6 = "2606:4700:4700::1111", mtu = "1380", probeDomains = "github.com,t.co")
+
+    @Test fun dnsMigration() = runBlocking {
+        val f = Fixture()
+        try {
+            f.disk.edit { it[ConfigKeys.DNS] = "1.1.1.1, 2001:4860:4860::8888,8.8.8.8,2606:4700:4700::1111" }
+            val config = f.store.read()
+            assertEquals("1.1.1.1,8.8.8.8", config.dnsIpv4)
+            assertEquals("2001:4860:4860::8888,2606:4700:4700::1111", config.dnsIpv6)
+            assertNull(f.disk.data.first()[ConfigKeys.DNS])
+            f.reopen()
+            assertEquals(config, f.store.read())
+        } finally { f.close() }
+    }
+
+    @Test fun dnsMigrationKeepsOverrides() = runBlocking {
+        val f = Fixture()
+        try {
+            f.disk.edit {
+                it[ConfigKeys.DNS] = "1.1.1.1,2001:4860:4860::8888"
+                it[ConfigKeys.DNS_IPV4] = ""
+                it[ConfigKeys.DNS_IPV6] = "2606:4700:4700::1111"
+            }
+            val config = f.store.read()
+            assertEquals("", config.dnsIpv4)
+            assertEquals("2606:4700:4700::1111", config.dnsIpv6)
+            assertNull(f.disk.data.first()[ConfigKeys.DNS])
+        } finally { f.close() }
+    }
+
+    @Test fun dnsMigrationCommitFailure() = runBlocking {
+        val f = Fixture()
+        try {
+            f.disk.edit { it[ConfigKeys.DNS] = "1.1.1.1,2001:4860:4860::8888" }
+            f.failCommit = true
+            try {
+                f.store.read()
+                throw AssertionError("migration unexpectedly succeeded")
+            } catch (_: IOException) { }
+            val prefs = f.disk.data.first()
+            assertEquals("1.1.1.1,2001:4860:4860::8888", prefs[ConfigKeys.DNS])
+            assertNull(prefs[ConfigKeys.DNS_IPV4])
+            assertNull(prefs[ConfigKeys.DNS_IPV6])
+            f.failCommit = false
+            assertEquals("2001:4860:4860::8888", f.store.read().dnsIpv6)
+        } finally { f.close() }
+    }
 
     @Test(timeout = 15000)
     fun concurrentAccessKeepsWholeConfigs() = runBlocking {
@@ -123,7 +171,7 @@ class VaultConfigStoreTest {
     }
 
     @Test(timeout = 15000)
-    fun cancelledCommitPreservesPreviousConfig() = runBlocking {
+    fun cancelledCommit() = runBlocking {
         val f = Fixture()
         try {
             f.store.write(first)
@@ -139,7 +187,7 @@ class VaultConfigStoreTest {
     }
 
     @Test
-    fun legacyEncryptedPasswordMigratesWithExistingHost() = runBlocking {
+    fun encryptedMigration() = runBlocking {
         val f = Fixture()
         try {
             f.legacy = "new encrypted password"
@@ -158,7 +206,7 @@ class VaultConfigStoreTest {
     }
 
     @Test
-    fun fallbackMigratesAfterKeystoreRecovery() = runBlocking {
+    fun keystoreRecoveryMigration() = runBlocking {
         val f = Fixture()
         try {
             f.legacy = "stale credential"
@@ -176,7 +224,7 @@ class VaultConfigStoreTest {
     }
 
     @Test
-    fun failedMigrationCommitPreservesLegacyRecoveryCopy() = runBlocking {
+    fun failedMigrationCommit() = runBlocking {
         val f = Fixture()
         try {
             f.legacy = "recovery"
@@ -213,7 +261,7 @@ class VaultConfigStoreTest {
     }
 
     @Test
-    fun unreadableLegacyCredentialIsNotDeleted() = runBlocking {
+    fun unreadableLegacyCredential() = runBlocking {
         val f = Fixture()
         try {
             f.legacy = "recovery"
@@ -230,7 +278,7 @@ class VaultConfigStoreTest {
     }
 
     @Test
-    fun legacyPlaintextRecoversAfterEncryptionFailure() = runBlocking {
+    fun plaintextRecovery() = runBlocking {
         val f = Fixture()
         try {
             f.disk.edit { it[ConfigKeys.PASSWORD] = "recovery" }

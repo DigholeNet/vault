@@ -39,6 +39,8 @@ pub const HANDSHAKE_RACE_STAGGER_MS: u64 = 300;
 pub const HEARTBEAT_INTERVAL_SECS: u64 = 10;
 pub const HEARTBEAT_TIMEOUT_MS: u64 = 30_000;
 pub const INITIAL_RECONNECT_DELAY_MS: u64 = 1_000;
+/// Coalesce bursts of OS path notifications before opening another socket.
+pub const NETWORK_CHANGE_DEBOUNCE_MS: u64 = 300;
 pub const MAX_RECONNECT_DELAY_MS: u64 = 60_000;
 /// Max packets delivered per `on_packets` callback. Bigger batches amortize
 /// the (expensive) FFI callback; the bound keeps latency flat.
@@ -86,8 +88,9 @@ impl From<anyhow::Error> for ClientError {
 pub trait ClientCallbacks: Send + Sync {
     /// A batch of decrypted IP packets from the tunnel.
     fn on_packets(&self, packets: Vec<Vec<u8>>);
-    /// Apply assigned addresses and platform routes. A configuration error
-    /// keeps the session inactive and aborts this connection attempt.
+    /// Apply addresses and platform routes on initial assignment or a real
+    /// address/mask/prefix change. Reconnects with the same configuration do
+    /// not repeat this callback. Failed setup may be retried.
     fn on_ip_assigned(
         &self,
         ipv4: String,
@@ -102,9 +105,9 @@ pub trait ClientCallbacks: Send + Sync {
 
 pub struct ClientConfig {
     pub password: String,
-    /// Candidate supernode addresses in preference order (usually literal
-    /// IPs resolved by the platform before the tunnel comes up). Every
-    /// (re)connect races them Happy-Eyeballs style: each candidate's
+    /// Candidate supernode addresses (usually literal IPs resolved by the
+    /// platform before the tunnel comes up). Every (re)connect prefers IPv6
+    /// and races candidates Happy-Eyeballs style: each candidate's
     /// handshake starts HANDSHAKE_RACE_STAGGER_MS after the previous one
     /// and the first to complete wins. Must not be empty.
     pub hosts: Vec<String>,
@@ -118,6 +121,13 @@ pub struct ClientConfig {
     /// fd. Android uses it to call `VpnService.protect(fd)`; iOS/macOS pass a
     /// hook that just returns true (the system manages the tunnel socket).
     pub socket_protect: Option<Arc<dyn Fn(i32) -> bool + Send + Sync>>,
+}
+
+/// Atomic snapshot of transport readiness and its attempt generation.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ConnectionStatus {
+    pub connected: bool,
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -154,6 +164,8 @@ impl UplinkCounters {
 
 struct ClientState {
     is_active: bool,
+    connection_generation: u64,
+    assigned_addresses: Option<(String, String, String, i32)>,
     is_closing: bool,
     last_pong: Instant,
     receive_handle: Option<JoinHandle<()>>,
@@ -268,6 +280,11 @@ impl ClientSession {
     /// drains the queue, encrypts and sends. When the queue is full the
     /// packet is dropped (UDP semantics) instead of growing memory.
     pub fn write_packet(&self, data: Vec<u8>) -> Result<(), ClientError> {
+        // This unicast VPN does not carry IPv6 multicast control traffic.
+        // Apply the same policy for every platform before queueing packets.
+        if data.len() >= 40 && data[0] >> 4 == 6 && data[24] == 0xff {
+            return Ok(());
+        }
         let state = self.lock_state()?;
 
         let counters = &self.inner.uplink;
@@ -320,22 +337,16 @@ impl ClientSession {
         }
     }
 
-    pub fn is_active(&self) -> bool {
-        self.inner
-            .state
-            .lock()
-            .map(|s| s.is_active)
-            .unwrap_or(false)
+    pub fn connection_status(&self) -> ConnectionStatus {
+        let state = self.inner.state.lock().unwrap_or_else(|e| e.into_inner());
+        ConnectionStatus {
+            connected: state.is_active,
+            generation: state.connection_generation,
+        }
     }
 
-    /// Seconds since the last authenticated packet from the server (pong or
-    /// decrypted data); platform watchdogs use this to detect a dead server.
-    pub fn last_activity_age_secs(&self) -> u64 {
-        self.inner
-            .state
-            .lock()
-            .map(|s| s.last_pong.elapsed().as_secs())
-            .unwrap_or(0)
+    pub fn is_active(&self) -> bool {
+        self.connection_status().connected
     }
 
     /// Wake the existing connection loop after an underlying network change.
@@ -433,6 +444,8 @@ impl ClientState {
     fn new() -> Self {
         Self {
             is_active: false,
+            connection_generation: 0,
+            assigned_addresses: None,
             is_closing: false,
             last_pong: Instant::now(),
             receive_handle: None,
@@ -481,6 +494,11 @@ impl ClientInner {
             {
                 break;
             }
+            if result.is_none()
+                && !Self::settle_network_changes(&mut shutdown_rx, &mut reconnect_rx).await
+            {
+                break;
+            }
             match result {
                 Some(Err(e)) => {
                     warn!("Connection attempt failed: {e}; retrying in {reconnect_delay}ms");
@@ -490,6 +508,9 @@ impl ClientInner {
                         _ = shutdown_rx.recv() => break,
                         _ = reconnect_rx.recv() => {
                             reconnect_delay = INITIAL_RECONNECT_DELAY_MS;
+                            if !Self::settle_network_changes(&mut shutdown_rx, &mut reconnect_rx).await {
+                                break;
+                            }
                             continue;
                         }
                         _ = sleep(Duration::from_millis(reconnect_delay)) => {}
@@ -501,6 +522,21 @@ impl ClientInner {
         }
         self.clear_connection();
         Ok(())
+    }
+
+    /// OS bridges only report events; coalescing and transport restart stay here.
+    async fn settle_network_changes(
+        shutdown_rx: &mut mpsc::Receiver<()>,
+        reconnect_rx: &mut mpsc::Receiver<()>,
+    ) -> bool {
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown_rx.recv() => return false,
+                _ = reconnect_rx.recv() => continue,
+                _ = sleep(Duration::from_millis(NETWORK_CHANGE_DEBOUNCE_MS)) => return true,
+            }
+        }
     }
 
     fn clear_connection(&self) {
@@ -520,6 +556,12 @@ impl ClientInner {
     }
 
     async fn try_connect(self: &Arc<Self>) -> Result<(), ClientError> {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            // A generation identifies an attempt even when it fails or keeps
+            // the same IP. Consumers must not infer transport identity from IP.
+            state.connection_generation = state.connection_generation.saturating_add(1);
+        }
         let candidates = self.resolve_candidates().await?;
         info!(
             "Racing {} supernode candidate(s): {candidates:?}",
@@ -528,6 +570,18 @@ impl ClientInner {
         let (socket, crypto, remote_addr, response) = self.race_handshakes(candidates).await?;
         info!("Handshake race won by {remote_addr}");
 
+        let addresses = (
+            response.ipv4,
+            response.ipv4_mask,
+            response.ipv6,
+            response.ipv6_prefixlen,
+        );
+        let assigned = self
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .assigned_addresses
+            .clone();
         // Start the uplink sender BEFORE notifying the platform, so that
         // write_packet works as soon as on_ip_assigned fires.
         let (uplink_tx, uplink_rx) = mpsc::channel::<Vec<u8>>(UPLINK_QUEUE_CAPACITY);
@@ -551,20 +605,21 @@ impl ClientInner {
             state.uplink_handle = Some(uplink_handle);
         }
 
-        if let Err(e) = self.callbacks.on_ip_assigned(
-            response.ipv4,
-            response.ipv4_mask,
-            response.ipv6,
-            response.ipv6_prefixlen,
-        ) {
-            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            state.uplink_tx = None;
-            if let Some(handle) = state.uplink_handle.take() {
-                handle.abort();
-            }
-            return Err(ClientError::InternalError(format!(
-                "platform configuration failed: {e}"
-            )));
+        if assigned.as_ref() != Some(&addresses) {
+            self.callbacks
+                .on_ip_assigned(
+                    addresses.0.clone(),
+                    addresses.1.clone(),
+                    addresses.2.clone(),
+                    addresses.3,
+                )
+                .map_err(|e| {
+                    ClientError::InternalError(format!("platform configuration failed: {e}"))
+                })?;
+            self.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .assigned_addresses = Some(addresses);
         }
         {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -591,7 +646,10 @@ impl ClientInner {
         for host in &self.config.hosts {
             let lookup = tokio::time::timeout(
                 Duration::from_secs(DNS_TIMEOUT_SECS),
-                tokio::net::lookup_host(format!("{}:{}", host, self.config.port)),
+                tokio::net::lookup_host((
+                    host.trim_start_matches('[').trim_end_matches(']'),
+                    self.config.port,
+                )),
             )
             .await;
             match lookup {
@@ -619,6 +677,8 @@ impl ClientInner {
                 last_error
             }));
         }
+        // Address-family preference belongs to the client, not platform glue.
+        candidates.sort_by_key(SocketAddr::is_ipv4);
         Ok(candidates)
     }
 
@@ -1163,6 +1223,70 @@ mod tests {
                 state: Arc::new(Mutex::new(ClientState::new())),
             }),
         }
+    }
+
+    #[tokio::test]
+    async fn network_change_shutdown() {
+        let (stop_tx, mut stop_rx) = mpsc::channel(1);
+        let (change_tx, mut change_rx) = mpsc::channel(1);
+        let settling = ClientInner::settle_network_changes(&mut stop_rx, &mut change_rx);
+        tokio::pin!(settling);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut settling)
+                .await
+                .is_err()
+        );
+        change_tx.send(()).await.unwrap();
+        // This would have settled after another 200ms without the new event.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(250), &mut settling)
+                .await
+                .is_err()
+        );
+        stop_tx.send(()).await.unwrap();
+        assert!(
+            !tokio::time::timeout(Duration::from_millis(100), &mut settling)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn ipv6_multicast_filter() {
+        let session = idle_session();
+        let (tx, mut rx) = mpsc::channel(4);
+        session.lock_state().unwrap().uplink_tx = Some(tx);
+        let mut packet = vec![0; 40];
+        packet[0] = 0x60;
+        packet[24] = 0xff;
+        session.write_packet(packet.clone()).unwrap();
+        assert!(rx.try_recv().is_err());
+        packet[24] = 0xfd;
+        session.write_packet(packet.clone()).unwrap();
+        assert_eq!(rx.try_recv().unwrap(), packet);
+        packet[0] = 0x45;
+        packet[24] = 0xff;
+        session.write_packet(packet.clone()).unwrap();
+        assert_eq!(rx.try_recv().unwrap(), packet);
+    }
+
+    #[test]
+    fn ipv6_resolution_order() {
+        let mut session = idle_session();
+        Arc::get_mut(&mut session.inner).unwrap().config.hosts =
+            vec!["127.0.0.1".into(), "::1".into(), "[::1]".into()];
+        let candidates = session
+            .inner
+            .runtime
+            .block_on(session.inner.resolve_candidates())
+            .unwrap();
+        assert_eq!(
+            candidates,
+            vec![
+                "[::1]:1".parse::<SocketAddr>().unwrap(),
+                "127.0.0.1:1".parse().unwrap()
+            ]
+        );
     }
 
     #[test]

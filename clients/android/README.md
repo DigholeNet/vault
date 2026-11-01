@@ -2,23 +2,50 @@
 
 The Android client of the [Vault VPN](../../README.md) system — a secure,
 high-performance VPN app built with Kotlin and modern Android architecture.
-All protocol logic (handshake, heartbeat, reconnect, crypto, data pump)
+All protocol logic (handshake, heartbeat, reconnect, crypto, data pump, diagnostics)
 lives in the shared Rust core ([`vault-core`](../../core/) via
-[`vault-bridge`](../bridge/), loaded through UniFFI/JNA); this app is a thin
-platform adapter.
+[`vault-bridge`](../bridge/), loaded through UniFFI/JNA). Kotlin provides UI,
+configuration storage, Android lifecycle and VPN interface/socket callbacks. Diagnostic network binding lives in the Rust bridge.
+
+Runtime requirement: **Android API 36 or newer**, matching the app's `minSdk`.
+This is a device installation requirement, separate from the build SDK.
 
 Features:
 
 - Encrypted client-to-server tunnels (SPAKE2 PAKE handshake, X25519 key exchange, AEAD ciphers); the supernode decrypts and relays traffic
 - Automatic reconnection on network changes
 - IPv4 and IPv6 support
-- Split tunneling for server traffic
+- Excludes server addresses from VPN routing to avoid routing loops
+
+## Interface
+
+The four tabs follow the iOS client: Status, Configure, Diagnostics, and About.
+Android uses Material 3 controls and light/dark surfaces. Configuration groups
+follow iOS, including separate IPv4 and IPv6 DNS fields; language selection
+lives in Configure. Saving keeps the page open, and connection changes apply on the next connection. Drafts
+survive tab switches, rotation, and language changes.
+
+Diagnostics uses the shared [Rust engine and transport](../../docs/diagnostics-engine.md).
+Kotlin supplies live VPN metadata and its Network handle, publishes typed results,
+and cancels work when the session/network changes. Expand a check to see target
+results and request durations. TLS verification and trust anchors are owned by
+Rust; Android trust stores do not affect diagnostic HTTPS.
+
+Logs update every second while visible, wrap to the screen width, and can be
+copied or cleared while offline. Updates pause when the log page is hidden or
+the app enters the background. Scrolling back keeps your reading position.
+
+The shared log keeps a current file and one backup. Platform writes check a
+1 MiB rotation threshold; Rust-only appends do not trigger that check, so the
+file can grow beyond the threshold until the next platform write. Rust appends
+use synchronous filesystem I/O; they do not wait for the path mutex but can
+block on file operations.
 
 ## Network recovery
 
 Once connected, the VPN keeps its TUN interface and native session through long
-offline periods. The Rust core retries with exponential backoff; Android no
-longer stops recovery after 120 seconds. A debounced network change also wakes
+offline periods. The Rust core retries with exponential backoff until recovery
+or explicit teardown. A debounced network change also wakes
 an already recovering session, bypassing the current retry delay. Repeated
 watchdog checks remain deduplicated so they do not interrupt handshakes.
 
@@ -34,6 +61,7 @@ close the session. Initial connection failures retain their existing behavior.
 │                 Android App                 │
 │  MainActivity ─ StatusFragment (status UI)  │
 │               ├ ConfigureFragment (config)  │
+│               ├ DiagnosticsFragment         │
 │               └ AboutFragment               │
 │                      │ bind/controls        │
 │               VaultVpnService (VpnService)  │
@@ -45,7 +73,7 @@ close the session. Initial connection failures retain their existing behavior.
                        ▼
         vault-bridge → vault-core (Rust)
         handshake · heartbeat · reconnect
-        crypto · data pump
+        crypto · data pump · diagnostics
                        │ encrypted UDP
                        ▼
                   supernode (server)
@@ -53,8 +81,8 @@ close the session. Initial connection failures retain their existing behavior.
 
 Data flow: the app starts `VaultVpnService`, which creates an `Edge` session
 over a protected socket; after the handshake completes the service
-establishes the VPN interface and pumps packets between the TUN fd and the
-Rust session.
+establishes the VPN interface and transfers plaintext packets between the TUN
+fd and the Rust session.
 
 ## Build
 
@@ -62,13 +90,35 @@ Requirements:
 
 - Android SDK (API 36+) and an NDK. Point Gradle at the SDK via `ANDROID_HOME` or `sdk.dir` in `local.properties` (Android Studio writes it automatically). Set `ANDROID_NDK_HOME` to use a specific NDK; otherwise the build selects the highest installed version from the SDK's `ndk/` directory or legacy `ndk-bundle`. If no NDK is installed, AGP downloads **NDK 27.3.13750724**
 - Any JDK 17+ to run Gradle — the compile JDK (24) is auto-provisioned via the foojay resolver
-- Rust toolchain + `cargo-ndk` (`cargo install cargo-ndk`) for the shared `vault-core` / `vault-bridge` native library
+- Rust 1.98 or newer and `cargo-ndk` for the shared native library
+- `protoc` on PATH (Debian/Ubuntu: `sudo apt-get install protobuf-compiler`;
+  macOS: `brew install protobuf`)
+- Rust Android targets: `aarch64-linux-android`, `armv7-linux-androideabi`,
+  `x86_64-linux-android`
 
 Gradle (wrapper) and Kotlin are pinned by the project — no manual install needed.
+
+The app still requires API 36 or newer, but its Rust native API is selected
+from the actual NDK sysroot: the highest API at or below `minSdk` available
+for all three ABIs. For example, an NDK with libraries through API 35 uses
+`cargo ndk --platform 35` for this API-36 app. This also handles API levels
+with no separate native library directory. AGP's NDK version and path are
+kept consistent, and AGP and cargo-ndk use the same NDK;
+the build logs its path and selected API. Missing startup objects or Android
+system libraries fail early with the exact missing path. Lowering the native
+API does not lower the APK's installation requirement or disable unresolved-
+symbol checks.
+
+Run `./gradlew :vaultcore:testNdkPlatformSelection --no-daemon` to check
+selection against older/newer NDK layouts, missing API directories and
+incomplete installations. Android CI runs this before app tests and packaging.
 
 ```bash
 git clone https://github.com/DigholeNet/vault.git
 cd vault/clients/android
+
+cargo install cargo-ndk --locked
+rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
 
 # Build debug APK
 ./gradlew :app:assembleDebug
@@ -80,10 +130,20 @@ cd vault/clients/android
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Debug builds need no signing keys and install alongside the release app
+Direct Gradle builds default to version `0.1.0` / code `1`. For versioned
+release artifacts, run `scripts/package-android.sh` from the repository root;
+it injects the workspace version and derived Android version code.
+
+Debug builds need no signing keys and install alongside a release-build app
 (`applicationId` gets a `.debug` suffix). To publish your own build, change
 `applicationId` in `app/build.gradle.kts` and configure release signing —
 see [docs/releasing.md](../../docs/releasing.md).
+
+The APK includes the project LICENSE and NOTICE files.
+
+Rust builds resolve Cargo from `CARGO` (an explicit executable path), then
+`CARGO_HOME/bin`, then `PATH`, falling back to the default rustup location.
+For example, set `CARGO=/opt/rust/bin/cargo` for a custom installation.
 
 ## Configuration
 
@@ -91,13 +151,30 @@ Server settings in the app:
 
 | Setting | Description | Default |
 |---|---|---|
+| Device ID | Read-only peer identifier | Generated on device |
 | Host | Vault server hostname or IP | Required |
 | Port | Server UDP port | 9527 |
 | Password | Authentication password | Required |
-| DNS | Comma-separated DNS servers | 1.1.1.1,8.8.8.8 |
+| MTU | 1280–1427; empty uses link-based automatic sizing | Automatic |
+| IPv4 DNS | Comma-separated IPv4 resolver addresses; empty uses defaults | 1.1.1.1,8.8.8.8 |
+| IPv6 DNS | Comma-separated IPv6 resolver addresses; empty uses Google IPv6 defaults | 2001:4860:4860::8888,2001:4860:4860::8844 |
+| Probe domains | Comma-separated diagnostic domains; empty uses defaults | www.google.com,github.com,t.co |
+| Language | App language; takes effect immediately | System |
 
-The server assigns the client's virtual IP address (IPv4 and/or IPv6) in the
-handshake response.
+The server assigns the client's virtual IP address (IPv4, IPv6-only or dual-stack)
+in the handshake response. Each DNS field accepts up to four addresses of its own family; probe domains
+are limited to 32 entries.
+Empty fields use the defaults above. IPv4-only tunnels apply only IPv4 DNS;
+IPv6-only tunnels apply only IPv6 DNS; dual-stack tunnels combine both lists.
+The Android resolver chooses which configured server to use; list order does
+not guarantee query order. Both IPv4 and IPv6 resolvers can answer A and AAAA
+queries. Settings for an unassigned family are retained but not applied.
+
+Existing combined DNS settings migrate into the two fields by address family,
+preserving custom values and their order within each family. The migration
+commits both fields and removes the old key in one DataStore transaction; a
+failed commit keeps the old record intact. Each field can be cleared independently
+to restore its defaults. Connection-setting changes apply on the next connection.
 
 Credentials are encrypted with an Android Keystore key; their ciphertext is
 committed in the same DataStore transaction as host, port, and DNS settings.
@@ -116,13 +193,8 @@ Connection issues:
 | "Cannot resolve host" | DNS issue | Try IP address instead of hostname |
 | "Apply IP failed" | Server unreachable | Check network and firewall |
 
-Performance issues:
-
-| Symptom | Diagnosis | Solution |
-|---|---|---|
-| Slow speeds | Wrong algorithm | Enable AES-GCM for hardware acceleration |
-| High latency | Distant server | Choose closer server location |
-| Battery drain | Frequent reconnection | Check network stability |
+Latency and repeated reconnection should be investigated with Diagnostics and
+Runtime Logs. The app does not expose a cipher-selection setting.
 
 ## Development
 
@@ -136,7 +208,9 @@ clients/android/
 │   │   │   ├── MainActivity.kt    # Main entry point
 │   │   │   ├── VaultVpnService.kt # VPN service implementation
 │   │   │   ├── StatusFragment.kt  # Connection status UI
-│   │   │   └── ConfigureFragment.kt # Settings UI
+│   │   │   ├── ConfigureFragment.kt # Settings UI
+│   │   │   ├── DiagnosticsViewModel.kt # Rust diagnostics adapter
+│   │   │   └── DiagnosticsFragment.kt # Checks and logs UI
 │   │   └── res/                  # Layouts, drawables, values
 │   └── build.gradle.kts
 ├── vaultcore/                    # Kotlin wrapper over the Rust core (UniFFI)
@@ -160,8 +234,9 @@ Code style: Kotlin coding conventions, 4-space indentation, max line length
 
 ## Documentation
 
+- [Shared diagnostics](../../docs/diagnostics-engine.md) — workflow, transport, trust and verification
 - [Protocol specification](../../docs/protocol.md) — wire format, handshake, encryption
-- [Performance measurements](../../docs/performance.md) — indicative benchmarks
+- [Performance](../../docs/performance.md) — protocol costs, timers and measurement guidance
 - [Releasing](../../docs/releasing.md) — release process and signing keys
 - [Changelog](../../CHANGELOG.md) — version history and release notes
 - [Privacy Policy](../../PRIVACY.md) — how we handle your data

@@ -6,7 +6,7 @@ use clap::Parser;
 use serde::de::DeserializeOwned;
 use tracing::info;
 
-use crate::SysSignal;
+use crate::{SysSignal, logger::rolling::LoggerGuard};
 
 #[derive(Parser, Debug, Default)]
 struct Args {
@@ -42,7 +42,7 @@ struct Args {
     #[arg(long)]
     group: Option<String>,
 
-    /// Print logs also to files in this directory
+    /// Write logs to this directory (default: /var/log/vault/; no console output)
     #[arg(long)]
     log_dir: Option<String>,
 
@@ -129,7 +129,7 @@ pub fn app_main<T: DeserializeOwned, F, F2>(
     do_run: F2,
 ) -> anyhow::Result<()>
 where
-    F: FnOnce(bool, bool, Option<&String>) -> anyhow::Result<()>,
+    F: FnOnce(bool, bool, Option<&String>) -> anyhow::Result<LoggerGuard>,
     F2: FnOnce(Arc<SysSignal>, T, PrivDropRequest) -> anyhow::Result<()>,
 {
     let args: Args = Args::parse();
@@ -154,7 +154,8 @@ where
     // instance lock before forking so duplicate starts fail in the caller.
     let (config, signal) = load_and_lock::<T>(args.config.as_deref(), sock_path)?;
 
-    if args.daemon {
+    // Declared before the runtime so it drains logs after runtime/daemon cleanup.
+    let _logger_guard = if args.daemon {
         let mut daemonize = daemonize::Daemonize::new();
         if let Some(pid_file) = &args.pid_file {
             daemonize = daemonize.pid_file(pid_file).chown_pid_file(true);
@@ -167,11 +168,12 @@ where
         // The logger must start after the fork: the non-blocking file
         // writer's background thread does not survive daemonize, so a
         // logger created earlier would silently stop writing.
-        logger_init(args.verbose, args.quiet, args.log_dir.as_ref())?;
+        let guard = logger_init(args.verbose, args.quiet, args.log_dir.as_ref())?;
         info!("Running process as daemon");
+        guard
     } else {
-        logger_init(args.verbose, args.quiet, args.log_dir.as_ref())?;
-    }
+        logger_init(args.verbose, args.quiet, args.log_dir.as_ref())?
+    };
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -216,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn config_errors_and_duplicate_starts_preserve_active_socket() {
+    fn failed_start_keeps_socket() {
         let dir = std::env::temp_dir().join(format!(
             "vs-{}",
             &uuid::Uuid::new_v4().simple().to_string()[..8]
@@ -237,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_config_does_not_create_control_files() {
+    fn missing_config_no_socket() {
         let dir = std::env::temp_dir().join(format!(
             "vs-{}",
             &uuid::Uuid::new_v4().simple().to_string()[..8]

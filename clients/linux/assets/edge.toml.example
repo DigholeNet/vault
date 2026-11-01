@@ -2,5 +2,6 @@ password="your_password"
 port=9527
 iface="vpn"
 host="your_server_ip"
-dns=["8.8.8.8", "1.1.1.1"]
+dns_ipv4=["1.1.1.1", "8.8.8.8"]
+dns_ipv6=["2001:4860:4860::8888", "2001:4860:4860::8844"]
 storage="/var/lib/vault/storage.dat"

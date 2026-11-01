@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::ip::{Ipv4Cidr, Ipv6Cidr, deserialize_ipv4_cidr, deserialize_ipv6_cidr};
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct SuperNodeConfig {
     password: String,
     iface: String,
@@ -33,5 +34,30 @@ impl SuperNodeConfig {
 
     pub fn get_port(&self) -> u16 {
         self.port
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_pool_field_is_rejected() {
+        let config = r#"
+password = "secret"
+iface = "vpn"
+port = 9527
+ipv4 = "192.168.10.0/24"
+ipv_6 = "fd00::/96"
+"#;
+        let error = toml::from_str::<SuperNodeConfig>(config).unwrap_err();
+        assert!(error.to_string().contains("unknown field `ipv_6`"));
+        let valid = config.replace("ipv_6", "ipv6");
+        let parsed: SuperNodeConfig = toml::from_str(&valid).unwrap();
+        assert_eq!(parsed.get_password(), "secret");
+        assert_eq!(parsed.get_iface(), "vpn");
+        assert_eq!(parsed.get_port(), 9527);
+        assert!(parsed.get_ipv4().is_some());
+        assert!(parsed.get_ipv6().is_some());
     }
 }

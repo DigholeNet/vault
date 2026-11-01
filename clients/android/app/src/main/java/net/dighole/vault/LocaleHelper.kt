@@ -80,7 +80,7 @@ object LocaleHelper {
 
     /**
      * Apply saved locale or system default.
-     * Called from BaseActivity.
+     * Called from BaseActivity.attachBaseContext before inflating localized views.
      */
     fun applySavedLocale(context: Context): Context {
         val language = getSavedLanguage(context)

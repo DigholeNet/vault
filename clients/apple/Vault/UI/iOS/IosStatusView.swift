@@ -4,27 +4,22 @@
 //
 //
 
-import Network
 import SwiftUI
 import VaultCore
 
 #if os(iOS)
-    struct IosStatusView: View {
-        var vpnManager: VpnManager
-        @EnvironmentObject var appData: AppData
-        @EnvironmentObject var config: VaultConfig
-        @EnvironmentObject var languageManager: LanguageManager
+struct IosStatusView: View {
+    var vpnManager: VpnManager
+    @EnvironmentObject var appData: AppData
+    @EnvironmentObject var languageManager: LanguageManager
 
-        func onError() {
-            appData.vpnOn = false
-        }
+    var parsedIPs: (ipv4: String?, ipv6: String?) {
+        appData.assignedIp.parsedIPv4AndIPv6()
+    }
 
-        var parsedIPs: (ipv4: String?, ipv6: String?) {
-            config.ip.parsedIPv4AndIPv6()
-        }
-
-        var body: some View {
-            GeometryReader { _ in
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
                 VStack {
                     Spacer()
 
@@ -32,41 +27,36 @@ import VaultCore
                         // VPN Status
                         Text(VpnStatusUtil.getStatus(appData.vpnStatus))
                             .bold()
-                            .foregroundColor(.black)
+                            .foregroundStyle(.primary)
                             .font(.system(size: 32))
 
                         Spacer().frame(height: 40)
 
-                        Toggle("", isOn: $appData.vpnOn)
-                            .onChange(of: appData.vpnOn) {
-                                // appData.vpnOn is also written by
-                                // updateVPNStatus() to sync with the system
-                                // status. Only treat it as user intent when
-                                // it diverges from the actual status,
-                                // otherwise a status sync would re-trigger
-                                // connect()/disconnect().
-                                if appData.vpnOn {
-                                    guard appData.vpnStatus == VpnStatus.off
-                                    else { return }
-                                    vpnManager.connect(onError: onError)
-                                } else {
-                                    guard
-                                        appData.vpnStatus == VpnStatus.on
-                                            || appData.vpnStatus
-                                                == VpnStatus.connecting
-                                    else { return }
-                                    vpnManager.disconnect()
-                                }
+                        Toggle("", isOn: Binding(
+                            get: { appData.vpnOn },
+                            set: { enabled in
+                                if appData.vpnStatus == .disconnecting { vpnManager.disconnect() }
+                                else if enabled { vpnManager.connect() }
+                                else { vpnManager.disconnect() }
                             }
-                            .toggleStyle(CustomToggleStyle())
-                            .disabled(
-                                appData.vpnStatus == VpnStatus.disconnecting
-                            )
+                        ))
+                        .toggleStyle(CustomToggleStyle())
+                        .disabled(
+                            !appData.canToggleConnection
+                        )
 
-                        Spacer().frame(height: 30)
+                        if let error = appData.connectionError {
+                            Text(languageManager.tr(error)).foregroundStyle(.red)
+                        }
+
+                        if appData.vpnStatus == .connected, appData.vpnOn, let since = appData.connectedSince {
+                            ConnectionDurationView(since: since)
+                        }
+
+                        Spacer().frame(height: 10)
 
                         // Connection Info & Statistics (combined, no background)
-                        if appData.vpnStatus == .on || appData.vpnStatus == .disconnecting {
+                        if appData.vpnStatus == .connected {
                             let ips = parsedIPs
 
                             VStack(spacing: 16) {
@@ -78,7 +68,7 @@ import VaultCore
                                                 Image(systemName: "server.rack")
                                                     .foregroundColor(.blue)
                                                     .font(.system(size: 14))
-                                                Text(languageManager.tr("IPv4:"))
+                                                Text(verbatim: "IPv4:")
                                                     .font(.system(size: 14))
                                                     .foregroundColor(.gray)
                                                 Text(ipv4)
@@ -92,14 +82,13 @@ import VaultCore
                                                 Image(systemName: "server.rack")
                                                     .foregroundColor(.green)
                                                     .font(.system(size: 14))
-                                                Text(languageManager.tr("IPv6:"))
+                                                Text(verbatim: "IPv6:")
                                                     .font(.system(size: 14))
                                                     .foregroundColor(.gray)
                                                 Text(ipv6)
                                                     .font(.system(size: 14, weight: .semibold, design: .monospaced))
                                                     .foregroundColor(.primary)
-                                                    .lineLimit(1)
-                                                    .minimumScaleFactor(0.8)
+                                                    .fixedSize(horizontal: false, vertical: true)
                                             }
                                         }
                                     }
@@ -118,7 +107,7 @@ import VaultCore
                                             Image(systemName: "arrow.up.circle.fill")
                                                 .foregroundColor(.blue)
                                                 .font(.system(size: 18))
-                                            Text(languageManager.tr("Sent"))
+                                            Text(languageManager.tr("Uplink"))
                                                 .font(.system(size: 13))
                                                 .foregroundColor(.gray)
                                         }
@@ -151,7 +140,7 @@ import VaultCore
                                             Image(systemName: "arrow.down.circle.fill")
                                                 .foregroundColor(.green)
                                                 .font(.system(size: 18))
-                                            Text(languageManager.tr("Received"))
+                                            Text(languageManager.tr("Downlink"))
                                                 .font(.system(size: 13))
                                                 .foregroundColor(.gray)
                                         }
@@ -183,40 +172,61 @@ import VaultCore
                     .frame(maxWidth: .infinity)
 
                     Spacer()
-                }
+                }.frame(minHeight: geometry.size.height)
             }
         }
     }
+}
 
-    struct CustomToggleStyle: ToggleStyle {
-        func makeBody(configuration: Configuration) -> some View {
-            Button(
-                action: {
-                    configuration.isOn.toggle()
-                },
-                label: {
-                    Image(
-                        systemName: configuration.isOn
-                            ? "personalhotspot" : "personalhotspot.slash"
-                    )
-                    .renderingMode(.template)
-                    .foregroundColor(configuration.isOn ? .green : .red)
-                    .font(.system(size: 50))
-                }
+struct CustomToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button(
+            action: {
+                configuration.isOn.toggle()
+            },
+            label: {
+                Image(
+                    systemName: configuration.isOn
+                        ? "personalhotspot" : "personalhotspot.slash"
+                )
+                .renderingMode(.template)
+                .foregroundColor(configuration.isOn ? .green : .red)
+                .font(.system(size: 50))
+                .frame(width: 88, height: 88)
+                .background(Color(uiColor: .systemBackground), in: Circle())
+                .contentShape(Circle())
+            }
+        )
+        .accessibilityLabel(LanguageManager.shared.tr(configuration.isOn ? "Disconnect" : "Connect"))
+        .accessibilityIdentifier("vpn.connection")
+        .buttonStyle(ConnectionIconButtonStyle())
+        .frame(width: 88, height: 88)
+    }
+}
+
+private struct ConnectionIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .shadow(
+                color: .black.opacity(configuration.isPressed ? 0.08 : 0.15),
+                radius: configuration.isPressed ? 3 : 8,
+                x: 0,
+                y: configuration.isPressed ? 1 : 4
             )
-            .buttonStyle(PlainButtonStyle())
-            .frame(width: 80, height: 80)
-        }
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
+}
 
-    #Preview {
-        let config = VaultConfig()
-        let appData = AppData()
-        let vpnManager = VpnManager(
-            config: config, appData: appData)
-        IosStatusView(vpnManager: vpnManager)
-            .environmentObject(appData)
-            .environmentObject(config)
-            .environmentObject(LanguageManager.shared)
-    }
+#Preview {
+    let config = VaultConfig()
+    let appData = AppData()
+    let vpnManager = VpnManager(
+        config: config, appData: appData
+    )
+    IosStatusView(vpnManager: vpnManager)
+        .environmentObject(appData)
+        .environmentObject(config)
+        .environmentObject(LanguageManager.shared)
+}
 #endif

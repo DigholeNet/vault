@@ -5,9 +5,9 @@
 # Prerequisites:
 #   - Full Xcode (iOS SDK); if xcode-select points at the Command Line
 #     Tools, DEVELOPER_DIR is set automatically
-#   - Apple signing identities in the keychain (Apple Development suffices
-#     for development-signed artifacts)
-#   - Rust Apple targets (see rust-toolchain.toml)
+#   - Apple Distribution (default iOS export) and Developer ID Application
+#     (macOS Release archive), with matching provisioning profiles
+#   - Rust Apple targets (see clients/apple/README.md, Build & test)
 #
 # Usage: TEAM_ID=<your-team-id> scripts/package-apple.sh
 #
@@ -24,8 +24,8 @@
 #                         development-signed build)
 #   MACOS_EXPORT_OPTIONS  path to an exportOptions plist for macOS; the app
 #                         is re-signed from the archive with it (default:
-#                         ExportOptions-developerid.plist; set to empty for
-#                         a development-signed app zipped from the archive)
+#                         ExportOptions-developerid.plist; empty skips export
+#                         and zips the Developer ID-signed archive app)
 #   NOTARY_PROFILE        notarytool keychain profile used to notarize and
 #                         staple the macOS app (default: vault-notary;
 #                         set to empty to skip notarization)
@@ -52,24 +52,38 @@ MACOS_EXPORT_OPTIONS="${MACOS_EXPORT_OPTIONS-$ROOT/scripts/apple/ExportOptions-d
 NOTARY_PROFILE="${NOTARY_PROFILE-vault-notary}"
 TEAM_ID="${TEAM_ID:-}"
 
+VERSION="$(grep -m1 '^version = ' "$ROOT/Cargo.toml" | cut -d'"' -f2)"
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "error: Apple packaging requires a numeric major.minor.patch version; prerelease suffixes are not supported." >&2
+    exit 1
+fi
+
 # Fail fast with a clear message when no team is available: the committed
 # Shared.xcconfig ships with an empty TEAM_ID, so signing needs TEAM_ID
 # from the environment or from Config/Local.xcconfig (git-ignored).
-if [[ -z "$TEAM_ID" ]] && ! grep -q '^TEAM_ID = [A-Z0-9]\{10\}$' \
+if [[ -z "$TEAM_ID" ]] && ! grep -Eq '^[[:blank:]]*TEAM_ID[[:blank:]]*=[[:blank:]]*[A-Z0-9]{10}[[:space:]]*(//.*)?$' \
     "$APPLE_DIR/Config/Shared.xcconfig" "$APPLE_DIR/Config/Local.xcconfig" 2>/dev/null; then
     echo "error: no Apple Developer team configured." >&2
     echo "Pass TEAM_ID (e.g. TEAM_ID=ABCDE12345 $0) or set TEAM_ID in clients/apple/Config/Local.xcconfig." >&2
     exit 1
 fi
 
-# Single version source: the workspace package version in the root
-# Cargo.toml; injected as MARKETING_VERSION into both archives.
-VERSION="$(grep -m1 '^version = ' "$ROOT/Cargo.toml" | cut -d'"' -f2)"
-# Monotonic build number: macOS only replaces an installed system extension
-# when the new bundle's version is higher, so a static CFBundleVersion would
-# keep the old (buggy) sysex running forever. Clean tree: git commit count;
-# dirty tree: append a timestamp so local test builds still bump the version
-# (14.20261013 > 14, and the next clean build 15 > 14.x).
+# Fail fast when the Apple timestamp server is unreachable: Release signing
+# uses the hardened runtime, which requires a secure timestamp from
+# timestamp.apple.com; otherwise the build only fails at the codesign step
+# (a common failure when a VPN/proxy is active while packaging).
+if ! curl -sS -o /dev/null --connect-timeout 5 --max-time 10 \
+    http://timestamp.apple.com/ts01; then
+    echo "error: cannot reach timestamp.apple.com; Release codesign needs it for the secure timestamp." >&2
+    echo "Disconnect any VPN/proxy that may block it, then re-run." >&2
+    exit 1
+fi
+
+# Cargo supplies the marketing version. Git history and tracked local edits
+# supply the build identity. Different version identifiers trigger the system
+# extension replacement delegate; our delegate requests replacement.
+# Dirty builds append a minute timestamp. This is a development build identity,
+# not a promise of a globally monotonic counter across branches or machines.
 COMMITS="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
 if git -C "$ROOT" diff-index --quiet HEAD -- 2>/dev/null; then
     BUILD_NUMBER="$COMMITS"
@@ -153,9 +167,9 @@ xcodebuild -project "$APPLE_DIR/Vault.xcodeproj" \
     "${XCB_VERSION[@]}" \
     archive
 
-# With MACOS_EXPORT_OPTIONS set (the default), the app is re-signed from the
-# archive (Developer ID) as notarization and Gatekeeper require; with it set
-# to empty, the development-signed .app is taken straight from the archive.
+# The Release archive already uses Developer ID signing. Export re-signs it
+# with the selected export options; an empty MACOS_EXPORT_OPTIONS packages
+# the archive app directly and does not switch to development signing.
 MACOS_APP="$BUILD_DIR/Vault-macOS.xcarchive/Products/Applications/Vault.app"
 if [[ -n "${MACOS_EXPORT_OPTIONS:-}" ]]; then
     echo "==> Exporting macOS app (re-signing)"

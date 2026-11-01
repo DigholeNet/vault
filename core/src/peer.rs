@@ -328,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn reused_socket_clears_previous_device_indexes() {
+    fn reused_socket_indexes() {
         let mut peers = Peers::<SystemTimeSource>::default();
         let old_ip = Ipv4Addr::new(10, 0, 0, 2);
         let new_ip = Ipv4Addr::new(10, 0, 0, 3);

@@ -6,6 +6,7 @@ mod buf;
 #[cfg(feature = "client")]
 pub mod client;
 mod crypto;
+pub mod diagnostics;
 // TUN device and epoll are used on Linux/Android only (supernode and the
 // Linux edge client); excluded on Apple platforms.
 #[cfg(any(target_os = "linux", target_os = "android"))]

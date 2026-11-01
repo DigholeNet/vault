@@ -4,7 +4,7 @@ import Testing
 
 private enum StorageFailure: Error { case unavailable }
 
-@Test func migrationFailurePreservesLegacyPassword() {
+@Test func migrationFailure() {
     var legacy: String? = "recovery"
     let store = PasswordPersistence(
         read: { "stale" },
@@ -16,7 +16,7 @@ private enum StorageFailure: Error { case unavailable }
     #expect(legacy == "recovery")
 }
 
-@Test func successfulMigrationClearsLegacyOnlyAfterSave() throws {
+@Test func successfulMigration() throws {
     var legacy: String? = "recovery"
     var saved = ""
     let store = PasswordPersistence(
@@ -32,7 +32,7 @@ private enum StorageFailure: Error { case unavailable }
     #expect(legacy == nil)
 }
 
-@Test func failedUpdateCanBeRetriedWithoutDiscardingRecovery() throws {
+@Test func failedUpdateRetry() throws {
     var legacy: String? = "recovery"
     var saved = "old"
     var unavailable = true

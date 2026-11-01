@@ -8,12 +8,12 @@ pub use pool::Ipv4Cidr;
 pub use pool::Ipv4Pool;
 pub use pool::Ipv6Cidr;
 pub use pool::Ipv6Pool;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 use serde::Deserialize;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 use serde::Deserializer;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 pub fn deserialize_ipv4_cidr<'de, D>(deserializer: D) -> Result<Option<Ipv4Cidr>, D::Error>
 where
     D: Deserializer<'de>,
@@ -29,7 +29,7 @@ where
         }
     }
 }
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 pub fn deserialize_ipv6_cidr<'de, D>(deserializer: D) -> Result<Option<Ipv6Cidr>, D::Error>
 where
     D: Deserializer<'de>,

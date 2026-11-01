@@ -4,8 +4,8 @@
 //
 //
 import Foundation
-import Security
 import os.log
+import Security
 
 // Single-letter names (v/c/b) are deliberate in the byte-level parsing helpers
 // below; readability would suffer from longer names there.
@@ -30,7 +30,6 @@ extension Array {
         self = [Element]()
         self.reserveCapacity(reserveCapacity)
     }
-
 }
 
 /// The app group identifier configured at build time: `APP_GROUP_ID` in
@@ -61,9 +60,9 @@ private func signingAppGroup() -> String? {
         SecCSFlags(rawValue: kSecCSSigningInformation),
         &info
     ) == errSecSuccess,
-          let dict = info as? [String: Any],
-          let entitlements = dict[kSecCodeInfoEntitlementsDict as String] as? [String: Any],
-          let groups = entitlements["com.apple.security.application-groups"] as? [String]
+        let dict = info as? [String: Any],
+        let entitlements = dict[kSecCodeInfoEntitlementsDict as String] as? [String: Any],
+        let groups = entitlements["com.apple.security.application-groups"] as? [String]
     else { return nil }
     return groups.first { $0.hasSuffix(kConfiguredAppGroup) }
 }

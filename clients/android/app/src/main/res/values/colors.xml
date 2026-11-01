@@ -1,6 +1,16 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" ?>
 <resources>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
+    <color name="vault_blue">#2563EB</color>
+    <color name="vault_background">#F4F6FA</color>
+    <color name="vault_surface">#FFFFFF</color>
+    <color name="vault_text">#172033</color>
+    <color name="connection_connected">#34C759</color>
+    <color name="connection_disconnected">#FF3B30</color>
+<color name="status_uplink">#007AFF</color>
+<color name="status_downlink">#34C759</color>
+<color name="status_background">#FFFFFF</color>
+    <color name="configure_body">#111827</color>
+    <color name="configure_label">@color/configure_body</color>
+    <color name="configure_supporting">#6B7280</color>
+    <color name="configure_placeholder">#9CA3AF</color>
 </resources>

@@ -37,10 +37,16 @@ const MAX_PENDING_HANDSHAKES: usize = 32;
 /// single spoofed or corrupted packet cannot kill a legitimate handshake.
 const MAX_PENDING_DECRYPT_FAILURES: u8 = 3;
 
-/// Renders a client-reported string for logs; old clients send an empty
-/// string, shown as `-`.
-fn or_dash(s: &str) -> &str {
-    if s.is_empty() { "-" } else { s }
+/// Quote and bound client-reported labels before placing them in a log record.
+/// These labels remain untrusted even after session authentication.
+fn client_label(value: &str) -> String {
+    if value.is_empty() {
+        return "-".into();
+    }
+    let mut chars = value.chars();
+    let label: String = chars.by_ref().take(128).collect();
+    let suffix = if chars.next().is_some() { "…" } else { "" };
+    format!("{label:?}{suffix}")
 }
 
 pub struct SuperNode<TS: TimeSource> {
@@ -263,8 +269,8 @@ impl<TS: TimeSource> SuperNode<TS> {
                         target: "client",
                         "{}, {},{}, Peer idle timeout, removed. {:?}/{:?}",
                         hex::encode(peer.id().0),
-                        or_dash(peer.platform()),
-                        or_dash(peer.device_name()),
+                        client_label(peer.platform()),
+                        client_label(peer.device_name()),
                         peer.get_ipv4(),
                         peer.get_ipv6()
                     );
@@ -409,10 +415,10 @@ impl<TS: TimeSource> SuperNode<TS> {
                                     );
                                     info!(
                                         target: "client",
-                                        "{},{},{}, Handshake answered. {:?}/{:?}",
+                                        "{},{},{}, Handshake response sent; client not yet authenticated. {:?}/{:?}",
                                         hex::encode(r.id.0),
-                                        or_dash(&r.platform),
-                                        or_dash(&r.device_name),
+                                        client_label(&r.platform),
+                                        client_label(&r.device_name),
                                         ipv4,
                                         ipv6
                                     );
@@ -460,8 +466,8 @@ impl<TS: TimeSource> SuperNode<TS> {
                     target: "client",
                     "{},{},{}, Received ping: {}, timestamp: {}",
                     hex::encode(peer.id().0),
-                    or_dash(peer.platform()),
-                    or_dash(peer.device_name()),
+                    client_label(peer.platform()),
+                    client_label(peer.device_name()),
                     addr,
                     ping.ts
                 );
@@ -485,8 +491,8 @@ impl<TS: TimeSource> SuperNode<TS> {
                                 target: "client",
                                 "{},{},{},{}, Dropping packet with spoofed source {} (assigned {:?}/{:?})",
                                 hex::encode(peer.id().0),
-                                or_dash(peer.platform()),
-                                or_dash(peer.device_name()),
+                                client_label(peer.platform()),
+                                client_label(peer.device_name()),
                                 addr,
                                 src_ip,
                                 peer.get_ipv4(),
@@ -535,8 +541,8 @@ impl<TS: TimeSource> SuperNode<TS> {
                                 target: "client",
                                 "{},{},{} Received close from {}, peer removed",
                                 hex::encode(id.0),
-                                or_dash(peer.platform()),
-                                or_dash(peer.device_name()),
+                                client_label(peer.platform()),
+                                client_label(peer.device_name()),
                                 addr
                             );
                             self.peers.remove_peer_by_socket(&addr);
@@ -640,10 +646,10 @@ impl<TS: TimeSource> SuperNode<TS> {
         self.init_limiter.record_init_success(addr.ip());
         info!(
             target: "client",
-            "{},{},{} Pending handshake confirmed, peer promoted. {:?}/{:?}",
+            "{},{},{} Client authenticated; peer promoted. {:?}/{:?}",
             hex::encode(pending.id.0),
-            or_dash(&pending.platform),
-            or_dash(&pending.device_name),
+            client_label(&pending.platform),
+            client_label(&pending.device_name),
             pending.reservation.ipv4,
             pending.reservation.ipv6
         );
@@ -707,5 +713,34 @@ impl<TS: TimeSource> SuperNode<TS> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn labels_cannot_inject_records_or_terminal_controls() {
+        let label = client_label("phone,\"quoted\"\r\n[INFO] fake\t\x1b[31m\u{2028}\u{202e}");
+        assert!(!label.chars().any(char::is_control));
+        assert!(!label.contains('\u{2028}'));
+        assert!(!label.contains('\u{202e}'));
+        assert!(label.contains("\\r\\n"));
+        assert!(label.contains("\\\"quoted\\\""));
+    }
+
+    #[test]
+    fn labels_are_bounded_without_breaking_unicode() {
+        assert_eq!(client_label(""), "-");
+        assert_eq!(client_label("手机"), "\"手机\"");
+        assert_eq!(
+            client_label(&"机".repeat(128)),
+            format!("\"{}\"", "机".repeat(128))
+        );
+        assert_eq!(
+            client_label(&"机".repeat(10000)),
+            format!("\"{}\"…", "机".repeat(128))
+        );
     }
 }

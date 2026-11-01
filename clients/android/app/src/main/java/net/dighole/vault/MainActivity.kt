@@ -9,21 +9,28 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
-import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.bottomnavigation.BottomNavigationView
 
 class MainActivity : BaseActivity() {
 
     private lateinit var bottomNav: BottomNavigationView
-    private lateinit var topAppBar: MaterialToolbar
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        topAppBar = findViewById(R.id.topAppBar)
         bottomNav = findViewById(R.id.bottomNav)
 
+        bottomNav.isItemActiveIndicatorEnabled = true
+        val root = findViewById<android.view.View>(R.id.mainRoot)
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { target, insets ->
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            val ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())
+            target.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
+            bottomNav.visibility = if (insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()))
+                android.view.View.GONE else android.view.View.VISIBLE
+            androidx.core.view.WindowInsetsCompat.CONSUMED
+        }
         requestNotificationPermissionIfNeeded()
 
         bottomNav.setOnItemSelectedListener { item ->
@@ -38,6 +45,10 @@ class MainActivity : BaseActivity() {
                     true
                 }
 
+                R.id.nav_diagnostics -> {
+                    showFragment(TAG_DIAGNOSTICS) { DiagnosticsFragment() }
+                    true
+                }
                 R.id.nav_about -> {
                     showFragment(TAG_ABOUT) { AboutFragment.newInstance() }
                     true
@@ -47,9 +58,13 @@ class MainActivity : BaseActivity() {
             }
         }
 
-        if (savedInstanceState == null) {
-            bottomNav.selectedItemId = R.id.nav_status
-        }
+        bottomNav.selectedItemId = savedInstanceState?.getInt("selected_tab") ?: R.id.nav_status
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (bottomNav.selectedItemId != R.id.nav_status) navigateTo(R.id.nav_status)
+                else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
+            }
+        })
     }
 
     /**
@@ -61,10 +76,13 @@ class MainActivity : BaseActivity() {
     }
 
     private fun showFragment(tag: String, factory: () -> Fragment) {
+        findViewById<android.view.View>(R.id.mainRoot).setBackgroundColor(ContextCompat.getColor(this,
+            if (tag == TAG_STATUS) R.color.status_background else R.color.vault_background))
         val transaction = supportFragmentManager.beginTransaction()
 
         supportFragmentManager.findFragmentByTag(TAG_STATUS)?.let { transaction.hide(it) }
         supportFragmentManager.findFragmentByTag(TAG_CONFIGURE)?.let { transaction.hide(it) }
+        supportFragmentManager.findFragmentByTag(TAG_DIAGNOSTICS)?.let { transaction.hide(it) }
         supportFragmentManager.findFragmentByTag(TAG_ABOUT)?.let { transaction.hide(it) }
 
         val existing = supportFragmentManager.findFragmentByTag(tag)
@@ -114,10 +132,16 @@ class MainActivity : BaseActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("selected_tab", bottomNav.selectedItemId)
+        super.onSaveInstanceState(outState)
+    }
+
     companion object {
         private const val TAG = "MainActivity"
         private const val TAG_STATUS = "status"
         private const val TAG_CONFIGURE = "configure"
+        private const val TAG_DIAGNOSTICS = "diagnostics"
         private const val TAG_ABOUT = "about"
         private const val REQUEST_NOTIFICATION_PERMISSION = 1001
     }

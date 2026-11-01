@@ -21,7 +21,6 @@ System requirements:
 ```
 supernode/
 ├── Cargo.toml              # Package manifest with debian metadata
-├── build.rs                # Build script for manpage generation
 ├── supernode.adoc    # Manpage source (AsciiDoc format)
 ├── src/
 │   ├── main.rs             # Application entry point
@@ -73,8 +72,8 @@ in [docs/protocol.md](../docs/protocol.md) and implemented in `vault-core`.
 
 ### Network configuration
 
-Host-wide forwarding is an administrator-managed prerequisite (below). The
-supernode only reads these global switches and never changes or restores them.
+The supernode automatically enables host-wide forwarding for each configured
+address family when needed (below). It never disables forwarding on shutdown.
 On startup it sets redirect switches to zero on its own new TUN interface.
 If global IPv4 redirect sending remains enabled, it warns and continues startup. For both IPv4 and IPv6 it installs:
 
@@ -94,40 +93,37 @@ Routes must be present when the server starts; restart after changing exit inter
 command aborts startup.
 Partial startup failures and normal shutdown remove only rules added by this
 instance and restore its TUN-local tunables if they still have the applied values.
-Global forwarding, upstream RA settings, and unrelated host tunables are untouched
-on success, failure, and shutdown. After SIGKILL/OOM, inspect firewall rules manually.
+Enabled forwarding and adjusted upstream RA settings remain in place on
+success, failure, and shutdown. After SIGKILL/OOM, inspect firewall rules manually.
 
-### Host forwarding prerequisite
+### Automatic host forwarding
 
-Configure forwarding once as part of provisioning, before starting the service:
+At startup, the server enables `net.ipv4.ip_forward=1` for an IPv4 pool and
+`net.ipv6.conf.all.forwarding=1` for an IPv6 pool if needed. No manual sysctl
+configuration is required, including after reboot. Startup fails if a required
+sysctl cannot be read or written.
+
+Before enabling IPv6 forwarding, the server changes `accept_ra=1` to
+`accept_ra=2` on detected exit interfaces to preserve Router Advertisement
+reception in router mode. Explicitly disabled RA (`0`) stays disabled.
+Forwarding and uplink RA changes are not rolled back, even if startup later
+fails, because other services may depend on them.
+
+Changing IPv4 `ip_forward` resets other IPv4 settings to host/router defaults.
+Hosts with custom IPv4 tunables can still provision forwarding before applying
+those tunables using `/etc/sysctl.d/90-vault-forwarding.conf`:
 
 ```ini
-# /etc/sysctl.d/90-vault-forwarding.conf
 net.ipv4.ip_forward = 1
-# Optional host hardening; not required for startup:
-# net.ipv4.conf.all.send_redirects = 0
-# Only when an IPv6 pool is configured:
-# net.ipv6.conf.eth0.accept_ra = 2
-# net.ipv6.conf.all.forwarding = 1
+# For an RA-dependent IPv6 uplink, replace eth0 with the actual interface:
+net.ipv6.conf.eth0.accept_ra = 2
+net.ipv6.conf.all.forwarding = 1
 ```
 
-For an IPv6 uplink that learns its route through Router Advertisements, replace
-`eth0` with the actual uplink name and set `accept_ra = 2` **before** enabling
-IPv6 forwarding. Static IPv6 uplinks do not need the RA override. Add the override
-for each RA-dependent uplink. Keep these settings in the host network manager if
-it owns the interface instead of maintaining conflicting configurations.
-
-IPv4 `send_redirects` is enabled when either the global or interface switch is
-on. Administrators may optionally set the global switch to `0` to ensure the
-TUN does not send redirects. The daemon only warns if this global switch is on
-or cannot be read; it never changes it or blocks startup because of it. Other
-interfaces retain their own redirect settings.
-
-Apply the file with `sudo sysctl -p /etc/sysctl.d/90-vault-forwarding.conf`.
-Changing IPv4 `ip_forward` resets other IPv4 settings to host/router defaults;
-provision it before applying custom IPv4 tunables, or review and reapply those
-settings afterward. The daemon deliberately does not automate this host-wide
-transition or attempt to reverse it when one VPN process exits.
+Apply optional persistent configuration with
+`sudo sysctl -p /etc/sysctl.d/90-vault-forwarding.conf`.
+If a network manager owns these settings, configure it consistently so it does
+not disable forwarding while the server is running.
 
 ### Verification
 
@@ -145,26 +141,29 @@ the lock file itself intentionally remains in place between starts.
 ## Build
 
 Prerequisites: the stable Rust toolchain (Rust 1.98 or newer) and
-optionally `asciidoctor` for manpage generation. The server runs only on
+`asciidoctor` for Debian packaging (not needed for plain binary builds). The server runs only on
 Linux (TUN/TAP); on other platforms the crate still compiles as a stub, so
 `cargo check -p supernode` works everywhere.
 
+Run these commands from the repository root:
+
 ```bash
 # Debug / release build
-cargo build
-cargo build --release
+cargo build -p supernode
+cargo build -p supernode --release
 
 # Run tests
 cargo test -p supernode
 
-# Create Debian package (requires cargo-deb)
-cargo deb
+# Create Debian package (requires cargo-deb and asciidoctor)
+scripts/package-linux.sh --manpages-only
+cargo deb -p supernode
 ```
 
 Build artifacts:
 
 - **Binary**: `target/release/supernode`
-- **Manpage**: `target/supernode.1.gz` (generated if asciidoctor is available)
+- **Manpage**: `supernode/target/supernode.1.gz` (generated by `scripts/package-linux.sh --manpages-only`)
 
 ## Configuration
 
@@ -184,9 +183,21 @@ Fields:
   unique password (SPAKE2 security depends on its entropy)
 - `port`: UDP port for edge client connections
 - `iface`: name of the TUN device to create
-- `ipv4`: IPv4 pool in CIDR notation (network address, not interface IP); the
+- `ipv4`: optional IPv4 pool in CIDR notation (network address, not interface IP); the
   server takes the first pool address for its own TUN device
 - `ipv6`: IPv6 pool in CIDR notation (optional)
+
+Configure at least one of `ipv4` or `ipv6`. For an IPv6-only tunnel, omit
+`ipv4`:
+
+```toml
+password = "change-me-to-a-strong-password"
+port = 9527
+iface = "vpn"
+ipv6 = "fd00::/96"
+```
+
+The server needs working IPv6 egress for clients to reach IPv6 internet targets.
 
 Command line usage:
 
@@ -217,8 +228,13 @@ The project includes systemd unit files:
 ### Debian package installation
 
 ```bash
-# Install the package
-dpkg -i supernode_0.1.0-1_amd64.deb
+# Install a locally built package (adjust the filename to your build)
+dpkg -i target/debian/supernode_0.1.0-1_amd64.deb
+
+# Create the configuration on a fresh installation. Set a strong password
+# and review the address pools before starting the service.
+install -m 600 /etc/vault/supernode.toml.example /etc/vault/supernode.toml
+sudoedit /etc/vault/supernode.toml
 
 # Start the service and enable auto-start
 systemctl enable --now supernode
@@ -249,10 +265,28 @@ Common issues:
 1. **Permission denied**: ensure running as root or with appropriate capabilities
 2. **TUN device error**: check `/dev/net/tun` exists and is accessible
 3. **Address already in use**: another process is using the configured UDP port
-4. **Manpage build warning**: install `asciidoctor` to generate manpages
+4. **Missing manpage when packaging**: install `asciidoctor` and run
+   `scripts/package-linux.sh --manpages-only` before `cargo deb`
 
 Run with `--verbose` to enable debug-level logging for troubleshooting
 connection issues.
+
+## Logging and configuration errors
+
+Logs are written only to files, including when running in the foreground.
+`--log-dir` selects the directory; the default is `/var/log/vault/`.
+Current files have fixed names (`default.log`, `error.log`, and server
+`client.log`). On the first write after a UTC date change, the previous file
+is archived as `<name>.log.YYYY-MM-DD`, using its last-write date. Same-day
+restarts append to the current file. Files from the previous dated naming
+scheme are retained; today's dated file is adopted if no current file exists.
+Each stream (`default`, `error`, and server `client` logs)
+keeps at most 30 files, including the current file. Older files are removed when
+that stream first writes a log or rotates; existing history is cleaned up then too.
+This limits file count, not total size or age; a busy day can still produce a large file.
+`RUST_LOG` controls filtering unless `--verbose` or `--quiet` overrides it.
+Unknown TOML fields are rejected, so configuration typos fail startup.
+
 
 ## License
 

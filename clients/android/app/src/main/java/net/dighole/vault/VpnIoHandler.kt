@@ -155,46 +155,6 @@ class VpnIoHandler(
         return result
     }
 
-    fun isInterfaceAvailable(): Boolean = vpnInterface?.fileDescriptor?.valid() == true
-
-    fun isRunning(): Boolean = isInterfaceAvailable() &&
-        vpnReadJob?.isActive == true && vpnWriteJob?.isActive == true &&
-        vpnIoRestartJob?.isActive != true
-
-    /**
-     * Cancels the I/O coroutines and closes the current TUN interface without
-     * touching the packet channels. Used when a reconnect swaps the TUN
-     * interface: the caller then installs the new one via [setVpnInterface]
-     * and restarts I/O with [startReadingAndWriting]. Cancelling alone would
-     * not unblock the read coroutine parked in a blocking read — closing the
-     * fd does.
-     */
-    @Synchronized
-    fun releaseInterface() {
-        interfaceGate.stop { }
-        vpnIoRestartJob?.cancel()
-        vpnReadJob?.cancel()
-        vpnWriteJob?.cancel()
-
-        try {
-            vpnInputStream?.close()
-        } catch (_: Exception) {
-        }
-        vpnInputStream = null
-
-        try {
-            vpnOutputStream?.close()
-        } catch (_: Exception) {
-        }
-        vpnOutputStream = null
-
-        try {
-            vpnInterface?.close()
-        } catch (_: Exception) {
-        }
-        vpnInterface = null
-    }
-
     @Synchronized
     fun stop() {
         interfaceGate.stop { }

@@ -1,0 +1,53 @@
+name: GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/pages.yml'
+      - 'scripts/update-site-release.py'
+      - 'scripts/test-site-release.py'
+  workflow_dispatch:
+  release:
+    types: [published, edited, deleted]
+  schedule:
+    # GITHUB_TOKEN-created releases may not trigger another workflow.
+    # Refresh daily as well, so release automation is still picked up.
+    - cron: '23 2 * * *'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Check release-link selection
+        run: python -B scripts/test-site-release.py
+      - name: Install QR generator
+        run: python -m pip install qrcode==8.2
+      - name: Refresh stable-release links and Android QR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/update-site-release.py
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

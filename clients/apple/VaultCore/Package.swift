@@ -10,12 +10,13 @@ import PackageDescription
 let package = Package(
     name: "VaultCore",
     platforms: [
-      .macOS(.v15), .iOS(.v18)
+        .macOS(.v15), .iOS(.v18)
     ],
     products: [
         .library(
             name: "VaultCore",
-            targets: ["VaultCore"]),
+            targets: ["VaultCore"]
+        )
     ],
     targets: [
         // Rust core (vault-core client via UniFFI), built by
@@ -34,7 +35,7 @@ let package = Package(
         .testTarget(
             name: "VaultCoreTests",
             dependencies: ["VaultCore"]
-        ),
+        )
     ],
     // Swift 5 language mode: the UniFFI-generated bindings
     // (Sources/VaultCore/Generated) are not Swift 6 strict-concurrency clean

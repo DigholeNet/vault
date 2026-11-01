@@ -31,6 +31,14 @@ pub async fn run_mock_server_sessions(
     password: &str,
     sessions: usize,
 ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    run_mock_server_leases(password, vec!["10.0.0.2".to_string(); sessions]).await
+}
+
+/// Supply different leases to test configuration changes during reconnect.
+pub async fn run_mock_server_leases(
+    password: &str,
+    leases: Vec<String>,
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let server_socket = UdpSocket::bind("127.0.0.1:0")
         .await
         .expect("bind server socket");
@@ -40,7 +48,7 @@ pub async fn run_mock_server_sessions(
     let handle = tokio::spawn(async move {
         let mut buf = vec![0u8; 65535];
 
-        for _ in 0..sessions {
+        for ipv4 in leases {
             // PAKE-authenticated handshake. Stale packets from the previous
             // session (uplink DATA, heartbeat pings) may still be in flight
             // and land here first — the client's uplink and heartbeat run in
@@ -81,7 +89,7 @@ pub async fn run_mock_server_sessions(
                 &pake_message,
                 &chosen,
                 server_pub.bytes(),
-                "10.0.0.2".to_string(),
+                ipv4,
                 "255.255.255.0".to_string(),
                 "fd00::2".to_string(),
                 64,

@@ -6,8 +6,29 @@ plugins {
     alias(libs.plugins.detekt)
 }
 
+val licenseAssets = tasks.register<Sync>("copyLicenseNotices") {
+    from(rootProject.file("../..")) { include("LICENSE", "NOTICE") }
+    into(layout.buildDirectory.dir("generated/licenseAssets"))
+}
+
+// Same build identity as Apple: commit count, with a timestamp for tracked local changes.
+val gitBuildId = providers.exec {
+    workingDir(rootProject.file("../.."))
+    commandLine("bash", "-c", """
+        commits=${'$'}(git rev-list --count HEAD 2>/dev/null || echo 0)
+        if git diff-index --quiet HEAD -- 2>/dev/null; then
+            echo "${'$'}commits"
+        else
+            echo "${'$'}commits.${'$'}(date +%Y%m%d%H%M)"
+        fi
+    """.trimIndent())
+}.standardOutput.asText.get().trim()
+
 android {
     namespace = "net.dighole.vault"
+    sourceSets.getByName("main").assets.directories.add(
+        layout.buildDirectory.dir("generated/licenseAssets").get().asFile.absolutePath
+    )
     compileSdk = libs.versions.compile.sdk.get().toInt()
 
     defaultConfig {
@@ -15,7 +36,8 @@ android {
         minSdk = libs.versions.min.sdk.get().toInt()
         targetSdk = libs.versions.target.sdk.get().toInt()
         versionCode = providers.gradleProperty("versionCode").map(String::toInt).orElse(1).get()
-        versionName = providers.gradleProperty("versionName").orElse("1.0.0").get()
+        versionName = providers.gradleProperty("versionName").orElse("0.1.0").get()
+        buildConfigField("String", "GIT_BUILD_ID", "\"$gitBuildId\"")
     }
 
     signingConfigs {
@@ -39,8 +61,8 @@ android {
 
             // The keystore travels as base64 text (same variable as CI), so
             // no real keystore file ever needs to live in the repository
-            // tree; it is decoded into the build directory. Debug builds
-            // never read this file.
+            // tree; it is decoded into the build directory when configured.
+            // Debug APKs use the Android debug signing key.
             val keystoreFile =
                 layout.buildDirectory.file("signing/vault-release.keystore").get().asFile
             if (!keystoreBase64.isNullOrEmpty()) {
@@ -109,6 +131,10 @@ android {
         buildUponDefaultConfig.set(false)
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_24
         targetCompatibility = JavaVersion.VERSION_24
@@ -148,3 +174,5 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.junit)
 }
+
+tasks.named("preBuild").configure { dependsOn(licenseAssets) }

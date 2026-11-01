@@ -20,17 +20,27 @@ thiserror = {version = "2"}
 tracing = {workspace = true}
 vault-core = {path = "../core"}
 
+[dev-dependencies]
+toml.workspace = true
+
 [package.metadata.deb]
 assets = [
+  ["../NOTICE", "/usr/share/doc/supernode/NOTICE", "644"],
   ["target/release/supernode", "/usr/bin/supernode", "755"],
   ["assets/supernode.toml.example", "/etc/vault/supernode.toml.example", "600"],
   ["assets/supernode.service", "/lib/systemd/system/supernode.service", "644"],
   ["assets/supernode.target", "/lib/systemd/system/supernode.target", "644"],
   ["target/supernode.1.gz", "/usr/share/man/man1/supernode.1.gz", "644"],
 ]
-depends = "libc6 (>= 2.23), libgcc1 (>= 1:6.0.1), iptables, procps"
+depends = "$auto, iptables, procps"
 extended-description = """\
  Vault VPN server (supernode)."""
 license-file = ["../LICENSE", "1"]
 maintainer-scripts = "assets/deb-scripts"
 section = "net"
+
+# Local musl packages need only runtime command tools; native builds
+# retain automatic shared-library dependency detection above.
+[package.metadata.deb.variants.musl]
+name = "supernode"
+depends = "iptables, procps"
