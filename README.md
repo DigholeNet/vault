@@ -6,6 +6,61 @@
 
 Vault is a cross-platform VPN system: a **single Rust protocol core**, **three client platforms** (Apple / Android / Linux), and a **Linux server** (supernode). Star topology — traffic entering a VPN tunnel is relayed through the server over an encrypted UDP connection.
 
+## Screenshots
+
+English interfaces on Android, iOS and macOS. Expand each gallery to see all pages.
+
+| Android | iOS | macOS |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/android-status.png" alt="Android status" width="240"> | <img src="docs/screenshots/ios-status.png" alt="iOS status" width="240"> | <img src="docs/screenshots/macos-menu.png" alt="macOS menu bar panel" width="300"> |
+
+<details>
+<summary><strong>Android — all pages</strong></summary>
+
+| Status | Configure | Diagnostics |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/android-status.png" alt="Android status" width="240"> | <img src="docs/screenshots/android-configure.png" alt="Android complete configuration page" width="240"> | <img src="docs/screenshots/android-diagnostics.png" alt="Android diagnostics" width="240"> |
+
+| Runtime logs | About |
+|:---:|:---:|
+| <img src="docs/screenshots/android-logs.png" alt="Android runtime logs" width="240"> | <img src="docs/screenshots/android-about.png" alt="Android about page" width="240"> |
+
+</details>
+
+<details>
+<summary><strong>iOS — all pages</strong></summary>
+
+| Status | Configure |
+|:---:|:---:|
+| <img src="docs/screenshots/ios-status.png" alt="iOS status" width="240"> | <img src="docs/screenshots/ios-configure.png" alt="iOS complete configuration page" width="240"> |
+
+| Diagnostics | Runtime logs | About |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/ios-diagnostics.png" alt="iOS diagnostics" width="240"> | <img src="docs/screenshots/ios-logs.png" alt="iOS runtime logs" width="240"> | <img src="docs/screenshots/ios-about.png" alt="iOS about page" width="240"> |
+
+</details>
+
+<details>
+<summary><strong>macOS — all pages</strong></summary>
+
+| Menu bar panel | General |
+|:---:|:---:|
+| <img src="docs/screenshots/macos-menu.png" alt="macOS menu bar panel" width="340"> | <img src="docs/screenshots/macos-general.png" alt="macOS general settings" width="480"> |
+
+| Connection | Network |
+|:---:|:---:|
+| <img src="docs/screenshots/macos-connection.png" alt="macOS connection settings" width="480"> | <img src="docs/screenshots/macos-network.png" alt="macOS network settings" width="480"> |
+
+| Advanced | About |
+|:---:|:---:|
+| <img src="docs/screenshots/macos-advanced.png" alt="macOS advanced settings" width="480"> | <img src="docs/screenshots/macos-about.png" alt="macOS about page" width="360"> |
+
+| Diagnostics | Runtime logs |
+|:---:|:---:|
+| <img src="docs/screenshots/macos-diagnostics.png" alt="macOS diagnostics" width="480"> | <img src="docs/screenshots/macos-logs.png" alt="macOS runtime logs" width="480"> |
+
+</details>
+
 ## Architecture
 
 ```
