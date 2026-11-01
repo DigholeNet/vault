@@ -3,7 +3,7 @@ use dashmap::DashMap;
 use std::{
     collections::HashMap,
     io,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
 };
 use time::format_description::FormatItem;
 use tracing::{Level, level_filters::LevelFilter};
@@ -16,11 +16,65 @@ use tracing_subscriber::{
 #[derive(Default)]
 struct Writers {
     cache: HashMap<String, NonBlocking>,
-    guards: Vec<WorkerGuard>,
+    guards: Vec<LogWorker>,
     closed: bool,
 }
 
+struct CompletionWriter<W> {
+    inner: W,
+    completed: mpsc::Sender<()>,
+}
+
+impl<W: io::Write> io::Write for CompletionWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.inner.write(bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl<W> Drop for CompletionWriter<W> {
+    fn drop(&mut self) {
+        let _ = self.completed.send(());
+    }
+}
+
+struct LogWorker {
+    guard: WorkerGuard,
+    completed: mpsc::Receiver<()>,
+}
+
+impl LogWorker {
+    fn shutdown(self) {
+        let Self { guard, completed } = self;
+        drop(guard);
+        // WorkerGuard only waits one second. A slow file writer may still be
+        // draining after that deadline; its drop signals that the worker has
+        // finished its final flush. A disconnected channel also releases us
+        // if the worker unwinds.
+        let _ = completed.recv();
+    }
+}
+
+fn non_blocking_writer<W: io::Write + Send + 'static>(writer: W) -> (NonBlocking, LogWorker) {
+    let (completed, receiver) = mpsc::channel();
+    let (writer, guard) = tracing_appender::non_blocking(CompletionWriter {
+        inner: writer,
+        completed,
+    });
+    (
+        writer,
+        LogWorker {
+            guard,
+            completed: receiver,
+        },
+    )
+}
+
 /// Keep alive until all daemon cleanup and runtime shutdown have completed.
+/// Dropping this guard waits for queued file writes and their final flush.
 #[must_use = "dropping the logger guard shuts down file logging"]
 pub struct LoggerGuard(Arc<Mutex<Writers>>);
 
@@ -32,8 +86,10 @@ impl Drop for LoggerGuard {
             writers.cache.clear();
             std::mem::take(&mut writers.guards)
         };
-        // WorkerGuard drains its queue. Do not hold the state lock while waiting.
-        drop(guards);
+        // Do not hold the state lock while waiting for the workers.
+        for guard in guards {
+            guard.shutdown();
+        }
     }
 }
 
@@ -65,7 +121,7 @@ impl MultiFileWriter {
         }
 
         let file_appender = daily_appender(&self.log_dir, key);
-        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        let (non_blocking, guard) = non_blocking_writer(file_appender);
         writers.cache.insert(key.to_string(), non_blocking.clone());
         writers.guards.push(guard);
         Box::new(non_blocking)
@@ -147,6 +203,73 @@ fn apply_log_levels(environment: EnvFilter, levels: &[&str]) -> EnvFilter {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn shutdown_waits_for_slow_worker() {
+        use std::{io::Write, thread, time::Duration};
+
+        struct GatedWriter {
+            started: mpsc::Sender<()>,
+            release: Option<mpsc::Receiver<()>>,
+            bytes: Arc<Mutex<Vec<u8>>>,
+            flushed: Arc<std::sync::atomic::AtomicBool>,
+        }
+
+        impl Write for GatedWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if let Some(release) = self.release.take() {
+                    self.started.send(()).unwrap();
+                    release.recv().unwrap();
+                }
+                self.bytes.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushed
+                    .store(true, std::sync::atomic::Ordering::Release);
+                Ok(())
+            }
+        }
+
+        let (started, writing) = mpsc::channel();
+        let (release, blocked) = mpsc::channel();
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let flushed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (mut writer, worker) = non_blocking_writer(GatedWriter {
+            started,
+            release: Some(blocked),
+            bytes: bytes.clone(),
+            flushed: flushed.clone(),
+        });
+        let guard = LoggerGuard(Arc::new(Mutex::new(Writers {
+            guards: vec![worker],
+            ..Writers::default()
+        })));
+        writer.write_all(b"first\n").unwrap();
+        writer.write_all(b"second\n").unwrap();
+        drop(writer);
+        writing.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let (finished, shutdown) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            drop(guard);
+            finished.send(()).unwrap();
+        });
+        // Keep the writer blocked beyond WorkerGuard's fixed one-second wait.
+        let premature = shutdown.recv_timeout(Duration::from_millis(1250));
+        release.send(()).unwrap();
+        if premature.is_err() {
+            shutdown.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+        thread.join().unwrap();
+        assert!(
+            matches!(premature, Err(mpsc::RecvTimeoutError::Timeout)),
+            "logger shutdown returned before its worker finished writing"
+        );
+        assert_eq!(*bytes.lock().unwrap(), b"first\nsecond\n");
+        assert!(flushed.load(std::sync::atomic::Ordering::Acquire));
+    }
 
     #[test]
     fn normal_exit_drains_all_log_streams() {
