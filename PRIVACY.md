@@ -74,6 +74,11 @@ include **connection metadata** needed to operate and debug the service:
 - The tunnel IP address assigned to each client
 - Handshake and disconnect events with timestamps
 
+Handshake-request metadata is logged before client authentication. Device names
+and platform labels are client-reported, truncated and escaped for display;
+they are not verified device identities. Logs distinguish pending handshakes
+from authenticated connections.
+
 Debug-level packet logs additionally include source/destination IP addresses and
 packet sizes. Warning logs can include addresses for rejected or unroutable packets,
 even without debug logging. Do not enable verbose logging if recording this metadata

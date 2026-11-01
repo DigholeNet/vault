@@ -35,6 +35,12 @@ Logs update every second while visible, wrap to the screen width, and can be
 copied or cleared while offline. Updates pause when the log page is hidden or
 the app enters the background. Scrolling back keeps your reading position.
 
+The shared log keeps a current file and one backup. Platform writes check a
+1 MiB rotation threshold; Rust-only appends do not trigger that check, so the
+file can grow beyond the threshold until the next platform write. Rust appends
+use synchronous filesystem I/O; they do not wait for the path mutex but can
+block on file operations.
+
 ## Network recovery
 
 Once connected, the VPN keeps its TUN interface and native session through long
@@ -119,6 +125,10 @@ Debug builds need no signing keys and install alongside a release-build app
 see [docs/releasing.md](../../docs/releasing.md).
 
 The APK includes the project LICENSE and NOTICE files.
+
+Rust builds resolve Cargo from `CARGO` (an explicit executable path), then
+`CARGO_HOME/bin`, then `PATH`, falling back to the default rustup location.
+For example, set `CARGO=/opt/rust/bin/cargo` for a custom installation.
 
 ## Configuration
 

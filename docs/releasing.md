@@ -29,8 +29,11 @@ direct `cargo deb` use, first run `scripts/package-linux.sh --manpages-only`.
 Local `scripts/package-linux.sh` cross-builds x86_64 musl binaries with Zig;
 the release workflow builds native GNU/Linux binaries on Ubuntu after all
 platform checks pass. Both produce
-Debian packages, but libc/linking requirements can differ. The current Debian
-metadata declares libc6/libgcc dependencies even for local musl packages.
+Debian packages, but libc/linking requirements can differ. Local musl packages
+select the `musl` cargo-deb variant and declare only
+runtime command dependencies (iproute2/procps for edge, iptables/procps for
+supernode). Native CI packages use cargo-deb's `$auto` detection for shared-library
+dependencies, in addition to those runtime commands.
 Validate each package on the intended Debian/Ubuntu host; do not assume the
 local script reproduces CI binaries byte for byte.
 

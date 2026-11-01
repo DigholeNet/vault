@@ -17,9 +17,9 @@ public final class FileLogger: @unchecked Sendable {
     public static let shared = FileLogger()
 
     private let queue = DispatchQueue(label: "net.dighole.vault.filelogger")
-    /// Keep the log file under 1 MB; when the limit is exceeded the file is
-    /// rotated to vault.prev.log (overwriting the previous backup) instead
-    /// of being deleted, so the lines just before a crash survive.
+    /// Check the 1 MiB rotation threshold before each Swift write, keeping
+    /// one backup. Rust writes do not run this check; the shared file can
+    /// exceed the threshold until the next Swift write.
     private let maxLogSize: UInt64 = 1 * 1024 * 1024
     private let logFileURL: URL?
     /// Backup of the previous session's (or pre-rotation) log. Read together

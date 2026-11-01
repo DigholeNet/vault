@@ -21,7 +21,13 @@ reconnect with exponential backoff.
     Read configuration options from the specified TOML file.
 
 *--log-dir* <DIR>::
-    Print logs also to files in this directory.
+    Write logs to this directory (default: /var/log/vault/). Logs are written
+    only to files, including in foreground mode. Current log files have no date suffix (for example, default.log). On the
+    first write after a UTC date change, the old file is archived with its
+    last-write date (default.log.YYYY-MM-DD). Each stream keeps at most 30
+    files, including the
+    current file; older files are removed when that stream is initialized or
+    rotates. This is a file-count limit, not a size or age limit.
 
 *--daemon*::
     Run the process in the background.

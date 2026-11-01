@@ -9,7 +9,7 @@ mod imp {
     use dashmap::DashMap;
     use vault_core::{
         SystemTimeSource, app_main,
-        logger::rolling::{cli_log_levels, init_logger},
+        logger::rolling::{LoggerGuard, cli_log_levels, init_logger},
     };
 
     pub fn run() -> anyhow::Result<()> {
@@ -25,20 +25,22 @@ mod imp {
         })
     }
 
-    fn logger_init(verbose: bool, quiet: bool, log_dir: Option<&String>) -> anyhow::Result<()> {
+    fn logger_init(
+        verbose: bool,
+        quiet: bool,
+        log_dir: Option<&String>,
+    ) -> anyhow::Result<LoggerGuard> {
         let targets = DashMap::new();
         targets.insert("client", "client");
-        init_logger(
+        Ok(init_logger(
             log_dir.map_or("/var/log/vault/", |d| d),
             targets,
             cli_log_levels(verbose, quiet),
-        );
-
-        Ok(())
+        ))
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 mod config;
 // Pure-logic modules also build under `cfg(test)` on any OS so their unit
 // tests can run off-Linux; supernode.rs itself stays Linux-only.

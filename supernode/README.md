@@ -271,6 +271,23 @@ Common issues:
 Run with `--verbose` to enable debug-level logging for troubleshooting
 connection issues.
 
+## Logging and configuration errors
+
+Logs are written only to files, including when running in the foreground.
+`--log-dir` selects the directory; the default is `/var/log/vault/`.
+Current files have fixed names (`default.log`, `error.log`, and server
+`client.log`). On the first write after a UTC date change, the previous file
+is archived as `<name>.log.YYYY-MM-DD`, using its last-write date. Same-day
+restarts append to the current file. Files from the previous dated naming
+scheme are retained; today's dated file is adopted if no current file exists.
+Each stream (`default`, `error`, and server `client` logs)
+keeps at most 30 files, including the current file. Older files are removed when
+that stream first writes a log or rotates; existing history is cleaned up then too.
+This limits file count, not total size or age; a busy day can still produce a large file.
+`RUST_LOG` controls filtering unless `--verbose` or `--quiet` overrides it.
+Unknown TOML fields are rejected, so configuration typos fail startup.
+
+
 ## License
 
 MIT — see [LICENSE](../LICENSE)

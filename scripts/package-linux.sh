@@ -74,7 +74,7 @@ generate_manpages
 for pkg in edge supernode; do
     echo "==> Building deb: $pkg ($TARGET)"
     cargo zigbuild -p "$pkg" --release --target "$TARGET" --locked
-    cargo deb -p "$pkg" --target "$TARGET" --no-build --no-strip --output "$DIST_DIR/"
+    cargo deb -p "$pkg" --variant musl --target "$TARGET" --no-build --no-strip --output "$DIST_DIR/"
 done
 
 echo ""

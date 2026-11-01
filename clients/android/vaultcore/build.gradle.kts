@@ -120,10 +120,27 @@ tasks.withType<dev.detekt.gradle.Detekt>().configureEach {
     exclude("**/uniffi/**")
 }
 
-// Ensure Gradle can find cargo / cargo-ndk even when the daemon was started
-// without ~/.cargo/bin on PATH (common when building from an IDE).
-val cargoBin = "${System.getProperty("user.home")}/.cargo/bin"
-val pathWithCargo = cargoBin + File.pathSeparator + (System.getenv("PATH") ?: "")
+// Match the Apple script: explicit CARGO, custom CARGO_HOME/bin, PATH, then
+// the default rustup location. Use an executable path for CARGO overrides.
+val cargoName = if (System.getProperty("os.name").lowercase().contains("win")) "cargo.exe" else "cargo"
+val cargoHomeBin = File(
+    System.getenv("CARGO_HOME")?.takeIf { it.isNotBlank() }
+        ?: "${System.getProperty("user.home")}/.cargo",
+    "bin"
+)
+val cargoFromHome = System.getenv("CARGO_HOME")?.takeIf { it.isNotBlank() }
+    ?.let { cargoHomeBin.resolve(cargoName).takeIf(File::canExecute) }
+val cargoFromPath = System.getenv("PATH").orEmpty().split(File.pathSeparator)
+    .asSequence().filter { it.isNotBlank() }
+    .map { File(it, cargoName) }.firstOrNull { it.isFile && it.canExecute() }
+val defaultCargo = File("${System.getProperty("user.home")}/.cargo/bin", cargoName)
+val cargoExecutable = System.getenv("CARGO")?.takeIf { it.isNotBlank() }
+    ?: (cargoFromHome ?: cargoFromPath ?: defaultCargo).absolutePath
+val pathWithCargo = listOfNotNull(
+    File(cargoExecutable).parent,
+    cargoHomeBin.absolutePath,
+    System.getenv("PATH")
+).distinct().joinToString(File.pathSeparator)
 
 // Host cdylib filename is OS-dependent: macOS .dylib, Linux .so, Windows .dll.
 val hostLibName = run {
@@ -145,7 +162,7 @@ tasks.register<Exec>("cargoBuildHost") {
     workingDir = rustDir
     environment("PATH", pathWithCargo)
     environment("CARGO_TARGET_DIR", rustDir.resolve("target").absolutePath)
-    commandLine("$cargoBin/cargo", "build")
+    commandLine(cargoExecutable, "build")
 }
 
 tasks.register<Exec>("generateUniFFIBindings") {
@@ -156,7 +173,7 @@ tasks.register<Exec>("generateUniFFIBindings") {
     environment("PATH", pathWithCargo)
     environment("CARGO_TARGET_DIR", rustDir.resolve("target").absolutePath)
     commandLine(
-        "$cargoBin/cargo", "run",
+        cargoExecutable, "run",
         "--features", "bindgen",
         "--bin", "uniffi-bindgen",
         "--",
@@ -180,7 +197,7 @@ tasks.register<Exec>("cargoNdkBuild") {
     environment("PATH", pathWithCargo)
     environment("CARGO_TARGET_DIR", rustDir.resolve("target").absolutePath)
     commandLine(
-        "$cargoBin/cargo", "ndk",
+        cargoExecutable, "ndk",
         "--platform", libs.versions.min.sdk.get(),
         "-t", "arm64-v8a",
         "-t", "armeabi-v7a",

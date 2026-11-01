@@ -80,6 +80,12 @@ UTC timestamps, bracketed severity, and `app`, `ne`, or `rust` as the source.
 Runtime Logs also normalize older Rust severity fields and repair duplicated
 opening timestamp brackets before chronological merging.
 
+The shared log keeps a current file and one backup. Platform writes check a
+1 MiB rotation threshold; Rust-only appends do not trigger that check, so the
+file can grow beyond the threshold until the next platform write. Rust appends
+use synchronous filesystem I/O; they do not wait for the path mutex but can
+block on file operations.
+
 The Clear Logs button truncates the current and previous log files, clears the
 macOS provider-log cache, and invalidates in-flight UI refreshes. On macOS, an
 unavailable root provider is marked for clearing on the next connection; the UI
@@ -191,6 +197,10 @@ The iOS provider is an embedded app extension; macOS uses a system extension.
 On macOS, install the signed app in `/Applications` and approve the extension in
 System Settings. macOS App Groups are team-prefixed; the system extension runs
 outside the user's session, so status/log communication uses provider messages.
+
+Rust builds resolve Cargo from `CARGO` (an explicit executable path), then
+`CARGO_HOME/bin`, then `PATH`, falling back to the default rustup location.
+For example, set `CARGO=/opt/rust/bin/cargo` for a custom installation.
 
 ## Source layout
 

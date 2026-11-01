@@ -5,8 +5,9 @@
 //! and standalone edge binaries), this module appends everything to one
 //! file owned by the platform app (the same `vault.log` the Kotlin/Swift
 //! side writes to), so a field diagnostic capture contains both platform
-//! and core/bridge records in order. The platform side owns rotation, so
-//! writes open + append per line and never hold an fd.
+//! and core/bridge records in order. The platform side checks rotation on
+//! its own writes; Rust-only writes do not enforce a size limit. Writes open
+//! and append per line without retaining an fd.
 
 use std::fs::OpenOptions;
 use std::path::PathBuf;
@@ -27,9 +28,8 @@ pub fn set_path(path: &str) {
     }
 }
 
-/// Append one line to the shared log file. Never blocks: if the path lock
-/// is held (e.g. by a panicking thread that died mid-write) the line is
-/// dropped rather than risking a deadlock.
+/// Append one line synchronously. The path mutex is never waited on: a busy
+/// mutex drops the record. Opening and writing the file may still block on I/O.
 pub fn append(line: &str) {
     let Some(mutex) = LOG_FILE_PATH.get() else {
         return;

@@ -12,7 +12,7 @@
 ## Checklist
 
 - [ ] `cargo fmt --all --check` passes
-- [ ] `cargo clippy` has no new warnings
-- [ ] Tests added/updated where applicable (`cargo test`)
-- [ ] Protocol changes are compatible with deployed clients/servers, or called out explicitly
-- [ ] Docs updated (README / AGENTS.md / manpages) when behavior or layout changed
+- [ ] `cargo clippy --locked --workspace --all-targets --features vault-core/test -- -D warnings` passes
+- [ ] Tests added/updated where applicable; `cargo test --locked --workspace --features vault-core/test` passes
+- [ ] Protocol changes preserve compatibility within the wire version; breaking changes increment `PROTOCOL_VERSION`, update protocol docs/changelog, and require coordinated client/server upgrades
+- [ ] Docs updated (README / protocol docs / manpages) when behavior or layout changed

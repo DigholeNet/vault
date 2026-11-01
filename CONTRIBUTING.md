@@ -76,9 +76,12 @@ for clone-to-build commands per platform, and the component READMEs under
 
 ```bash
 # Run the Rust test suites
-cargo test -p vault-core --features test
-cargo test -p supernode
+cargo test --locked --workspace --features vault-core/test
+cargo clippy --locked --workspace --all-targets --features vault-core/test -- -D warnings
 ```
+
+Plain `cargo test` covers only the default members and skips the feature-gated
+client integration suite. Use the workspace command above before opening a PR.
 
 ## Coding Standards
 

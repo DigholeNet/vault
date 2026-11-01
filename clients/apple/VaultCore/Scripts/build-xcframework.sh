@@ -24,7 +24,21 @@ BUILD_DIR="$PKG_DIR/build"
 FRAMEWORKS_DIR="$PKG_DIR/Frameworks"
 FFI_MODULE="VaultCoreFFI"
 
-CARGO="${CARGO:-$HOME/.cargo/bin/cargo}"
+# Match Android: explicit executable override, custom Cargo home, PATH,
+# then the standard rustup installation as a fallback.
+if [[ -z "${CARGO:-}" ]]; then
+    if [[ -n "${CARGO_HOME:-}" && -x "$CARGO_HOME/bin/cargo" ]]; then
+        CARGO="$CARGO_HOME/bin/cargo"
+    elif command -v cargo >/dev/null 2>&1; then
+        CARGO="$(command -v cargo)"
+    else
+        CARGO="$HOME/.cargo/bin/cargo"
+    fi
+fi
+if ! command -v "$CARGO" >/dev/null 2>&1; then
+    echo "error: Cargo not found; set CARGO to its executable path or configure CARGO_HOME/PATH" >&2
+    exit 1
+fi
 # Pin the crate's target dir next to the crate (it is a workspace member).
 export CARGO_TARGET_DIR="$RUST_DIR/target"
 

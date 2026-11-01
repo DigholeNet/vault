@@ -12,7 +12,7 @@ use tracing::{error, info, warn};
 use vault_core::{
     PrivDropRequest, SysSignal, app_main,
     device::{Ipv4, Ipv6, TunTapDevice},
-    logger::rolling::{cli_log_levels, init_logger},
+    logger::rolling::{LoggerGuard, cli_log_levels, init_logger},
     util,
 };
 
@@ -312,13 +312,15 @@ fn on_ip_assigned(
     Ok(())
 }
 
-fn logger_init(verbose: bool, quiet: bool, log_dir: Option<&String>) -> anyhow::Result<()> {
+fn logger_init(
+    verbose: bool,
+    quiet: bool,
+    log_dir: Option<&String>,
+) -> anyhow::Result<LoggerGuard> {
     let targets = DashMap::new();
-    init_logger(
+    Ok(init_logger(
         log_dir.map_or("/var/log/vault/", |d| d),
         targets,
         cli_log_levels(verbose, quiet),
-    );
-
-    Ok(())
+    ))
 }

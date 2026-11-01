@@ -18,11 +18,11 @@ import java.util.concurrent.Executors
  *
  * Mirrors the Apple FileLogger design: a single current file (`vault.log`)
  * appended with O_APPEND semantics, rotated to one backup file
- * (`vault.prev.log`) once it exceeds [MAX_LOG_SIZE], so the lines just
- * before a disconnect or crash survive.
+ * (`vault.prev.log`) when a Kotlin write observes [MAX_LOG_SIZE] exceeded.
+ * Rust writes do not run this check, so this is not a strict file-size limit.
  *
- * All writes are serialized on a single background thread so logging never
- * blocks the caller (e.g. the VPN packet path or the main thread).
+ * Kotlin writes are queued on a background thread. Rust appends separately
+ * and synchronously; those writes can block on filesystem I/O.
  */
 object VaultFileLogger {
     private const val TAG = "VaultFileLogger"
