@@ -595,6 +595,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires IPv4/IPv6 loopback and permission to create ICMP datagram sockets"]
     fn ping_loopback() {
         for address in ["127.0.0.1", "::1"] {
             let cancellation = Cancellation::default();

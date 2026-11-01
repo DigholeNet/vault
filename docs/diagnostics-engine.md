@@ -146,8 +146,25 @@ connectivity verdict. All states are typed; localization belongs in the UI.
 ## Verification
 
 `cargo test -p vault-core -p vault-bridge` covers the engine, FFI, UDP DNS,
-cancellation, timeout, IPv4/IPv6 echo replies and HTTP/DNS parsing. No local
+cancellation, timeout, IPv4/IPv6 echo-reply parsing and HTTP/DNS parsing. No local
 HTTPS server, test certificate or private key is maintained.
+
+The real IPv4/IPv6 ICMP loopback test is excluded from the default run because
+it needs working loopback interfaces and permission to create ICMP datagram
+sockets. Run it explicitly in a suitable environment:
+
+```sh
+cargo test -p vault-core diagnostics::transport::tests::ping_loopback -- --exact --ignored
+```
+
+On Linux, check `sysctl net.ipv4.ping_group_range` and `id -G`: at least one
+of the user's group IDs must fall within the configured range. Running Cargo
+as root or granting raw-socket capabilities is not a substitute for this
+datagram-socket setting. Containers may also restrict socket creation.
+See the kernel's [ping socket permissions](https://kernel.org/doc/html/latest/networking/ip-sysctl.html#ping-group-range-2-integers).
+Linux CI temporarily permits only the runner's primary group and restores
+the previous range afterward. Both Linux and macOS CI run this test explicitly;
+permission errors, timeouts and unexpected replies still fail that CI step.
 
 Run real rustls HTTPS checks against `https://example.com` explicitly:
 
