@@ -25,7 +25,12 @@ struct LogTextView: UIViewRepresentable {
         view.text = text
         let location = min(selection.location, text.utf16.count)
         view.selectedRange = NSRange(location: location, length: min(selection.length, text.utf16.count - location))
-        view.scrollRangeToVisible(NSRange(location: text.utf16.count, length: 0))
+        // SwiftUI may not have assigned the viewport when the text first arrives.
+        DispatchQueue.main.async { [weak view] in
+            guard let view, view.text == text else { return }
+            view.layoutIfNeeded()
+            view.scrollRangeToVisible(NSRange(location: text.utf16.count, length: 0))
+        }
     }
 }
 #endif

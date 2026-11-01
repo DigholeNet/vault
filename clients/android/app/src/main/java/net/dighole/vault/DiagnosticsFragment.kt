@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.view.doOnPreDraw
 import net.dighole.vaultcore.uniffi.DiagnosticProbe
 import net.dighole.vaultcore.uniffi.DiagnosticOperation
 import net.dighole.vaultcore.uniffi.DiagnosticStage
@@ -180,6 +181,7 @@ class DiagnosticsFragment : Fragment() {
         val visible = view != null && isResumed && !isHidden && tab == 1 && !clearingLogs
         if (!visible) { logUpdates?.cancel(); logUpdates = null; return }
         if (logUpdates?.isActive == true) return
+        logsRendered = false
         logUpdates = viewLifecycleOwner.lifecycleScope.launch {
             while (isActive) {
                 refreshLogs(false)
@@ -201,8 +203,12 @@ class DiagnosticsFragment : Fragment() {
                 logText = content
                 text.text = content.ifEmpty { getString(R.string.no_logs) }
                 logsRendered = true
-                scroll.post {
-                    if (followTail) scroll.fullScroll(View.FOCUS_DOWN) else scroll.scrollTo(0, previousY)
+                // Apply the final offset after layout and focus restoration. fullScroll
+                // also changes focus, which can reveal the selectable text's start again.
+                scroll.doOnPreDraw {
+                    if (view !== root || tab != 1) return@doOnPreDraw
+                    val targetY = if (followTail) text.bottom + scroll.paddingBottom - scroll.height else previousY
+                    scroll.scrollTo(0, targetY.coerceAtLeast(0))
                 }
             }
             root.findViewById<MaterialButton>(R.id.btnCopyLogs).isEnabled = content.isNotEmpty() && !clearingLogs
