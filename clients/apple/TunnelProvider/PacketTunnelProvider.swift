@@ -675,7 +675,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     /// Poll the Rust core's traffic stats once per second and bridge them
     /// to the main app. TUN delivery measurements are separate from the
-    /// Rust receive counters and are summarized every five seconds.
+    /// Rust receive counters: healthy windows log every thirty seconds,
+    /// while failed writes retain the five-second reporting cadence.
     private func startStatsPolling() {
         dispatchPrecondition(condition: .onQueue(.main))
         let timer = DispatchSource.makeTimerSource(queue: .main)
@@ -696,13 +697,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let meanMs = String(format: "%.3f", report.meanDurationMilliseconds)
         let maxMs = String(format: "%.3f", report.maxDurationMilliseconds)
         let meanPackets = String(format: "%.2f", report.meanPacketsPerCall)
-        let message = "[session:\(sessionID)] TUN write metrics elapsed_s=\(elapsed) calls=\(report.calls) "
+        let message = "[session:\(sessionID)] TUN write metrics elapsed_s=\(elapsed) "
             + "submitted_packets=\(report.submittedPackets) submitted_bytes=\(report.submittedBytes) "
             + "packets_per_call_avg=\(meanPackets) packets_per_call_max=\(report.maxPacketsPerCall) "
-            + "failed_calls=\(report.failedCalls) failed_packets=\(report.failedPackets) "
             + "write_mean_ms=\(meanMs) write_max_ms=\(maxMs)"
         if report.failedCalls > 0 {
-            Logger.network.warningAndFile(message)
+            Logger.network.warningAndFile(
+                message + " calls=\(report.calls) failed_calls=\(report.failedCalls) failed_packets=\(report.failedPackets)"
+            )
         } else {
             Logger.network.noticeAndFile(message)
         }

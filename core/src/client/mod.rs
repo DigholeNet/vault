@@ -1043,7 +1043,7 @@ impl ClientInner {
                     }
                     match heartbeat_socket.send_to(buf.as_ref(), remote_addr).await {
                         Ok(bytes) => {
-                            info!("Heartbeat ping sent ({bytes} bytes to {remote_addr})")
+                            debug!("Heartbeat ping sent ({bytes} bytes to {remote_addr})")
                         }
                         Err(e) => warn!("Failed to send heartbeat: {e}"),
                     }
@@ -1057,12 +1057,12 @@ impl ClientInner {
         let mut last_pong = Instant::now();
         let timeout = Duration::from_millis(HEARTBEAT_TIMEOUT_MS);
 
-        // Reused across packets: avoids allocating and zeroing a fresh 64KB
-        // Buffer for every incoming packet on the hot path.
-        let mut pkt_buf = Buffer::new(0);
-        // Reused raw/decrypted packet collections for batching.
+        // Reused for heartbeat parsing. Data packets decrypt in their own Vec.
+        let mut heartbeat_buf = Buffer::new(0);
+        // Raw-packet staging is reused. Delivery transfers ownership of batch,
+        // so reserve its next allocation once, when the first data packet arrives.
         let mut pending: Vec<Vec<u8>> = Vec::with_capacity(DATA_BATCH_CAPACITY);
-        let mut batch: Vec<Vec<u8>> = Vec::with_capacity(DATA_BATCH_CAPACITY);
+        let mut batch: Vec<Vec<u8>> = Vec::new();
 
         // Keep the timer outside select: recreating sleep(1s) per packet
         // postpones maintenance indefinitely while traffic keeps arriving.
@@ -1094,20 +1094,20 @@ impl ClientInner {
                     }
 
                     batch.clear();
-                    for packet in pending.drain(..) {
+                    let pending_packets = pending.len();
+                    for mut packet in pending.drain(..) {
                         if packet.is_empty() {
                             continue;
                         }
                         let packet_type = packet[0];
-                        let payload = &packet[1..];
 
                         match packet_type {
                             protocol::HEARTBEAT => {
-                                pkt_buf.clear();
-                                if pkt_buf.write_all(payload).is_ok() {
-                                    match protocol::parse_pong(&mut pkt_buf, &crypto) {
+                                heartbeat_buf.clear();
+                                if heartbeat_buf.write_all(&packet[1..]).is_ok() {
+                                    match protocol::parse_pong(&mut heartbeat_buf, &crypto) {
                                         Ok(_pong) => {
-                                            info!("Pong received from {remote_addr}");
+                                            debug!("Pong received from {remote_addr}");
                                             last_pong = Instant::now();
                                             rejected_since = None;
                                             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -1120,31 +1120,32 @@ impl ClientInner {
                                 }
                             }
                             protocol::DATA_INTERFACE => {
-                                pkt_buf.clear();
-                                if pkt_buf.write_all(payload).is_ok() {
-                                    if crypto.decrypt(&mut pkt_buf, protocol::DATA_INTERFACE).is_ok() {
-                                        let data = pkt_buf.as_ref().to_vec();
-                                        report.packet(data.len());
-                                        // Any successfully authenticated
-                                        // packet proves the session is alive;
-                                        // refresh the liveness timestamp so
-                                        // lost pongs during active traffic do
-                                        // not cause a spurious reconnect.
-                                        last_pong = Instant::now();
-                                        rejected_since = None;
+                                if decrypt_packet(&crypto, &mut packet).is_ok() {
+                                    report.packet(packet.len());
+                                    // Any successfully authenticated
+                                    // packet proves the session is alive;
+                                    // refresh the liveness timestamp so
+                                    // lost pongs during active traffic do
+                                    // not cause a spurious reconnect.
+                                    last_pong = Instant::now();
+                                    rejected_since = None;
+                                    {
                                         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                                         state.last_pong = last_pong;
-                                        state.bytes_received.fetch_add(data.len() as u64, Ordering::Relaxed);
+                                        state.bytes_received.fetch_add(packet.len() as u64, Ordering::Relaxed);
                                         state.packets_received.fetch_add(1, Ordering::Relaxed);
-                                        batch.push(data);
-                                    } else {
-                                        report.decrypt_failure();
-                                        {
-                                            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                                            state.decrypt_failures.fetch_add(1, Ordering::Relaxed);
-                                        }
-                                        debug!("Downlink packet decrypt failed");
                                     }
+                                    if batch.is_empty() {
+                                        batch.reserve_exact(pending_packets);
+                                    }
+                                    batch.push(packet);
+                                } else {
+                                    report.decrypt_failure();
+                                    {
+                                        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                                        state.decrypt_failures.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                    debug!("Downlink packet decrypt failed");
                                 }
                             }
                             protocol::REJECTED => {
@@ -1231,6 +1232,19 @@ impl ClientInner {
 
         self.clear_connection();
     }
+}
+
+/// Keep the received allocation through delivery. Compact only after AEAD
+/// authentication and replay checks succeed; the header/tag stay out of FFI.
+fn decrypt_packet(crypto: &CryptoCore, packet: &mut Vec<u8>) -> anyhow::Result<()> {
+    let (packet_type, payload) = packet
+        .split_first_mut()
+        .ok_or_else(|| anyhow::anyhow!("empty packet"))?;
+    let plaintext_len = crypto.decrypt_slice(payload, *packet_type)?.len();
+    let plaintext_start = 1 + EXTRA_LEN;
+    packet.copy_within(plaintext_start..plaintext_start + plaintext_len, 0);
+    packet.truncate(plaintext_len);
+    Ok(())
 }
 
 async fn enqueue_downlink(
@@ -1497,18 +1511,56 @@ mod tests {
     }
 
     fn crypto() -> Arc<CryptoCore> {
-        let (private, _) = create_ecdh_keypair().unwrap();
-        let (_, public) = create_ecdh_keypair().unwrap();
-        Arc::new(
+        Arc::new(crypto_pair().0)
+    }
+
+    fn crypto_pair() -> (CryptoCore, CryptoCore) {
+        let (private, public) = create_ecdh_keypair().unwrap();
+        let (peer_private, peer_public) = create_ecdh_keypair().unwrap();
+        (
             CryptoCore::new(
                 private,
                 &crate::AlgorithmType::Aes128Gcm,
-                public.bytes(),
+                peer_public.bytes(),
                 Role::Initiator,
                 b"test",
             )
             .unwrap(),
+            CryptoCore::new(
+                peer_private,
+                &crate::AlgorithmType::Aes128Gcm,
+                public.bytes(),
+                Role::Responder,
+                b"test",
+            )
+            .unwrap(),
         )
+    }
+
+    #[test]
+    fn packet_reuse() {
+        let (sender, receiver) = crypto_pair();
+        let mut wire = Buffer::new(EXTRA_LEN + 1);
+        for len in [0, 1, 64, 1_400, 65_507 - 1 - EXTRA_LEN - crate::TAG_LEN] {
+            let expected: Vec<u8> = (0..len).map(|index| index as u8).collect();
+            wire.clear();
+            wire.write_all(&expected).unwrap();
+            protocol::build_data_interface(&mut wire, &sender).unwrap();
+            let mut packet = wire.as_ref().to_vec();
+            let pointer = packet.as_ptr();
+            let capacity = packet.capacity();
+
+            decrypt_packet(&receiver, &mut packet).unwrap();
+
+            assert_eq!(packet, expected);
+            assert_eq!(
+                packet.as_ptr(),
+                pointer,
+                "delivery must retain the receive allocation"
+            );
+            assert_eq!(packet.capacity(), capacity);
+        }
+        assert!(decrypt_packet(&receiver, &mut Vec::new()).is_err());
     }
 
     #[tokio::test]

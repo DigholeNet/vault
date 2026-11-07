@@ -137,29 +137,34 @@ class SessionGateTest {
     }
 
     @Test
-    fun latePacket() = runBlocking {
+    fun lateBatch() = runBlocking {
         withTimeout(5000) {
             val gate = SessionGate()
             val old = gate.begin()
             val entered = CompletableDeferred<Unit>()
             val resume = CompletableDeferred<Unit>()
-            val oldQueue = mutableListOf<String>()
-            val newQueue = mutableListOf<String>()
+            val oldQueue = PacketBatchQueue(2)
+            val newQueue = PacketBatchQueue(2)
             var queue = oldQueue
+            val oldBatch = listOf(byteArrayOf(1), byteArrayOf(2))
+            val newBatch = listOf(byteArrayOf(3), byteArrayOf(4))
             val callback = launch(Dispatchers.Default) {
                 entered.complete(Unit)
                 resume.await()
-                gate.update(old) { queue.add("old packet") }
+                gate.update(old) { queue.trySend(oldBatch) }
             }
             entered.await()
-            gate.stop { }
+            gate.stop { oldQueue.close() }
             val current = gate.begin()
             gate.update(current) { queue = newQueue }
             resume.complete(Unit)
             callback.join()
-            gate.update(current) { queue.add("new packet") }
-            assertTrue(oldQueue.isEmpty())
-            assertEquals(listOf("new packet"), newQueue)
+            gate.update(current) {
+                assertEquals(PacketBatchQueue.SendResult.ACCEPTED, queue.trySend(newBatch))
+            }
+            assertTrue(oldQueue.isClosed)
+            assertTrue(newBatch === newQueue.receive())
+            newQueue.close()
         }
     }
 

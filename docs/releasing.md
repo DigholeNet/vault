@@ -57,6 +57,13 @@ maximum code is 1,999,999,999. `0.1.0` encodes to `201999`, above the previous
 development code `100`. Direct Gradle builds still default to code `1` and are
 not versioned release artifacts.
 
+Android release APKs strip native debug information and retain support for
+arm64-v8a, armeabi-v7a and x86_64. Packaging exports only the APK, without a
+separate symbols archive. The unstripped libraries remain in the local
+`clients/android/vaultcore/src/main/jniLibs/` build outputs. Debug builds are
+useful for reproducing problems; symbolizing an existing release crash needs
+the unstripped libraries from that same release build.
+
 Apple packaging and the all-platform release gate accept only numeric
 `major.minor.patch` versions. Pre-release suffixes are rejected before packaging;
 they are not passed into Apple's marketing-version field.

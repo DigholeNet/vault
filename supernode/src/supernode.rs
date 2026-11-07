@@ -502,7 +502,7 @@ impl<TS: TimeSource> SuperNode<TS> {
                         }
                     }
 
-                    match self.device.write(buffer) {
+                    match self.device.write(buffer.as_ref()) {
                         Ok(_) => {}
                         // TUN queue full: drop rather than stall the loop.
                         Err(e) if is_would_block(&e) => {

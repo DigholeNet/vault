@@ -15,9 +15,11 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 use tokio::time::{Interval, MissedTickBehavior, interval_at};
-use tracing::info;
+use tracing::{info, warn};
 
-const REPORT_INTERVAL: Duration = Duration::from_secs(5);
+const REPORT_INTERVAL: Duration = Duration::from_secs(30);
+// Failures/backpressure keep the shorter window; only healthy summaries slow down.
+const ERROR_REPORT_INTERVAL: Duration = Duration::from_secs(5);
 const NO_ERRNO: i64 = i64::MIN;
 
 /// Keep the one-second liveness cadence without recreating a sleep whenever
@@ -280,7 +282,12 @@ impl UplinkReport {
     }
 
     pub(super) fn report_if_due(&mut self) {
-        if self.started.elapsed() >= REPORT_INTERVAL {
+        let elapsed = self.started.elapsed();
+        let has_failures = self.build_failures > 0
+            || self.errors.total > 0
+            || self.queue.full_drops.load(Ordering::Relaxed) > 0
+            || self.queue.closed_drops.load(Ordering::Relaxed) > 0;
+        if elapsed >= REPORT_INTERVAL || (has_failures && elapsed >= ERROR_REPORT_INTERVAL) {
             self.report(false);
         }
     }
@@ -305,40 +312,44 @@ impl UplinkReport {
         {
             return;
         }
-        macro_rules! log_window {
-            ($level:expr) => {
-                tracing::event!(
-                    $level,
-                    generation = self.generation,
-                    peer = %self.peer,
-                    final_window,
-                    elapsed_s = elapsed,
-                    packets,
-                    payload_bytes = bytes,
-                    payload_Bps = bytes as f64 / elapsed.max(1e-6),
-                    queue_depth = queue.depth,
-                    queue_peak = queue.peak,
-                    queue_capacity = queue.capacity,
-                    queue_full_drops,
-                    queue_closed_drops,
-                    build_failures,
-                    send_failures = errors.total,
-                    send_emsgsize = errors.message_too_large,
-                    send_would_block = errors.would_block,
-                    send_enobufs = errors.no_buffer_space,
-                    send_unreachable = errors.unreachable,
-                    send_other = errors.other,
-                    last_errno = ?errors.last_errno,
-                    "VPN uplink metrics"
-                );
-            };
-        }
         if queue_full_drops > 0 || queue_closed_drops > 0 || build_failures > 0 || errors.total > 0
         {
-            // Preserve failure visibility for warning-only daemon log filters.
-            log_window!(tracing::Level::WARN);
+            // Keep failures visible and detailed even with warning-only filters.
+            warn!(
+                generation = self.generation,
+                peer = %self.peer,
+                final_window,
+                elapsed_s = elapsed,
+                packets,
+                payload_bytes = bytes,
+                payload_Bps = bytes as f64 / elapsed.max(1e-6),
+                queue_depth = queue.depth,
+                queue_peak = queue.peak,
+                queue_capacity = queue.capacity,
+                queue_full_drops,
+                queue_closed_drops,
+                build_failures,
+                send_failures = errors.total,
+                send_emsgsize = errors.message_too_large,
+                send_would_block = errors.would_block,
+                send_enobufs = errors.no_buffer_space,
+                send_unreachable = errors.unreachable,
+                send_other = errors.other,
+                last_errno = ?errors.last_errno,
+                "VPN uplink metrics"
+            );
         } else {
-            log_window!(tracing::Level::INFO);
+            info!(
+                generation = self.generation,
+                final_window,
+                elapsed_s = format_args!("{elapsed:.3}"),
+                packets,
+                payload_bytes = bytes,
+                payload_Bps = (bytes as f64 / elapsed.max(1e-6)).round(),
+                queue_depth = queue.depth,
+                queue_peak = queue.peak,
+                "VPN uplink metrics"
+            );
         }
     }
 }
@@ -390,7 +401,11 @@ impl DownlinkReport {
     }
 
     pub(super) fn report_if_due(&mut self) {
-        if self.started.elapsed() >= REPORT_INTERVAL {
+        let elapsed = self.started.elapsed();
+        let has_anomalies = self.decrypt_failures > 0
+            || self.receive.waits.load(Ordering::Relaxed) > 0
+            || self.receive.receive_errors.load(Ordering::Relaxed) > 0;
+        if elapsed >= REPORT_INTERVAL || (has_anomalies && elapsed >= ERROR_REPORT_INTERVAL) {
             self.report(false);
         }
     }
@@ -406,36 +421,54 @@ impl DownlinkReport {
         let receive = self.receive.snapshot();
         if packets == 0
             && decrypt_failures == 0
-            && receive.queue.peak == 0
             && receive.waits == 0
             && receive.receive_errors == 0
         {
+            // Heartbeats also cross the receive queue; its peak alone is not data traffic.
             return;
         }
-        info!(
-            generation = self.generation,
-            peer = %self.peer,
-            final_window,
-            elapsed_s = elapsed,
-            decrypted_packets = packets,
-            payload_bytes = bytes,
-            payload_Bps = bytes as f64 / elapsed.max(1e-6),
-            decrypt_failures,
-            queue_depth = receive.queue.depth,
-            queue_peak = receive.queue.peak,
-            queue_capacity = receive.queue.capacity,
-            queue_waits = receive.waits,
-            queue_wait_total_ms = receive.wait_total_ms,
-            queue_wait_max_ms = receive.wait_max_ms,
-            receive_errors = receive.receive_errors,
-            last_receive_errno = ?receive.last_errno,
-            batches = batches.batches,
-            batch_packets_avg = batches.avg_packets(),
-            batch_packets_max = batches.max_packets,
-            callback_avg_ms = batches.callback_avg_ms(),
-            callback_max_ms = batches.callback_max_ms(),
-            "VPN downlink metrics"
-        );
+        if decrypt_failures > 0 || receive.waits > 0 || receive.receive_errors > 0 {
+            warn!(
+                generation = self.generation,
+                peer = %self.peer,
+                final_window,
+                elapsed_s = elapsed,
+                decrypted_packets = packets,
+                payload_bytes = bytes,
+                payload_Bps = bytes as f64 / elapsed.max(1e-6),
+                decrypt_failures,
+                queue_depth = receive.queue.depth,
+                queue_peak = receive.queue.peak,
+                queue_capacity = receive.queue.capacity,
+                queue_waits = receive.waits,
+                queue_wait_total_ms = receive.wait_total_ms,
+                queue_wait_max_ms = receive.wait_max_ms,
+                receive_errors = receive.receive_errors,
+                last_receive_errno = ?receive.last_errno,
+                batches = batches.batches,
+                batch_packets_avg = batches.avg_packets(),
+                batch_packets_max = batches.max_packets,
+                callback_avg_ms = batches.callback_avg_ms(),
+                callback_max_ms = batches.callback_max_ms(),
+                "VPN downlink metrics"
+            );
+        } else {
+            info!(
+                generation = self.generation,
+                final_window,
+                elapsed_s = format_args!("{elapsed:.3}"),
+                decrypted_packets = packets,
+                payload_bytes = bytes,
+                payload_Bps = (bytes as f64 / elapsed.max(1e-6)).round(),
+                queue_depth = receive.queue.depth,
+                queue_peak = receive.queue.peak,
+                batch_packets_avg = format_args!("{:.2}", batches.avg_packets()),
+                batch_packets_max = batches.max_packets,
+                callback_avg_ms = format_args!("{:.3}", batches.callback_avg_ms()),
+                callback_max_ms = format_args!("{:.3}", batches.callback_max_ms()),
+                "VPN downlink metrics"
+            );
+        }
     }
 }
 
@@ -582,6 +615,120 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn healthy_windows() {
+        let logs = CapturedLogs::default();
+        let output = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || output.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let (sender, _receiver) = mpsc::channel(2);
+            let mut uplink = UplinkReport::new(
+                Arc::new(UplinkQueueMetrics::new(&sender)),
+                "127.0.0.1:1001".parse().unwrap(),
+                1,
+            );
+            let mut downlink = DownlinkReport::new(
+                Arc::new(ReceiveMetrics::new(&sender)),
+                "127.0.0.1:1001".parse().unwrap(),
+                1,
+            );
+            uplink.sent(128);
+            downlink.packet(128);
+            downlink.batch(1, Duration::from_millis(2));
+            uplink.started = Instant::now() - Duration::from_secs(6);
+            downlink.started = uplink.started;
+            uplink.report_if_due();
+            downlink.report_if_due();
+            assert!(logs.0.lock().unwrap().is_empty());
+
+            // Waiting for the longer window must not clear its counters.
+            uplink.started = Instant::now() - REPORT_INTERVAL;
+            downlink.started = uplink.started;
+            uplink.report_if_due();
+            downlink.report_if_due();
+        });
+        let output = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        let lines: Vec<_> = output.lines().collect();
+        assert_eq!(lines.len(), 2, "{output}");
+        for line in lines {
+            assert!(line.contains("INFO"), "{line}");
+            assert!(line.contains("payload_bytes=128 "), "{line}");
+            assert!(!line.contains("failures="), "{line}");
+            assert!(!line.contains("queue_capacity="), "{line}");
+        }
+        assert!(output.contains("callback_max_ms=2.000"), "{output}");
+    }
+
+    #[test]
+    fn failure_windows() {
+        let logs = CapturedLogs::default();
+        let output = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || output.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let (sender, _receiver) = mpsc::channel(2);
+            let queue = Arc::new(UplinkQueueMetrics::new(&sender));
+            let receive = Arc::new(ReceiveMetrics::new(&sender));
+            let mut uplink = UplinkReport::new(queue.clone(), "127.0.0.1:1001".parse().unwrap(), 1);
+            let mut downlink =
+                DownlinkReport::new(receive.clone(), "127.0.0.1:1001".parse().unwrap(), 1);
+            queue.full_drops.store(2, Ordering::Relaxed);
+            uplink.send_error(&io::Error::from(io::ErrorKind::WouldBlock));
+            receive.record_wait(Duration::from_millis(2));
+            receive.record_receive_error(&io::Error::other("receive failed"));
+            downlink.decrypt_failure();
+            uplink.started = Instant::now() - Duration::from_secs(4);
+            downlink.started = uplink.started;
+            uplink.report_if_due();
+            downlink.report_if_due();
+            assert!(logs.0.lock().unwrap().is_empty());
+            uplink.started = Instant::now() - ERROR_REPORT_INTERVAL;
+            downlink.started = uplink.started;
+            uplink.report_if_due();
+            downlink.report_if_due();
+        });
+        let output = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(output.lines().count(), 2, "{output}");
+        for field in [
+            "queue_full_drops=2 ",
+            "send_would_block=1 ",
+            "decrypt_failures=1 ",
+            "queue_waits=1 ",
+            "receive_errors=1 ",
+        ] {
+            assert!(output.contains(field), "missing {field}: {output}");
+        }
+    }
+
+    #[test]
+    fn heartbeat_quiet() {
+        let logs = CapturedLogs::default();
+        let output = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || output.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let (sender, _receiver) = mpsc::channel(2);
+            let receive = Arc::new(ReceiveMetrics::new(&sender));
+            let mut report =
+                DownlinkReport::new(receive.clone(), "127.0.0.1:1001".parse().unwrap(), 1);
+            receive.queue.observe(1);
+            report.started = Instant::now() - REPORT_INTERVAL;
+            report.report_if_due();
+        });
+        assert!(logs.0.lock().unwrap().is_empty());
     }
 
     #[test]

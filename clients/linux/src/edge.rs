@@ -2,7 +2,6 @@
 use crate::config::EdgeConfig;
 use crate::interface::FamilyExits;
 use crate::storage::SimpleFileStorage;
-use std::io::Write;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -199,13 +198,8 @@ where
         + Sync,
 {
     fn on_packets(&self, packets: Vec<Vec<u8>>) {
-        let mut buffer = Buffer::new(0);
         for packet in packets {
-            buffer.clear();
-            if buffer.write_all(&packet).is_err() {
-                continue;
-            }
-            if let Err(e) = self.device.write(&mut buffer) {
+            if let Err(e) = self.device.write(&packet) {
                 // The edge TUN fd is blocking, so a full queue blocks here
                 // instead of erroring; if write still fails, drop the packet
                 // (UDP semantics).

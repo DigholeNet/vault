@@ -25,12 +25,40 @@ struct TunnelWriteMetricsTests {
 
         // Drained failures and the old maximum must not leak into a new window.
         metrics.record(packets: 1, bytes: 50, succeeded: true, durationNanoseconds: 500_000)
-        let next = try #require(metrics.takeReport(at: 18_000_000_000))
-        #expect(next.elapsedSeconds == 5)
+        #expect(metrics.takeReport(at: 18_000_000_000) == nil)
+        let next = try #require(metrics.takeReport(at: 38_000_000_000))
+        #expect(next.elapsedSeconds == 30)
         #expect(next.calls == 1)
         #expect(next.meanPacketsPerCall == 1 && next.maxPacketsPerCall == 1)
         #expect(next.failedCalls == 0 && next.failedPackets == 0)
         #expect(next.meanDurationMilliseconds == 0.5 && next.maxDurationMilliseconds == 0.5)
+    }
+
+    @Test func reportCadence() throws {
+        let metrics = TunnelWriteMetrics(startedAt: 0)
+        for second in stride(from: 5, through: 25, by: 5) {
+            metrics.record(packets: 2, bytes: 100, succeeded: true, durationNanoseconds: 1_000_000)
+            #expect(metrics.takeReport(at: UInt64(second) * 1_000_000_000) == nil)
+        }
+        #expect(metrics.takeReport(at: 29_999_999_999) == nil)
+        let healthy = try #require(metrics.takeReport(at: 30_000_000_000))
+        #expect(healthy.elapsedSeconds == 30)
+        #expect(healthy.calls == 5 && healthy.submittedPackets == 10 && healthy.submittedBytes == 500)
+
+        metrics.record(packets: 1, bytes: 50, succeeded: true, durationNanoseconds: 1_000_000)
+        metrics.record(packets: 3, bytes: 150, succeeded: false, durationNanoseconds: 2_000_000)
+        #expect(metrics.takeReport(at: 34_999_999_999) == nil)
+        let failure = try #require(metrics.takeReport(at: 35_000_000_000))
+        #expect(failure.elapsedSeconds == 5)
+        #expect(failure.calls == 2 && failure.submittedPackets == 4 && failure.submittedBytes == 200)
+        #expect(failure.failedCalls == 1 && failure.failedPackets == 3)
+
+        metrics.record(packets: 2, bytes: 100, succeeded: true, durationNanoseconds: 1_000_000)
+        #expect(metrics.takeReport(at: 55_000_000_000) == nil)
+        metrics.record(packets: 1, bytes: 50, succeeded: false, durationNanoseconds: 1_000_000)
+        let lateFailure = try #require(metrics.takeReport(at: 56_000_000_000))
+        #expect(lateFailure.elapsedSeconds == 21)
+        #expect(lateFailure.calls == 2 && lateFailure.submittedPackets == 3 && lateFailure.failedCalls == 1)
     }
 
     @Test func sessionIsolation() throws {
@@ -44,7 +72,7 @@ struct TunnelWriteMetricsTests {
         // The old Edge callback retains the old metrics object after stop.
         oldSession.record(packets: 1, bytes: 100, succeeded: false, durationNanoseconds: 25)
         replacement.record(packets: 1, bytes: 200, succeeded: true, durationNanoseconds: 50)
-        let report = try #require(replacement.takeReport(at: 6_000_000_000))
+        let report = try #require(replacement.takeReport(at: 31_000_000_000))
         #expect(report.calls == 1 && report.submittedBytes == 200 && report.failedCalls == 0)
     }
 

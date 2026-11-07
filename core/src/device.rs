@@ -330,12 +330,6 @@ impl TunTapDevice {
         }
     }
 
-    #[inline]
-    fn correct_data_after_read(&self, _buffer: &mut Buffer) {}
-
-    #[inline]
-    fn correct_data_before_write(&self, _buffer: &mut Buffer) {}
-
     fn get_overhead(&self) -> usize {
         40 /* for outer IPv6 header, can't be sure to only have IPv4 peers */
         + 8 /* for outer UDP header */
@@ -424,13 +418,12 @@ impl TunTapDevice {
         buffer.clear();
         let r = (&self.fd).read(buffer.buffer())?;
         buffer.set_length(r);
-        self.correct_data_after_read(buffer);
         Ok(r)
     }
 
-    pub fn write(&self, buffer: &mut Buffer) -> anyhow::Result<usize> {
-        self.correct_data_before_write(buffer);
-        let r = (&self.fd).write(buffer.as_ref())?;
+    /// Write one packet without copying it into an intermediate buffer.
+    pub fn write(&self, packet: &[u8]) -> anyhow::Result<usize> {
+        let r = (&self.fd).write(packet)?;
         (&self.fd).flush()?;
         Ok(r)
     }

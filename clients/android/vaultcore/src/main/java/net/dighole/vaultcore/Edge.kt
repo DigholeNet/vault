@@ -37,7 +37,7 @@ class EdgeException(message: String, cause: Throwable? = null) : Exception(messa
 class Edge(
     val config: EdgeConfig,
     private val id: PeerId,
-    private val onData: (ByteArray) -> Unit,
+    private val onPackets: (List<ByteArray>) -> Unit,
     private val onIpAssigned: (String, String, String, Int) -> Unit,
     private val pendingCompletion: (Throwable?) -> Unit,
     private val protectSocket: ((Int) -> Boolean)? = null
@@ -47,9 +47,7 @@ class Edge(
     init {
         val callbacks = object : EdgeCallbacks {
             override fun onDataBatch(packets: List<ByteArray>) {
-                for (packet in packets) {
-                    this@Edge.onData(packet)
-                }
+                this@Edge.onPackets(packets)
             }
 
             override fun onIpAssigned(

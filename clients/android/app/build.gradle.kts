@@ -35,6 +35,10 @@ android {
         applicationId = "net.dighole.vault"
         minSdk = libs.versions.min.sdk.get().toInt()
         targetSdk = libs.versions.target.sdk.get().toInt()
+        ndk {
+            // Match vaultcore's Rust targets; omit auxiliary libraries for unsupported ABIs.
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
         versionCode = providers.gradleProperty("versionCode").map(String::toInt).orElse(1).get()
         versionName = providers.gradleProperty("versionName").orElse("0.1.0").get()
         buildConfigField("String", "GIT_BUILD_ID", "\"$gitBuildId\"")

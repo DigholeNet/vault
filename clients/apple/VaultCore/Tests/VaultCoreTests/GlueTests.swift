@@ -49,7 +49,7 @@ struct TunnelPacketWriterTests {
         callbacks.onDataBatch(packets: packets)
         // Delivery and the system write finish before the core callback returns.
         #expect(callbackCalls == 1 && writeCalls == 1)
-        let report = try #require(metrics.takeReport(at: 5_000_000_000))
+        let report = try #require(metrics.takeReport(at: 30_000_000_000))
         #expect(report.calls == 1 && report.submittedPackets == 4)
         #expect(report.submittedBytes == 7)
         #expect(report.failedCalls == 0 && report.failedPackets == 0)

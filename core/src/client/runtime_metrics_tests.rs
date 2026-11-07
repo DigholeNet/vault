@@ -39,7 +39,7 @@ impl DownlinkEvents {
 }
 
 struct DeliveryCallbacks {
-    delivered: mpsc::UnboundedSender<usize>,
+    delivered: mpsc::UnboundedSender<Vec<Vec<u8>>>,
     delay: Duration,
 }
 
@@ -48,7 +48,7 @@ impl ClientCallbacks for DeliveryCallbacks {
         // Model synchronous platform TUN work, whose cost should appear in
         // callback metrics rather than in cryptographic failure counters.
         std::thread::sleep(self.delay);
-        self.delivered.send(packets.len()).unwrap();
+        self.delivered.send(packets).unwrap();
     }
 
     fn on_ip_assigned(&self, _: String, _: String, _: String, _: i32) -> Result<(), String> {
@@ -67,7 +67,7 @@ struct DataLoop {
     server: UdpSocket,
     client_address: SocketAddr,
     sender_crypto: CryptoCore,
-    delivered: mpsc::UnboundedReceiver<usize>,
+    delivered: mpsc::UnboundedReceiver<Vec<Vec<u8>>>,
     events: DownlinkEvents,
 }
 
@@ -145,17 +145,26 @@ impl DataLoop {
         }
     }
 
-    async fn send(&self, corrupt: bool) {
+    fn data_packet(&self, data: &[u8]) -> Vec<u8> {
         let mut packet = Buffer::new(EXTRA_LEN + 1);
-        packet.write_all(&[0x45; 64]).unwrap();
+        packet.write_all(data).unwrap();
         protocol::build_data_interface(&mut packet, &self.sender_crypto).unwrap();
+        packet.as_ref().to_vec()
+    }
+
+    async fn send(&self, corrupt: bool) {
+        let mut packet = self.data_packet(&[0x45; 64]);
         if corrupt {
             // Invalid AEAD tag with a fresh nonce: must be counted as a
             // decryption failure and never delivered to the platform.
-            *packet.message_mut().last_mut().unwrap() ^= 1;
+            *packet.last_mut().unwrap() ^= 1;
         }
+        self.send_raw(&packet).await;
+    }
+
+    async fn send_raw(&self, packet: &[u8]) {
         self.server
-            .send_to(packet.as_ref(), self.client_address)
+            .send_to(packet, self.client_address)
             .await
             .unwrap();
     }
@@ -165,7 +174,7 @@ impl DataLoop {
             tokio::time::timeout(Duration::from_millis(500), self.delivered.recv())
                 .await
                 .expect("local UDP packet should be delivered promptly"),
-            Some(1)
+            Some(vec![vec![0x45; 64]])
         );
     }
 
@@ -196,6 +205,9 @@ fn number(fields: &Fields, name: &str) -> f64 {
 async fn periodic_report() {
     let mut data_loop = DataLoop::start().await;
     let started = Instant::now();
+    // Failures retain the short reporting window even though healthy
+    // traffic now emits only a thirty-second summary.
+    data_loop.send(true).await;
     // There is never a one-second idle gap: the old sleep recreated inside
     // select would not fire until after this entire stream had ended.
     for _ in 0..65 {
@@ -213,7 +225,7 @@ async fn periodic_report() {
     assert!(number(report, "elapsed_s") >= 5.0);
     assert!(number(report, "decrypted_packets") > 0.0);
     assert!(number(report, "batches") > 0.0);
-    assert_eq!(number(report, "decrypt_failures"), 0.0);
+    assert_eq!(number(report, "decrypt_failures"), 1.0);
     assert!(number(report, "callback_avg_ms") >= 1.0);
     assert!(number(report, "callback_max_ms") >= number(report, "callback_avg_ms"));
 
@@ -285,4 +297,82 @@ async fn queue_backpressure() {
     drop(receiver);
     assert!(!enqueue_downlink(&sender, &metrics, vec![5]).await);
     assert_eq!(metrics.snapshot().receive_errors, 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mixed_delivery() {
+    let mut data_loop = DataLoop::start().await;
+
+    // A pong must still use the control-packet parser and refresh liveness,
+    // without being delivered as IP data by the new in-place data path.
+    let before_pong = Instant::now() - Duration::from_secs(1);
+    data_loop.inner.state.lock().unwrap().last_pong = before_pong;
+    let mut pong = Buffer::new(EXTRA_LEN + 1);
+    protocol::build_heartbeat_pong(
+        &mut pong,
+        &data_loop.sender_crypto,
+        &PeerId([3; 16]),
+        current_ts(),
+    )
+    .unwrap();
+    data_loop.send_raw(pong.as_ref()).await;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while data_loop.inner.state.lock().unwrap().last_pong == before_pong {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("authenticated pong should refresh liveness");
+    assert!(data_loop.delivered.try_recv().is_err());
+
+    // More than a full batch, with distinct lengths and contents. Include
+    // empty plaintext to check that trimming the wire header/tag is exact.
+    let expected: Vec<_> = (0..=DATA_BATCH_CAPACITY)
+        .map(|index| vec![index as u8; index * 13])
+        .collect();
+    let first = data_loop.data_packet(&expected[0]);
+    data_loop.send_raw(&first).await;
+    data_loop.send_raw(&first).await; // Replay must not reach the callback.
+    data_loop.send_raw(&[protocol::DATA_INTERFACE]).await;
+
+    let genuine = data_loop.data_packet(&expected[1]);
+    let mut forged = genuine.clone();
+    *forged.last_mut().unwrap() ^= 1;
+    data_loop.send_raw(&forged).await;
+    // Authentication failure must not consume the genuine packet's nonce.
+    data_loop.send_raw(&genuine).await;
+    for data in &expected[2..] {
+        data_loop.send_raw(&data_loop.data_packet(data)).await;
+    }
+
+    let mut delivered = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while delivered.len() < expected.len() {
+            let batch = data_loop.delivered.recv().await.unwrap();
+            assert!(!batch.is_empty() && batch.len() <= DATA_BATCH_CAPACITY);
+            delivered.extend(batch);
+        }
+    })
+    .await
+    .expect("all authenticated data should be delivered");
+    assert_eq!(delivered, expected);
+
+    let reports = data_loop.stop().await;
+    let total = |field| {
+        reports
+            .iter()
+            .map(|report| number(report, field))
+            .sum::<f64>()
+    };
+    assert_eq!(total("decrypted_packets"), expected.len() as f64);
+    assert_eq!(
+        total("payload_bytes"),
+        expected.iter().map(Vec::len).sum::<usize>() as f64
+    );
+    assert_eq!(total("decrypt_failures"), 3.0);
+    assert!(
+        reports
+            .iter()
+            .all(|report| number(report, "batch_packets_max") <= DATA_BATCH_CAPACITY as f64)
+    );
 }

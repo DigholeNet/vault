@@ -1018,16 +1018,61 @@ extension VaultTests {
 
 private final class StatusQueryVpnManager: VpnManager {
     var replies: [(Data?) -> Void] = []
+    var messages: [Data] = []
     override func deliverProviderMessage(
         _ message: Data,
         manager: NETunnelProviderManager,
         completion: @escaping (Data?) -> Void
     ) throws {
+        messages.append(message)
         replies.append(completion)
     }
 }
 
 extension VaultTests {
+    @MainActor
+    func testQuietPolling() async throws {
+        let controller = StatusQueryVpnManager(config: try makeConfig().config, appData: AppData())
+        let profile = TestTunnelManager()
+        controller.activeVPN = profile
+        controller.updateVPNStatus(profile)
+        controller.stopStatsMonitoring()
+        for reply in controller.replies { reply(nil) }
+        controller.replies.removeAll()
+        controller.messages.removeAll()
+        controller.lastMessageTrace.removeAll()
+
+        for command in [ProviderCommand.status, .logs] {
+            controller.sendProviderCommand(.init(command)) { _ in }
+            try XCTUnwrap(controller.replies.popLast())(Data([1]))
+            let initial = try XCTUnwrap(controller.lastMessageTrace[command])
+            // An unchanged healthy context must stay quiet even after the
+            // old thirty-second trace interval has elapsed.
+            controller.lastMessageTrace[command] = (initial.signature, 0)
+            controller.sendProviderCommand(.init(command)) { _ in }
+            try XCTUnwrap(controller.replies.popLast())(Data([1]))
+            XCTAssertEqual(controller.lastMessageTrace[command]?.time, 0)
+            if command == .logs {
+                let data = try XCTUnwrap(controller.messages.last)
+                XCTAssertEqual(try ProviderCommandEnvelope.decode(data).trace, false)
+            }
+
+            profile.isOnDemandEnabled.toggle()
+            controller.sendProviderCommand(.init(command)) { _ in }
+            try XCTUnwrap(controller.replies.popLast())(Data([1]))
+            XCTAssertNotEqual(controller.lastMessageTrace[command]?.signature, initial.signature)
+            XCTAssertGreaterThan(controller.lastMessageTrace[command]?.time ?? 0, 0)
+        }
+
+        // Explicit diagnostic commands keep their existing tracing behavior.
+        for _ in 0..<2 {
+            controller.sendProviderCommand(.init(.diagnosticContext)) { _ in }
+            try XCTUnwrap(controller.replies.popLast())(Data([1]))
+            let data = try XCTUnwrap(controller.messages.last)
+            XCTAssertEqual(try ProviderCommandEnvelope.decode(data).trace, true)
+        }
+    }
+
     @MainActor
     func testStatusPollingRejectsLateReplyAfterDisconnect() async throws {
         let data = AppData()

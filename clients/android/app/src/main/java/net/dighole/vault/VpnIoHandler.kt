@@ -18,6 +18,7 @@ import net.dighole.vaultcore.LogThrottle
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Handles TUN interface packet I/O for the VPN service.
@@ -39,12 +40,12 @@ class VpnIoHandler(
     private val onUplinkPacket: (ByteArray) -> Unit
 ) {
     /**
-     * Channel for downlink packets received from the VPN server.
-     * External producers (e.g. Edge.onData) write into this channel.
+     * Downlink batches retain the Rust callback's packet boundaries.
+     * Capacity is measured in packets, not batches.
      * Rebuilt after stop() if ensureRunning() detects it was closed.
      */
-    private var _pendingWritePackets = Channel<ByteArray>(capacity = 1024)
-    val pendingWritePackets: Channel<ByteArray> get() = _pendingWritePackets
+    @Volatile
+    private var pendingWritePackets = PacketBatchQueue()
 
     private var uplinkChannel: Channel<ByteArray>? = null
     @Volatile
@@ -59,6 +60,22 @@ class VpnIoHandler(
     private var vpnIoRestartJob: Job? = null
     private val interfaceGate = SessionGate()
     private var interfaceToken = 0L
+
+    fun enqueueDownlink(packets: List<ByteArray>) {
+        when (pendingWritePackets.trySend(packets)) {
+            PacketBatchQueue.SendResult.ACCEPTED -> Unit
+            PacketBatchQueue.SendResult.CLOSED -> {
+                if (LogThrottle.shouldLog("downlink-channel-closed", 5000)) {
+                    Log.d(logTag, "Downlink channel closed, dropping packets")
+                }
+            }
+            PacketBatchQueue.SendResult.FULL -> {
+                if (LogThrottle.shouldLog("pending-write-full", 5000)) {
+                    Log.w(logTag, "Pending write channel full, dropping excess packets")
+                }
+            }
+        }
+    }
 
     @Synchronized
     fun setVpnInterface(iface: ParcelFileDescriptor) {
@@ -102,8 +119,8 @@ class VpnIoHandler(
                 false
             }
             else -> {
-                if (_pendingWritePackets.isClosedForReceive) {
-                    _pendingWritePackets = Channel<ByteArray>(capacity = 1024)
+                if (pendingWritePackets.isClosed) {
+                    pendingWritePackets = PacketBatchQueue()
                     Log.d(logTag, "Pending write channel rebuilt after stop()")
                 }
                 ensureUplinkChannel()
@@ -159,7 +176,7 @@ class VpnIoHandler(
     fun stop() {
         interfaceGate.stop { }
         try {
-            _pendingWritePackets.close()
+            pendingWritePackets.close()
             Log.d(logTag, "Pending write channel closed")
         } catch (_: Exception) {
         }
@@ -257,7 +274,7 @@ class VpnIoHandler(
                                 // Skip idle intervals; a "0 pkts / 0 bytes" line every
                                 // second drowns out useful logs during reconnect.
                                 if (readPackets > 0) {
-                                    Log.i(logTag, "TUN read last 1s: $readPackets pkts / $readBytes bytes")
+                                    Log.d(logTag, "TUN read last 1s: $readPackets pkts / $readBytes bytes")
                                 }
                                 readPackets = 0
                                 readBytes = 0
@@ -323,11 +340,13 @@ class VpnIoHandler(
     }
 
     private fun startWritingPackets() {
+        // An old writer must never consume a replacement interface's queue.
+        val channel = pendingWritePackets
+        val iface = vpnInterface ?: run {
+            Log.e(logTag, "VPN interface is null, cannot start writing")
+            return
+        }
         vpnWriteJob = scope.launch {
-            val iface = vpnInterface ?: run {
-                Log.e(logTag, "VPN interface is null, cannot start writing")
-                return@launch
-            }
             val output = FileOutputStream(iface.fileDescriptor)
             vpnOutputStream = output
 
@@ -335,39 +354,38 @@ class VpnIoHandler(
             var writeBytes = 0L
             var lastWriteLog = System.currentTimeMillis()
             try {
-                while (serviceRunning.get() && isActive) {
-                    val packet = try {
-                        pendingWritePackets.receive()
+                writeLoop@ while (serviceRunning.get() && isActive) {
+                    val packets = try {
+                        channel.receive()
                     } catch (_: CancellationException) {
                         break
                     } catch (_: ClosedReceiveChannelException) {
                         break
                     }
-                    try {
-                        output.write(packet)
-                        writePackets++
-                        writeBytes += packet.size
-                        val now = System.currentTimeMillis()
-                        if (now - lastWriteLog >= 1000L) {
-                            // Skip idle intervals; see the read loop above.
-                            if (writePackets > 0) {
-                                Log.i(logTag, "TUN write last 1s: $writePackets pkts / $writeBytes bytes")
+                    for (packet in packets) {
+                        if (!serviceRunning.get() || !isActive) break@writeLoop
+                        try {
+                            // A TUN write represents one IP packet; never concatenate a batch.
+                            output.write(packet)
+                            writePackets++
+                            writeBytes += packet.size
+                        } catch (e: java.io.IOException) {
+                            Log.e(logTag, "IO Error writing packet: ${e.message}")
+                            break@writeLoop
+                        } catch (_e: Exception) {
+                            if (LogThrottle.shouldLog("write-packet-error", 5000)) {
+                                Log.e(logTag, "Error writing packet", _e)
                             }
-                            writePackets = 0
-                            writeBytes = 0
-                            lastWriteLog = now
                         }
-                        // Explicit flush is not needed here; the kernel flushes the
-                        // shared fd on its own schedule. Removing it avoids a syscall
-                        // per packet and significantly improves throughput.
-                    } catch (e: java.io.IOException) {
-                        Log.e(logTag, "IO Error writing packet: ${e.message}")
-                        break
-                    } catch (_e: Exception) {
-                        // Throttled: fires per packet while the TUN fd is broken.
-                        if (LogThrottle.shouldLog("write-packet-error", 5000)) {
-                            Log.e(logTag, "Error writing packet", _e)
+                    }
+                    val now = System.currentTimeMillis()
+                    if (now - lastWriteLog >= 1000L) {
+                        if (writePackets > 0) {
+                            Log.d(logTag, "TUN write last 1s: $writePackets pkts / $writeBytes bytes")
                         }
+                        writePackets = 0
+                        writeBytes = 0
+                        lastWriteLog = now
                     }
                 }
             } finally {
@@ -379,5 +397,55 @@ class VpnIoHandler(
             }
             Log.d(logTag, "Packet writing stopped")
         }
+    }
+}
+
+/** Non-blocking batch admission with the same 1024-packet budget as the old packet channel. */
+internal class PacketBatchQueue(private val capacity: Int = 1024) {
+    enum class SendResult { ACCEPTED, FULL, CLOSED }
+
+    private val queuedPackets = AtomicInteger()
+    @Volatile
+    var isClosed = false
+        private set
+    private val channel = Channel<List<ByteArray>>(
+        capacity = capacity,
+        // receive() can be cancelled after removing an element but before returning it.
+        onUndeliveredElement = { packets -> queuedPackets.addAndGet(-packets.size) }
+    )
+
+    init {
+        require(capacity > 0) { "Packet capacity must be positive" }
+    }
+
+    @Synchronized
+    fun trySend(packets: List<ByteArray>): SendResult {
+        if (isClosed) return SendResult.CLOSED
+        if (packets.isEmpty()) return SendResult.ACCEPTED
+        val accepted = minOf(packets.size, capacity - queuedPackets.get())
+        if (accepted == 0) return SendResult.FULL
+        // Reuse the complete batch normally; a partial batch must not retain dropped arrays.
+        val batch = if (accepted == packets.size) packets else packets.take(accepted)
+        queuedPackets.addAndGet(accepted)
+        val result = channel.trySend(batch)
+        if (!result.isSuccess) queuedPackets.addAndGet(-accepted)
+        return when {
+            result.isClosed -> SendResult.CLOSED
+            !result.isSuccess || accepted < packets.size -> SendResult.FULL
+            else -> SendResult.ACCEPTED
+        }
+    }
+
+    suspend fun receive(): List<ByteArray> {
+        val packets = channel.receive()
+        queuedPackets.addAndGet(-packets.size)
+        return packets
+    }
+
+    @Synchronized
+    fun close() {
+        isClosed = true
+        // Drop buffered batches and release their packet budget on session teardown.
+        channel.cancel()
     }
 }

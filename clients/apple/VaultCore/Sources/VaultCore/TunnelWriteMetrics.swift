@@ -45,7 +45,8 @@ public final class TunnelWriteMetrics: @unchecked Sendable {
     private let lock = NSLock()
     private var window = Window()
     private var startedAt: UInt64
-    private static let reportIntervalNanoseconds: UInt64 = 5_000_000_000
+    private static let healthyReportIntervalNanoseconds: UInt64 = 30_000_000_000
+    private static let failureReportIntervalNanoseconds: UInt64 = 5_000_000_000
 
     public init(startedAt: UInt64 = DispatchTime.now().uptimeNanoseconds) {
         self.startedAt = startedAt
@@ -69,13 +70,17 @@ public final class TunnelWriteMetrics: @unchecked Sendable {
         window.maxDurationNanoseconds = max(window.maxDurationNanoseconds, durationNanoseconds)
     }
 
-    /// Drain at most once per five seconds, using actual elapsed time when
-    /// the process/timer was delayed. Empty windows produce no log record.
+    /// Healthy traffic is summarized every thirty seconds; failed writes
+    /// use a five-second minimum reporting interval. Counters remain intact
+    /// between reports, including traffic preceding a failure.
+    /// Empty windows produce no log record; force flushes a final window.
     public func takeReport(at now: UInt64 = DispatchTime.now().uptimeNanoseconds, force: Bool = false) -> Report? {
         lock.lock()
         defer { lock.unlock() }
         let elapsed = now >= startedAt ? now - startedAt : 0
-        guard force || elapsed >= Self.reportIntervalNanoseconds else { return nil }
+        let interval = window.failedCalls > 0
+            ? Self.failureReportIntervalNanoseconds : Self.healthyReportIntervalNanoseconds
+        guard force || elapsed >= interval else { return nil }
         defer {
             window = Window()
             startedAt = now

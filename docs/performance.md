@@ -71,10 +71,14 @@ not a battery-impact measurement. Avoid including credentials in shared reports.
 
 ## Runtime measurements
 
-The shared client core emits `VPN uplink metrics` and `VPN downlink metrics`
-to the existing runtime log about every five seconds when there is activity.
-Apple providers additionally emit `TUN write metrics`. These are aggregate
-records, not per-packet logs. `elapsed_s` is the actual monotonic time covered
+The shared client core emits concise `VPN uplink metrics` and `VPN downlink
+metrics` summaries about every thirty seconds when there is data traffic.
+Apple providers additionally emit `TUN write metrics` on the same cadence.
+Failures and receive backpressure retain detailed warnings with a five-second
+minimum reporting interval; healthy summaries omit error fields and repeated
+connection details. Successful heartbeats are DEBUG-only and do not produce
+empty data summaries. These are aggregate records, not per-packet logs.
+`elapsed_s` is the actual monotonic time covered
 by a window, so a delayed timer does not turn a longer interval into a claimed
 one-second sample. Core maintenance still runs on a persistent one-second
 timer for liveness checks; missed ticks do not cause a burst of reports.
@@ -86,6 +90,7 @@ the session's cumulative `session_not_connected_total`. Apple logs `Tunnel
 settings applied` with the successfully applied MTU and configuration revision.
 The MTU is the configured TUN MTU, not a measurement of the remote path MTU.
 An HTTPS test's `-4`/`-6` option does not identify the outer tunnel IP family.
+The table below includes fields present only in detailed warnings.
 
 | Record / fields | Meaning |
 |---|---|
@@ -107,8 +112,8 @@ Apple forwards each existing Rust downlink batch to one `writePackets` call,
 preserving packet order and the matching IPv4/IPv6 protocol entries. It does
 not wait for more packets to fill a batch. Empty batches are ignored; calls
 that return false are counted without retrying the batch. The core currently
-delivers at most 32 packets per batch. Under load, `submitted_packets` should
-exceed `calls` and `packets_per_call_avg` should rise above 1; sparse traffic
+delivers at most 32 packets per batch. Under load, `packets_per_call_avg`
+should rise above 1; sparse traffic
 may still arrive as single packets. A metric update now occurs once per write
 call rather than once per packet.
 
@@ -119,7 +124,8 @@ callback duration, receive-queue waits, workload throughput and CPU together.
 Rust and Apple report windows are independent, so adjacent records do not
 necessarily cover the same packets or the same slow event.
 
-Core records identify the peer and generation. Per-transport windows do not
+Core records identify the generation; the peer is included in `Transport ready`
+and detailed warnings. Per-transport windows do not
 reuse their predecessors' counters on reconnect. Apple counters belong to a
 provider session, which may contain several transport generations. Core
 `final_window=true` marks a partial final window. `VPN session uplink failure

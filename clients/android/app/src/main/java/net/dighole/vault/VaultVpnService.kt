@@ -26,7 +26,6 @@ import kotlinx.coroutines.launch
 import net.dighole.vault.data.readVaultConfig
 import net.dighole.vaultcore.Edge
 import net.dighole.vaultcore.EdgeConfig
-import net.dighole.vaultcore.LogThrottle
 import net.dighole.vaultcore.PeerId
 import net.dighole.vaultcore.uniffi.VpnException
 import net.dighole.vaultcore.uniffi.setFdBlocking
@@ -308,23 +307,9 @@ class VaultVpnService : VpnService() {
         val newEdge = Edge(
             config = edgeConfig,
             id = PeerId(id),
-            onData = { data ->
+            onPackets = { packets ->
                 sessionGate.update(sessionToken) {
-                    val handler = vpnIoHandler ?: return@update
-                    val result = handler.pendingWritePackets.trySend(data)
-                    if (!result.isSuccess) {
-                        // Throttled: these fire once per packet while the tunnel
-                        // is reconnecting, flooding the logs otherwise.
-                        if (result.isClosed) {
-                            if (LogThrottle.shouldLog("downlink-channel-closed", 5000)) {
-                                Log.d(TAG, "Downlink channel closed, dropping packet")
-                            }
-                        } else {
-                            if (LogThrottle.shouldLog("pending-write-full", 5000)) {
-                                Log.w(TAG, "Pending write channel full, dropping packet")
-                            }
-                        }
-                    }
+                    vpnIoHandler?.enqueueDownlink(packets)
                 }
             },
             onIpAssigned = { ipv4, ipv4Mask, ipv6, ipv6Prefixlen ->
