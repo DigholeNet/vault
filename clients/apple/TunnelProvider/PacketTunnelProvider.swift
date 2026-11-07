@@ -32,6 +32,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Polls Rust counters and publishes an in-memory status snapshot over IPC.
     private var statsTimer: DispatchSourceTimer?
     private var statsSession = PacketStats.Session()
+    /// Replaced for each start; callbacks retain their own session's object.
+    private var tunWriteMetrics = TunnelWriteMetrics()
     /// Logs an "alive" marker with the memory footprint every 30s. When the
     /// markers stop without a stopTunnel/sleep line, the process was killed
     /// or suspended without warning.
@@ -137,6 +139,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         // Each provider session owns fresh counters; the app carries forward
         // the last observed totals when an on-demand restart replaces it.
         statsSession.begin()
+        tunWriteMetrics = TunnelWriteMetrics()
         guard let protoConfig = protocolConfiguration as? NETunnelProviderProtocol
         else {
             Logger.network.error("Invalid protocol configuration type")
@@ -299,6 +302,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let deviceName = trimmedName.isEmpty ? "unknown" : trimmedName
 
         let token = sessionToken
+        let writeMetrics = tunWriteMetrics
         do {
             let config = EdgeConfig(
                 password: password,
@@ -312,7 +316,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 hosts: candidates,
                 deviceName: deviceName,
                 platform: platform,
-                onData: writePacketToTunnel,
+                onPackets: { [weak self] packets in
+                    self?.writePacketsToTunnel(packets, metrics: writeMetrics)
+                },
                 onIpAssigned: { [weak self] ipv4, mask, ipv6, prefix in
                     DispatchQueue.main.async {
                         guard let self, !self.stopRequested, self.sessionToken == token else { return }
@@ -422,6 +428,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         edge = nil
         do { try closing?.close() }
         catch { Logger.network.errorAndFile("Failed to close Edge: \(error)") }
+        reportTunWriteMetrics(force: true)
         completion?(NEVPNError(.connectionFailed))
     }
 
@@ -583,6 +590,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     else { self.cancelTunnelWithError(error) }
                     return
                 }
+                Logger.network.noticeAndFile(
+                    "[session:\(self.sessionID)] Tunnel settings applied revision=\(update.revision) mtu=\(configuration.mtu)"
+                )
                 if let next = self.tunnelSettings.next() {
                     self.applySettings(next)
                 } else if self.pendingStart?.isPending == true {
@@ -664,8 +674,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     /// Poll the Rust core's traffic stats once per second and bridge them
-    /// to the main app. vault-core owns the counters; per-packet counting
-    /// on the Swift side would be redundant.
+    /// to the main app. TUN delivery measurements are separate from the
+    /// Rust receive counters and are summarized every five seconds.
     private func startStatsPolling() {
         dispatchPrecondition(condition: .onQueue(.main))
         let timer = DispatchSource.makeTimerSource(queue: .main)
@@ -674,19 +684,34 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             guard let self = self, let edge = self.edge else { return }
             self.reasserting = self.tunnelSettings.isApplying || !edge.isConnected
             self.statsSession.update(PacketStats.Stats(edge.getTrafficStats()))
+            self.reportTunWriteMetrics()
         }
         timer.resume()
         statsTimer = timer
     }
 
-    func writePacketToTunnel(packet: Data) {
-        // Detect packet version from first byte (high 4 bits)
-        let isIPv6 = !packet.isEmpty && ((packet[0] >> 4) == 6)
-        let protocolFamily: Int32 = isIPv6 ? AF_INET6 : AF_INET
-        self.packetFlow.writePackets(
-            [packet],
-            withProtocols: [NSNumber(value: protocolFamily)]
-        )
+    private func reportTunWriteMetrics(force: Bool = false) {
+        guard let report = tunWriteMetrics.takeReport(force: force) else { return }
+        let elapsed = String(format: "%.3f", report.elapsedSeconds)
+        let meanMs = String(format: "%.3f", report.meanDurationMilliseconds)
+        let maxMs = String(format: "%.3f", report.maxDurationMilliseconds)
+        let meanPackets = String(format: "%.2f", report.meanPacketsPerCall)
+        let message = "[session:\(sessionID)] TUN write metrics elapsed_s=\(elapsed) calls=\(report.calls) "
+            + "submitted_packets=\(report.submittedPackets) submitted_bytes=\(report.submittedBytes) "
+            + "packets_per_call_avg=\(meanPackets) packets_per_call_max=\(report.maxPacketsPerCall) "
+            + "failed_calls=\(report.failedCalls) failed_packets=\(report.failedPackets) "
+            + "write_mean_ms=\(meanMs) write_max_ms=\(maxMs)"
+        if report.failedCalls > 0 {
+            Logger.network.warningAndFile(message)
+        } else {
+            Logger.network.noticeAndFile(message)
+        }
+    }
+
+    private func writePacketsToTunnel(_ packets: [Data], metrics: TunnelWriteMetrics) {
+        TunnelPacketWriter.write(packets, metrics: metrics) { packets, protocols in
+            self.packetFlow.writePackets(packets, withProtocols: protocols)
+        }
     }
 
     private func readPacketFromTunnel() {

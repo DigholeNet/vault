@@ -26,6 +26,14 @@ use tokio::task::JoinHandle;
 use tokio::time::{interval, sleep};
 use tracing::{debug, info, warn};
 
+mod metrics;
+#[cfg(test)]
+mod runtime_metrics_tests;
+
+use metrics::{
+    DownlinkReport, ReceiveMetrics, UplinkQueueMetrics, UplinkReport, maintenance_interval,
+};
+
 use crate::{
     Algorithm, Buffer, CryptoCore, EXTRA_LEN, Handshake, HandshakeResponse, PeerId, Role,
     create_ecdh_keypair, pake, protocol, supported_algorithms,
@@ -47,6 +55,7 @@ pub const MAX_RECONNECT_DELAY_MS: u64 = 60_000;
 pub const DATA_BATCH_CAPACITY: usize = 32;
 /// Bounded uplink queue; packets are dropped when full (UDP semantics).
 pub const UPLINK_QUEUE_CAPACITY: usize = 1024;
+pub const DOWNLINK_QUEUE_CAPACITY: usize = 256;
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -172,6 +181,7 @@ struct ClientState {
     heartbeat_handle: Option<JoinHandle<()>>,
     uplink_handle: Option<JoinHandle<()>>,
     uplink_tx: Option<mpsc::Sender<Vec<u8>>>,
+    uplink_queue_metrics: Option<Arc<UplinkQueueMetrics>>,
     run_handle: Option<JoinHandle<()>>,
     shutdown_tx: Option<mpsc::Sender<()>>,
     reconnect_tx: Option<mpsc::Sender<()>>,
@@ -292,14 +302,29 @@ impl ClientSession {
             counters.not_connected.fetch_add(1, Ordering::Relaxed);
             return Err(ClientError::NotConnected);
         };
-        match tx.try_send(data) {
+        let result = tx.try_send(data);
+        if let Some(metrics) = &state.uplink_queue_metrics {
+            let depth = if matches!(&result, Err(mpsc::error::TrySendError::Full(_))) {
+                tx.max_capacity()
+            } else {
+                tx.max_capacity() - tx.capacity()
+            };
+            metrics.queue.observe(depth);
+        }
+        match result {
             Ok(()) => Ok(()),
             Err(mpsc::error::TrySendError::Full(_)) => {
                 counters.queue_drops.fetch_add(1, Ordering::Relaxed);
+                if let Some(metrics) = &state.uplink_queue_metrics {
+                    metrics.full_drops.fetch_add(1, Ordering::Relaxed);
+                }
                 Ok(())
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 counters.not_connected.fetch_add(1, Ordering::Relaxed);
+                if let Some(metrics) = &state.uplink_queue_metrics {
+                    metrics.closed_drops.fetch_add(1, Ordering::Relaxed);
+                }
                 Err(ClientError::NotConnected)
             }
         }
@@ -367,9 +392,10 @@ impl ClientSession {
     }
 
     pub fn shutdown(&self) -> Result<(), ClientError> {
-        let mut handles = {
+        let (mut handles, report_totals) = {
             let mut state = self.lock_state()?;
 
+            let report_totals = !state.is_closing;
             state.is_closing = true;
             state.reconnect_tx = None;
 
@@ -390,13 +416,14 @@ impl ClientSession {
                 handles.push(handle);
             }
             state.uplink_tx = None;
+            state.uplink_queue_metrics = None;
             if let Some(handle) = state.run_handle.take() {
                 handle.abort();
                 handles.push(handle);
             }
 
             state.is_active = false;
-            handles
+            (handles, report_totals)
         };
 
         // Finish callbacks before platform guards restore DNS/routes. A
@@ -423,6 +450,17 @@ impl ClientSession {
             }
         }
 
+        if report_totals {
+            let failures = self.inner.uplink.failures();
+            info!(
+                workers_joined = !on_own_runtime,
+                queue_full_drops = failures[0],
+                not_connected = failures[1],
+                build_failures = failures[2],
+                send_failures = failures[3],
+                "VPN session uplink failure totals"
+            );
+        }
         Ok(())
     }
 
@@ -452,6 +490,7 @@ impl ClientState {
             heartbeat_handle: None,
             uplink_handle: None,
             uplink_tx: None,
+            uplink_queue_metrics: None,
             run_handle: None,
             shutdown_tx: None,
             reconnect_tx: None,
@@ -552,16 +591,18 @@ impl ClientInner {
             handle.abort();
         }
         state.uplink_tx = None;
+        state.uplink_queue_metrics = None;
         state.is_active = false;
     }
 
     async fn try_connect(self: &Arc<Self>) -> Result<(), ClientError> {
-        {
+        let generation = {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             // A generation identifies an attempt even when it fails or keeps
             // the same IP. Consumers must not infer transport identity from IP.
             state.connection_generation = state.connection_generation.saturating_add(1);
-        }
+            state.connection_generation
+        };
         let candidates = self.resolve_candidates().await?;
         info!(
             "Racing {} supernode candidate(s): {candidates:?}",
@@ -585,6 +626,7 @@ impl ClientInner {
         // Start the uplink sender BEFORE notifying the platform, so that
         // write_packet works as soon as on_ip_assigned fires.
         let (uplink_tx, uplink_rx) = mpsc::channel::<Vec<u8>>(UPLINK_QUEUE_CAPACITY);
+        let queue_metrics = Arc::new(UplinkQueueMetrics::new(&uplink_tx));
         {
             let mut state = self
                 .state
@@ -599,9 +641,12 @@ impl ClientInner {
                 remote_addr,
                 uplink_rx,
                 self.uplink.clone(),
+                queue_metrics.clone(),
+                generation,
             ));
             state.last_pong = Instant::now();
             state.uplink_tx = Some(uplink_tx);
+            state.uplink_queue_metrics = Some(queue_metrics);
             state.uplink_handle = Some(uplink_handle);
         }
 
@@ -629,9 +674,18 @@ impl ClientInner {
             state.is_active = true;
         }
 
-        info!("Handshake complete (peer={remote_addr}), starting data/heartbeat loops");
+        info!(
+            "Transport ready: generation={generation} peer={remote_addr} outer_ip={} uplink_capacity={UPLINK_QUEUE_CAPACITY} downlink_capacity={DOWNLINK_QUEUE_CAPACITY} session_not_connected_total={}",
+            if remote_addr.ip().to_canonical().is_ipv4() {
+                "IPv4"
+            } else {
+                "IPv6"
+            },
+            self.uplink.not_connected.load(Ordering::Relaxed)
+        );
 
-        self.run_data_loop(socket, crypto, remote_addr).await;
+        self.run_data_loop(socket, crypto, remote_addr, generation)
+            .await;
 
         Ok(())
     }
@@ -886,14 +940,17 @@ impl ClientInner {
         remote_addr: SocketAddr,
         mut rx: mpsc::Receiver<Vec<u8>>,
         counters: Arc<UplinkCounters>,
+        queue_metrics: Arc<UplinkQueueMetrics>,
+        generation: u64,
     ) {
         let mut buf = Buffer::new(EXTRA_LEN + 1);
-        let mut ticker = interval(Duration::from_secs(5));
-        let mut previous = counters.failures();
+        let mut report = UplinkReport::new(queue_metrics.clone(), remote_addr, generation);
+        let mut ticker = maintenance_interval();
         loop {
             tokio::select! {
                 packet = rx.recv() => {
                     let Some(data) = packet else { break; };
+                    queue_metrics.queue.observe(rx.len().saturating_add(1));
                     buf.clear();
                     // Bound both the fixed backing buffer and IPv4 UDP's
                     // maximum payload before copying/encrypting FFI input.
@@ -901,23 +958,23 @@ impl ClientInner {
                         || buf.write_all(&data).is_err()
                         || protocol::build_data_interface(&mut buf, &crypto).is_err() {
                         counters.build_failures.fetch_add(1, Ordering::Relaxed);
+                        report.build_failure();
                         continue;
                     }
                     match socket.send_to(buf.as_ref(), remote_addr).await {
                         Ok(_) => {
                             counters.bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
                             counters.packets_sent.fetch_add(1, Ordering::Relaxed);
+                            report.sent(data.len());
                         }
-                        Err(_) => { counters.send_failures.fetch_add(1, Ordering::Relaxed); }
+                        Err(error) => {
+                            counters.send_failures.fetch_add(1, Ordering::Relaxed);
+                            report.send_error(&error);
+                        }
                     }
                 }
                 _ = ticker.tick() => {
-                    let current = counters.failures();
-                    let delta: Vec<_> = current.iter().zip(previous).map(|(now, before)| now - before).collect();
-                    if delta.iter().any(|count| *count > 0) {
-                        warn!("Uplink failures since last report: queue_full={} not_connected={} build={} send={}", delta[0], delta[1], delta[2], delta[3]);
-                    }
-                    previous = current;
+                    report.report_if_due();
                 }
             }
         }
@@ -928,9 +985,11 @@ impl ClientInner {
         socket: Arc<UdpSocket>,
         crypto: Arc<CryptoCore>,
         remote_addr: SocketAddr,
+        generation: u64,
     ) {
         info!("Data loop started for {remote_addr}");
-        let (packet_tx, mut packet_rx) = mpsc::channel::<Vec<u8>>(256);
+        let (packet_tx, mut packet_rx) = mpsc::channel::<Vec<u8>>(DOWNLINK_QUEUE_CAPACITY);
+        let receive_metrics = Arc::new(ReceiveMetrics::new(&packet_tx));
 
         {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -938,6 +997,7 @@ impl ClientInner {
                 return;
             }
             let receive_socket = socket.clone();
+            let metrics = receive_metrics.clone();
             let receive_handle = tokio::spawn(async move {
                 let mut buf = vec![0u8; 65535];
                 loop {
@@ -950,11 +1010,12 @@ impl ClientInner {
                                 continue;
                             }
                             let packet = buf[..len].to_vec();
-                            if packet_tx.send(packet).await.is_err() {
+                            if !enqueue_downlink(&packet_tx, &metrics, packet).await {
                                 break;
                             }
                         }
                         Err(e) => {
+                            metrics.record_receive_error(&e);
                             warn!("Receive error: {e}");
                             break;
                         }
@@ -1003,10 +1064,10 @@ impl ClientInner {
         let mut pending: Vec<Vec<u8>> = Vec::with_capacity(DATA_BATCH_CAPACITY);
         let mut batch: Vec<Vec<u8>> = Vec::with_capacity(DATA_BATCH_CAPACITY);
 
-        // Per-second local counters for downlink statistics (do not touch speed-calculation state)
-        let mut dl_packets_1s: u64 = 0;
-        let mut dl_bytes_1s: u64 = 0;
-        let mut dl_decrypt_fail_1s: u64 = 0;
+        // Keep the timer outside select: recreating sleep(1s) per packet
+        // postpones maintenance indefinitely while traffic keeps arriving.
+        let mut report = DownlinkReport::new(receive_metrics.clone(), remote_addr, generation);
+        let mut ticker = maintenance_interval();
         // Counts packets that are neither HEARTBEAT nor DATA_INTERFACE
         // (e.g. REJECTED after a NAT mapping change, or random internet
         // noise hitting this ephemeral port). Throttled to avoid log spam.
@@ -1020,6 +1081,7 @@ impl ClientInner {
         'outer: loop {
             tokio::select! {
                 Some(first) = packet_rx.recv() => {
+                    receive_metrics.queue.observe(packet_rx.len().saturating_add(1));
                     // Opportunistically drain queued packets (non-blocking) so a
                     // burst is processed and delivered with a single callback.
                     pending.clear();
@@ -1062,8 +1124,7 @@ impl ClientInner {
                                 if pkt_buf.write_all(payload).is_ok() {
                                     if crypto.decrypt(&mut pkt_buf, protocol::DATA_INTERFACE).is_ok() {
                                         let data = pkt_buf.as_ref().to_vec();
-                                        dl_packets_1s += 1;
-                                        dl_bytes_1s += data.len() as u64;
+                                        report.packet(data.len());
                                         // Any successfully authenticated
                                         // packet proves the session is alive;
                                         // refresh the liveness timestamp so
@@ -1077,7 +1138,7 @@ impl ClientInner {
                                         state.packets_received.fetch_add(1, Ordering::Relaxed);
                                         batch.push(data);
                                     } else {
-                                        dl_decrypt_fail_1s += 1;
+                                        report.decrypt_failure();
                                         {
                                             let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                                             state.decrypt_failures.fetch_add(1, Ordering::Relaxed);
@@ -1128,7 +1189,10 @@ impl ClientInner {
                     }
 
                     if !batch.is_empty() {
+                        let packet_count = batch.len();
+                        let callback_started = Instant::now();
                         self.callbacks.on_packets(std::mem::take(&mut batch));
+                        report.batch(packet_count, callback_started.elapsed());
                     }
 
                     if let Some(since) = rejected_since
@@ -1145,16 +1209,8 @@ impl ClientInner {
                         break 'outer;
                     }
                 }
-                _ = sleep(Duration::from_secs(1)) => {
-                    if dl_packets_1s > 0 || dl_decrypt_fail_1s > 0 {
-                        info!(
-                            "Downlink last 1s: {} pkts / {} bytes, decrypt_failures={}",
-                            dl_packets_1s, dl_bytes_1s, dl_decrypt_fail_1s
-                        );
-                    }
-                    dl_packets_1s = 0;
-                    dl_bytes_1s = 0;
-                    dl_decrypt_fail_1s = 0;
+                _ = ticker.tick() => {
+                    report.report_if_due();
                     if let Some(since) = rejected_since
                         && since.elapsed() > Duration::from_secs(3)
                     {
@@ -1174,6 +1230,31 @@ impl ClientInner {
         info!("Data loop ended for {remote_addr}");
 
         self.clear_connection();
+    }
+}
+
+async fn enqueue_downlink(
+    sender: &mpsc::Sender<Vec<u8>>,
+    metrics: &ReceiveMetrics,
+    packet: Vec<u8>,
+) -> bool {
+    match sender.try_send(packet) {
+        Ok(()) => {
+            metrics
+                .queue
+                .observe(sender.max_capacity() - sender.capacity());
+            true
+        }
+        Err(mpsc::error::TrySendError::Full(packet)) => {
+            metrics.queue.observe(sender.max_capacity());
+            let started = Instant::now();
+            let result = sender.send(packet).await;
+            // The packet is retained while waiting for space. This measures
+            // completed backpressure, not packet loss or kernel UDP overflow.
+            metrics.record_wait(started.elapsed());
+            result.is_ok()
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => false,
     }
 }
 
@@ -1354,7 +1435,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_runtime_shutdown_waits() {
+    fn cross_runtime_shutdown() {
         use std::sync::atomic::AtomicBool;
         let session = idle_session();
         let completed = Arc::new(AtomicBool::new(false));
@@ -1387,16 +1468,20 @@ mod tests {
     }
 
     #[test]
-    fn unsent_packets_not_counted() {
+    fn unsent_packets() {
         let session = idle_session();
         assert!(matches!(
             session.write_packet(vec![1; 10]),
             Err(ClientError::NotConnected)
         ));
         let (tx, rx) = mpsc::channel(1);
+        let queue_metrics = Arc::new(UplinkQueueMetrics::new(&tx));
+        session.lock_state().unwrap().uplink_queue_metrics = Some(queue_metrics.clone());
         session.lock_state().unwrap().uplink_tx = Some(tx);
         session.write_packet(vec![1; 10]).unwrap();
         session.write_packet(vec![1; 10]).unwrap();
+        let queue = queue_metrics.queue.snapshot();
+        assert_eq!((queue.depth, queue.peak, queue.capacity), (1, 1, 1));
         drop(rx);
         assert!(matches!(
             session.write_packet(vec![1; 10]),
@@ -1427,11 +1512,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn uplink_counting_and_oversize_reject() {
+    async fn uplink_accounting() {
         let destination = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let counters = Arc::new(UplinkCounters::default());
         let (tx, rx) = mpsc::channel(2);
+        let queue_metrics = Arc::new(UplinkQueueMetrics::new(&tx));
         tx.send(vec![1; 10]).await.unwrap();
         tx.send(vec![1; 65_535]).await.unwrap();
         drop(tx);
@@ -1441,6 +1527,8 @@ mod tests {
             destination.local_addr().unwrap(),
             rx,
             counters.clone(),
+            queue_metrics,
+            1,
         )
         .await;
         let mut buf = [0; 128];
@@ -1454,10 +1542,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn udp_send_failure_not_counted() {
+    async fn udp_send_failure() {
         let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let counters = Arc::new(UplinkCounters::default());
         let (tx, rx) = mpsc::channel(1);
+        let queue_metrics = Arc::new(UplinkQueueMetrics::new(&tx));
         tx.send(vec![1; 10]).await.unwrap();
         drop(tx);
         // IPv6 destination on an IPv4 socket fails without external traffic.
@@ -1467,6 +1556,8 @@ mod tests {
             "[::1]:1".parse().unwrap(),
             rx,
             counters.clone(),
+            queue_metrics,
+            1,
         )
         .await;
         assert_eq!(counters.bytes_sent.load(Ordering::Relaxed), 0);

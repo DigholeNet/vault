@@ -8,6 +8,7 @@
 //  pump) lives in vault-core; this class only adapts it to the Network
 //  Extension callbacks. Mirrors Edge.kt on Android.
 //
+import Darwin
 import Foundation
 import os.log
 
@@ -32,15 +33,15 @@ public enum EdgeError: Error {
 public final class Edge: @unchecked Sendable {
     /// Adapts the UniFFI `EdgeCallbacks` to the closures passed to `Edge.init`.
     /// Callbacks fire on Rust worker threads; the handlers here only forward.
-    private final class Callbacks: EdgeCallbacks, @unchecked Sendable {
-        let onData: (Data) -> Void
+    final class Callbacks: EdgeCallbacks, @unchecked Sendable {
+        let onPackets: ([Data]) -> Void
         let onIpAssigned: (String, String, String, Int32) -> Void
 
         init(
-            onData: @escaping (Data) -> Void,
+            onPackets: @escaping ([Data]) -> Void,
             onIpAssigned: @escaping (String, String, String, Int32) -> Void
         ) {
-            self.onData = onData
+            self.onPackets = onPackets
             self.onIpAssigned = onIpAssigned
         }
 
@@ -49,9 +50,7 @@ public final class Edge: @unchecked Sendable {
             // without one, bridged Objective-C objects accumulate for the
             // whole session and the extension gets jetsam-killed under load.
             autoreleasepool {
-                for packet in packets {
-                    self.onData(packet)
-                }
+                self.onPackets(packets)
             }
         }
 
@@ -83,10 +82,10 @@ public final class Edge: @unchecked Sendable {
         hosts: [String],
         deviceName: String,
         platform: String,
-        onData: @escaping ((Data) -> Void),
+        onPackets: @escaping (([Data]) -> Void),
         onIpAssigned: @escaping ((String, String, String, Int32) -> Void)
     ) throws {
-        let callbacks = Callbacks(onData: onData, onIpAssigned: onIpAssigned)
+        let callbacks = Callbacks(onPackets: onPackets, onIpAssigned: onIpAssigned)
         self.callbacks = callbacks
         // The Rust core races every candidate Happy-Eyeballs style (300 ms
         // stagger, first completed handshake wins).
@@ -139,5 +138,32 @@ public final class Edge: @unchecked Sendable {
 
     deinit {
         try? self.rustEdge.shutdown()
+    }
+}
+
+/// Writes each core batch synchronously, without buffering or waiting to fill it.
+public enum TunnelPacketWriter {
+    private static let ipv4 = NSNumber(value: AF_INET)
+    private static let ipv6 = NSNumber(value: AF_INET6)
+
+    public static func write(
+        _ packets: [Data],
+        metrics: TunnelWriteMetrics,
+        using writePackets: ([Data], [NSNumber]) -> Bool
+    ) {
+        guard !packets.isEmpty else { return }
+        var bytes = 0
+        let protocols = packets.map { packet in
+            bytes += packet.count
+            // Retain the single-packet path's IPv4 fallback for non-IPv6 data.
+            return packet.first.map { $0 >> 4 == 6 } == true ? ipv6 : ipv4
+        }
+
+        let started = DispatchTime.now().uptimeNanoseconds
+        let succeeded = writePackets(packets, protocols)
+        let elapsed = DispatchTime.now().uptimeNanoseconds - started
+        // A false return describes the whole submission. Retrying individual
+        // packets could duplicate data if the system accepted part of it.
+        metrics.record(packets: packets.count, bytes: bytes, succeeded: succeeded, durationNanoseconds: elapsed)
     }
 }
