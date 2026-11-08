@@ -58,13 +58,13 @@ class AppData: ObservableObject {
     }
 
     func applyStatus(_ status: ProviderStatus) {
-        assignedIp = status.ip
+        if assignedIp != status.ip { assignedIp = status.ip }
         let stats = status.stats
         let restarted = providerSession != nil && status.session != nil && providerSession != status.session
         providerSession = status.session
         // Byte rates come straight from the Rust core's own speed calculation.
-        bytesSentPerSecond = stats.bytesSentPerSecond
-        bytesReceivedPerSecond = stats.bytesReceivedPerSecond
+        if bytesSentPerSecond != stats.bytesSentPerSecond { bytesSentPerSecond = stats.bytesSentPerSecond }
+        if bytesReceivedPerSecond != stats.bytesReceivedPerSecond { bytesReceivedPerSecond = stats.bytesReceivedPerSecond }
 
         // On a counter regression (extension restarted mid-session), fold
         // the lost counts into statsBase so the displayed totals never go
@@ -82,11 +82,18 @@ class AppData: ObservableObject {
             statsBase.bytesReceived += previousStats.bytesReceived
         }
 
-        packetsSent = statsBase.packetsSent + stats.packetsSent
-        packetsReceived = statsBase.packetsReceived + stats.packetsReceived
-        bytesSent = statsBase.bytesSent + stats.bytesSent
-        bytesReceived = statsBase.bytesReceived + stats.bytesReceived
-
+        updateTotals(stats)
         previousStats = stats
+    }
+
+    private func updateTotals(_ stats: PacketStats.Stats) {
+        let nextPacketsSent = statsBase.packetsSent + stats.packetsSent
+        let nextPacketsReceived = statsBase.packetsReceived + stats.packetsReceived
+        let nextBytesSent = statsBase.bytesSent + stats.bytesSent
+        let nextBytesReceived = statsBase.bytesReceived + stats.bytesReceived
+        if packetsSent != nextPacketsSent { packetsSent = nextPacketsSent }
+        if packetsReceived != nextPacketsReceived { packetsReceived = nextPacketsReceived }
+        if bytesSent != nextBytesSent { bytesSent = nextBytesSent }
+        if bytesReceived != nextBytesReceived { bytesReceived = nextBytesReceived }
     }
 }

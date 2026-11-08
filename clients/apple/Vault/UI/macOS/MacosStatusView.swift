@@ -5,20 +5,9 @@ import VaultCore
 
 struct MacosStatusView: View {
     let vpnManager: VpnManager
-    @EnvironmentObject var appData: AppData
     @EnvironmentObject var languageManager: LanguageManager
     @State private var tab = 0
     @StateObject private var model = DiagnosticsViewModel()
-    private var result: DiagnosticsResult? { model.result }
-    private var running: Bool { model.running }
-    private var cancelRequested: Bool { model.cancelRequested }
-    private var startedAt: TimeInterval? { model.startedAt }
-    private var progressReceived: TimeInterval { model.progressReceived }
-    private var completedAt: Date? { model.completedAt }
-    private var logText: String { model.logText }
-    private var loadingLogs: Bool { model.loadingLogs }
-    @State private var logFilter = "all"
-    @State private var search = ""
     @State private var followsTail = true
 
     var body: some View {
@@ -29,20 +18,10 @@ struct MacosStatusView: View {
                     Text(languageManager.tr("Runtime Logs")).tag(1)
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 260)
                 Spacer()
-                if tab == 0 {
-                    if running {
-                        Button(languageManager.tr(cancelRequested ? "Cancelling…" : "Cancel")) {
-                            model.cancel(using: vpnManager)
-                        }.disabled(cancelRequested)
-                    } else {
-                        Button(action: diagnose) {
-                            Label(languageManager.tr(result == nil ? "Run Diagnostics" : "Run Again"), systemImage: "arrow.clockwise")
-                        }.disabled(appData.vpnStatus != .connected)
-                    }
-                }
+                if tab == 0 { MacosDiagnosticsAction(vpnManager: vpnManager, model: model) }
             }.padding(20)
             Divider()
-            if tab == 0 { diagnostics }
+            if tab == 0 { MacosConnectionDiagnostics(vpnManager: vpnManager, model: model) }
             else { logs }
             Divider()
             HStack {
@@ -60,10 +39,10 @@ struct MacosStatusView: View {
                         Label(languageManager.tr(model.clearingLogs ? "Clearing…" : "Clear"), systemImage: "trash")
                     }.disabled(model.clearingLogs)
                 }
-                Button { copy(tab == 0 ? diagnosticText : filteredLogs) } label: {
+                Button { copy(tab == 0 ? model.diagnosticText : model.filteredLogText) } label: {
                     Label(languageManager.tr("Copy"), systemImage: "doc.on.doc")
                 }
-                .disabled(tab == 0 ? result == nil : filteredLogs.isEmpty)
+                .disabled(tab == 0 ? model.result == nil : model.filteredLogText.isEmpty)
             }.padding(16)
         }
         .task(id: tab) {
@@ -72,7 +51,65 @@ struct MacosStatusView: View {
         }
     }
 
-    private var diagnostics: some View {
+    private var logs: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("", selection: $model.logFilter) {
+                    Text(languageManager.tr("All")).tag("all")
+                    Text(languageManager.tr("Application")).tag("app")
+                    Text(languageManager.tr("Tunnel")).tag("ne")
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 230)
+                TextField(languageManager.tr("Search logs"), text: $model.logSearch)
+                    .textFieldStyle(.roundedBorder)
+            }.padding(16)
+            if model.loadingLogs { ProgressView(languageManager.tr("Loading logs...")).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else if model.filteredLogText.isEmpty {
+                Text(languageManager.tr("No matching logs.")).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else { LogTextView(text: model.filteredLogText, followsTail: followsTail) }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+// Observe traffic state only while the diagnostics tab is visible. Runtime Logs
+// must not redraw when the provider publishes its per-second byte counters.
+private struct MacosDiagnosticsAction: View {
+    let vpnManager: VpnManager
+    @ObservedObject var model: DiagnosticsViewModel
+    @EnvironmentObject var appData: AppData
+    @EnvironmentObject var languageManager: LanguageManager
+
+    var body: some View {
+        if model.running {
+            Button(languageManager.tr(model.cancelRequested ? "Cancelling…" : "Cancel")) {
+                model.cancel(using: vpnManager)
+            }.disabled(model.cancelRequested)
+        } else {
+            Button {
+                model.run(using: vpnManager, connected: appData.vpnStatus == .connected)
+            } label: {
+                Label(languageManager.tr(model.result == nil ? "Run Diagnostics" : "Run Again"), systemImage: "arrow.clockwise")
+            }.disabled(appData.vpnStatus != .connected)
+        }
+    }
+}
+
+private struct MacosConnectionDiagnostics: View {
+    let vpnManager: VpnManager
+    @ObservedObject var model: DiagnosticsViewModel
+    @EnvironmentObject var appData: AppData
+    @EnvironmentObject var languageManager: LanguageManager
+    private var result: DiagnosticsResult? { model.result }
+    private var running: Bool { model.running }
+    private var startedAt: TimeInterval? { model.startedAt }
+    private var progressReceived: TimeInterval { model.progressReceived }
+    private var completedAt: Date? { model.completedAt }
+
+    var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 if running || result != nil {
@@ -248,37 +285,9 @@ struct MacosStatusView: View {
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
     }
 
-    private var logs: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Picker("", selection: $logFilter) {
-                    Text(languageManager.tr("All")).tag("all")
-                    Text(languageManager.tr("Application")).tag("app")
-                    Text(languageManager.tr("Tunnel")).tag("ne")
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 230)
-                TextField(languageManager.tr("Search logs"), text: $search)
-                    .textFieldStyle(.roundedBorder)
-            }.padding(16)
-            if loadingLogs { ProgressView(languageManager.tr("Loading logs...")).frame(maxWidth: .infinity, maxHeight: .infinity) }
-            else if filteredLogs.isEmpty {
-                Text(languageManager.tr("No matching logs.")).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else { LogTextView(text: filteredLogs, followsTail: followsTail) }
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var filteredLogs: String {
-        DiagnosticsPresentation.filteredLogs(logText, source: logFilter, search: search)
-    }
-
     private var passed: Bool { model.passed }
     private var incomplete: Bool { model.incomplete }
-    private var diagnosticText: String { model.diagnosticText }
     private func checkLabel(_ id: String) -> String { DiagnosticsPresentation.label(for: id) }
     private func diagnose() { model.run(using: vpnManager, connected: appData.vpnStatus == .connected) }
-
-    private func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
 }
 #endif

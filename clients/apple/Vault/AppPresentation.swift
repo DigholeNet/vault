@@ -150,7 +150,8 @@ enum DiagnosticsPresentation {
     }
 
     static func filteredLogs(_ text: String, source: String, search: String) -> String {
-        text.components(separatedBy: "\n").filter {
+        guard source != "all" || !search.isEmpty else { return text }
+        return text.components(separatedBy: "\n").filter {
             // Include Rust records in the tunnel filter; the shared source tag does
             // not distinguish app-process diagnostics from provider-process records.
             (source == "all" || $0.contains("[\(source)]") || (source == "ne" && $0.contains("[rust]")))

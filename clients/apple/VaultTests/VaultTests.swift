@@ -1,3 +1,4 @@
+import Combine
 import NetworkExtension
 import VaultCore
 import XCTest
@@ -904,6 +905,8 @@ extension VaultTests {
     func testClearDuringRefresh() async throws {
         let controller = LogControlTestManager()
         let model = DiagnosticsViewModel()
+        model.updateLogs("[rust] old log")
+        model.logFilter = "ne"
         let reading = expectation(description: "old logs reading")
         controller.onLogRead = { reading.fulfill() }
         let refresh = Task { await model.refreshLogs(using: controller) }
@@ -915,6 +918,7 @@ extension VaultTests {
         DispatchQueue.main.async { resumed.fulfill() }
         await fulfillment(of: [resumed], timeout: 2)
         XCTAssertEqual(model.logText, "")
+        XCTAssertEqual(model.filteredLogText, "")
         refresh.cancel()
         await refresh.value
         XCTAssertFalse(model.clearingLogs)
@@ -932,6 +936,82 @@ extension VaultTests {
         await model.clearLogs(using: controller)
         XCTAssertEqual(model.logMessage, "Unable to clear all log files. Please try again.")
         XCTAssertFalse(model.clearingLogs)
+    }
+
+    @MainActor
+    func testLogSnapshot() {
+        let model = DiagnosticsViewModel()
+        let text = "[app] ready\n[ne] DNS ready\n[rust] Handshake failed\n"
+        model.updateLogs(text)
+        XCTAssertEqual(model.filteredLogText, text)
+        var updates = 0
+        let observer = model.objectWillChange.sink { updates += 1 }
+        defer { observer.cancel() }
+        model.updateLogs(text)
+        XCTAssertEqual(updates, 0)
+        model.logFilter = "ne"
+        XCTAssertEqual(model.filteredLogText, "[ne] DNS ready\n[rust] Handshake failed")
+        model.logSearch = "HANDSHAKE"
+        XCTAssertEqual(model.filteredLogText, "[rust] Handshake failed")
+        model.updateLogs("[app] ready\n[rust] Handshake recovered")
+        XCTAssertEqual(model.filteredLogText, "[rust] Handshake recovered")
+        model.logFilter = "app"
+        XCTAssertEqual(model.filteredLogText, "")
+        model.logSearch = ""
+        XCTAssertEqual(model.filteredLogText, "[app] ready")
+    }
+
+    @MainActor
+    func testQuietLogRefresh() async {
+        let controller = LogControlTestManager()
+        let model = DiagnosticsViewModel()
+        model.updateLogs("unchanged")
+        var updates = 0
+        let observer = model.objectWillChange.sink { updates += 1 }
+        defer { observer.cancel() }
+        let first = expectation(description: "first read")
+        controller.onLogRead = { first.fulfill() }
+        let refresh = Task { await model.refreshLogs(using: controller) }
+        await fulfillment(of: [first], timeout: 2)
+        let second = expectation(description: "next poll after unchanged reply")
+        controller.onLogRead = { second.fulfill() }
+        controller.logReply?.resume(returning: "unchanged")
+        controller.logReply = nil
+        await fulfillment(of: [second], timeout: 5)
+        XCTAssertEqual(updates, 0)
+        refresh.cancel()
+        controller.logReply?.resume(returning: "cancelled reply")
+        controller.logReply = nil
+        await refresh.value
+        XCTAssertEqual(updates, 0)
+        XCTAssertEqual(model.logText, "unchanged")
+    }
+
+    @MainActor
+    func testReplacedLogRefresh() async {
+        let model = DiagnosticsViewModel()
+        let oldStore = LogControlTestManager()
+        let newStore = LogControlTestManager()
+        let oldRead = expectation(description: "old read")
+        oldStore.onLogRead = { oldRead.fulfill() }
+        let oldRefresh = Task { await model.refreshLogs(using: oldStore) }
+        await fulfillment(of: [oldRead], timeout: 2)
+        oldRefresh.cancel()
+        let newRead = expectation(description: "replacement read")
+        newStore.onLogRead = { newRead.fulfill() }
+        let newRefresh = Task { await model.refreshLogs(using: newStore) }
+        await fulfillment(of: [newRead], timeout: 2)
+        oldStore.logReply?.resume(returning: "stale logs")
+        oldStore.logReply = nil
+        await oldRefresh.value
+        XCTAssertTrue(model.loadingLogs)
+        XCTAssertEqual(model.logText, "")
+        newRefresh.cancel()
+        newStore.logReply?.resume(returning: "cancelled logs")
+        newStore.logReply = nil
+        await newRefresh.value
+        XCTAssertFalse(model.loadingLogs)
+        XCTAssertEqual(model.filteredLogText, "")
     }
 }
 
@@ -1013,6 +1093,26 @@ extension VaultTests {
         data.resetStats()
         data.applyStatus(ProviderStatus(ip: "10.0.0.3", stats: stats, session: "second"))
         XCTAssertEqual(data.bytesSent, 150)
+    }
+
+    func testQuietStats() {
+        let data = AppData()
+        var stats = PacketStats.Stats.zero
+        stats.bytesSent = 100
+        stats.bytesReceived = 200
+        stats.bytesReceivedPerSecond = 50
+        let status = ProviderStatus(ip: "10.0.0.2", stats: stats, session: "same")
+        data.applyStatus(status)
+        var updates = 0
+        let observer = data.objectWillChange.sink { updates += 1 }
+        defer { observer.cancel() }
+        data.applyStatus(status)
+        XCTAssertEqual(updates, 0)
+        stats.bytesReceivedPerSecond = 75
+        data.applyStatus(ProviderStatus(ip: "10.0.0.2", stats: stats, session: "same"))
+        XCTAssertEqual(updates, 1)
+        XCTAssertEqual(data.bytesReceivedPerSecond, 75)
+        XCTAssertEqual(data.bytesReceived, 200)
     }
 }
 
