@@ -409,34 +409,21 @@ impl Backend for SystemBackend {
 
     fn change_rule(&mut self, rule: &Rule, verb: &str) -> anyhow::Result<()> {
         let args = rule.command(verb);
-        let output = Self::command(rule.program, &args)?;
-        anyhow::ensure!(
-            output.status.success(),
-            "{} {} failed: {}",
-            rule.program,
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+        vault_core::util::checked_output(std::process::Command::new(rule.program).args(&args))?;
         Ok(())
     }
 
     fn read_sysctl(&mut self, key: &str) -> anyhow::Result<String> {
-        let output = Self::command("sysctl", &["-n".into(), key.into()])?;
-        anyhow::ensure!(
-            output.status.success(),
-            "read sysctl {key}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+        let output = vault_core::util::checked_output(
+            std::process::Command::new("sysctl").args(["-n", key]),
+        )?;
         Ok(String::from_utf8(output.stdout)?.trim().into())
     }
 
     fn write_sysctl(&mut self, key: &str, value: &str) -> anyhow::Result<()> {
-        let output = Self::command("sysctl", &["-w".into(), format!("{key}={value}")])?;
-        anyhow::ensure!(
-            output.status.success(),
-            "write sysctl {key}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+        vault_core::util::checked_output(
+            std::process::Command::new("sysctl").args(["-w", &format!("{key}={value}")]),
+        )?;
         Ok(())
     }
 }

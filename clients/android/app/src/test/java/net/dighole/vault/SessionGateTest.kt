@@ -20,7 +20,8 @@ import org.junit.Assert.assertEquals
 class SessionGateTest {
     private class Resource : Closeable {
         var closed = false
-        override fun close() { closed = true }
+        var closeCount = 0
+        override fun close() { closed = true; closeCount++ }
     }
 
     @Test
@@ -76,6 +77,9 @@ class SessionGateTest {
             assertTrue(stale.closed)
             assertTrue(old.closed)
             assertFalse(replacement.closed)
+            assertEquals(1, stale.closeCount)
+            assertEquals(1, old.closeCount)
+            assertEquals(0, replacement.closeCount)
             assertTrue(publishedTun === replacement)
             assertTrue(activeTun === replacement)
             assertEquals("A", assignedAddress)
@@ -94,6 +98,7 @@ class SessionGateTest {
             error("old interface published")
         })
         assertTrue(stale.closed)
+        assertEquals(1, stale.closeCount)
         assertEquals("new session", assignedAddress)
         assertTrue(gate.update(current) { })
     }
@@ -310,6 +315,7 @@ class SessionGateTest {
         assertFalse(worker.isAlive)
         assertFalse(stopper.isAlive)
         assertTrue(resource.closed)
+        assertEquals(1, resource.closeCount)
         assertFalse(connected.get())
     }
 }

@@ -272,7 +272,7 @@ footer p,footer>div{font-size:13px}
 [data-theme="dark"] .faq-plus{color:#aaa8df}
 @media(max-width:760px){.deployment-note{padding:21px 18px;gap:12px}.deployment-note p{font-size:14px}.deployment-note-icon{font-size:21px}.build-requirements{flex-direction:column;gap:12px;padding-top:10px}.build-requirements p{font-size:14px}.faq-item summary{font-size:15px;gap:13px;padding-block:23px}.faq-answer{padding:0 15px 25px 27px}.faq-answer p{font-size:14px;line-height:1.95}.faq-answer a{font-size:13px}}
 
-@media(min-width:1001px) and (max-width:1200px){header{height:auto;min-height:100px;flex-wrap:wrap;padding-block:18px;gap:14px}header nav{order:3;width:100%;justify-content:center;gap:30px}.header-actions{margin-left:auto}html{scroll-padding-top:165px}}@media(max-width:760px){header nav{gap:4px}header nav a{gap:4px;padding-inline:3px;font-size:11px}.nav-icon{width:14px;height:14px}}
+@media(min-width:1001px) and (max-width:1200px){header{height:auto;min-height:100px;flex-wrap:wrap;padding-block:18px;gap:14px}header nav{order:3;width:100%;justify-content:center;gap:30px}.header-actions{margin-left:auto}html{scroll-padding-top:165px}}@media(max-width:760px){.nav-icon{width:14px;height:14px}}
 /* Download packages, then configure a connection. */
 .downloads-section{background:#f5f7ff;border-block:1px solid var(--line)}
 .release-banner{display:grid;grid-template-columns:1fr auto;gap:12px 30px;padding:23px 27px;border:1px solid #dce3f5;background:#fff;border-radius:13px;margin-bottom:26px}
@@ -281,8 +281,8 @@ footer p,footer>div{font-size:13px}
 .release-indicator{width:6px;height:6px;border-radius:50%;background:#8d82d3;flex-shrink:0}
 .release-banner p{grid-row:2;grid-column:1;font-size:14px;margin:0;max-width:800px}
 .release-banner>a{grid-row:1/3;grid-column:2;align-self:center;font-size:13px;color:var(--blue)}
-.download-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
-.download-card{display:flex;flex-direction:column;min-width:0;padding:25px 22px;background:#fff;border:1px solid #dee4f4;border-radius:16px}
+.download-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.download-card{display:flex;flex-direction:column;min-width:0;padding:28px 30px;min-height:245px;background:#fff;border:1px solid #dee4f4;border-radius:16px}
 .download-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .download-platform-number{font:8px monospace;color:#96a0ba;letter-spacing:1px}
 .download-format{font:8px monospace;letter-spacing:.3px;color:#919ab3;border:1px solid #e1e6f0;border-radius:4px;padding:4px}
@@ -345,15 +345,13 @@ footer p,footer>div{font-size:13px}
 [data-theme="dark"] .server-setup{border-color:#3d4867}
 [data-theme="dark"] .server-setup>summary{background:#232b44}
 [data-theme="dark"] .server-setup>summary small{color:#adb8d6}
-@media(max-width:1200px){.download-grid{grid-template-columns:1fr 1fr;gap:20px}.download-card{padding:27px}.download-card p{min-height:53px}.onboarding-steps{gap:25px}.server-config-grid{gap:25px;grid-template-columns:1fr 1.15fr}}
-@media(max-width:760px){.download-grid{gap:14px}.download-card{padding:20px 16px}.download-card-top{flex-direction:column;align-items:flex-start;gap:8px}.download-platform-number{font-size:8px}.download-card h3{font-size:25px}.download-requirement{font-size:11px}.download-card p{font-size:13px}.download-action{font-size:12px;padding:11px 9px;gap:5px}.android-qr-link img{width:105px;height:105px}.android-qr-link{padding:4px}.ios-build-note{padding:12px;gap:8px;flex-direction:column}.ios-build-note small{font-size:11px}.download-build-link{font-size:11px}.release-banner{display:flex;flex-direction:column;padding:22px 20px;gap:14px}.release-banner p{font-size:13px}.release-banner>a{align-self:flex-start}.release-banner strong{font-size:14px}.download-next,.onboarding-footer{justify-content:flex-start;flex-wrap:wrap;gap:10px}.onboarding-steps{grid-template-columns:1fr;gap:27px}.onboarding-step h3{margin:16px 0 12px}.onboarding-step p{font-size:15px}.server-setup>summary{padding:21px 18px;gap:12px}.server-setup>summary strong{font-size:15px}.server-setup>summary small{font-size:12px}.server-setup-icon{font-size:21px}.server-setup-content{padding:20px 15px}.server-config-grid{grid-template-columns:1fr;gap:25px}.server-config-grid h3{font-size:21px}.server-setup .deployment-note{padding:18px 14px}.server-setup .deployment-note p{font-size:13px}}
-@media(max-width:380px){.download-grid{grid-template-columns:1fr}.download-card-top{flex-direction:row;align-items:center}.download-card p{font-size:14px}.download-requirement{font-size:12px}.download-action{font-size:13px}.ios-build-note{flex-direction:row}.ios-build-note small{font-size:12px}.android-qr-link img{width:144px;height:144px}}
+@media(max-width:1200px){.download-card p{min-height:53px}.onboarding-steps{gap:25px}.server-config-grid{gap:25px;grid-template-columns:1fr 1.15fr}}
+@media(max-width:760px){.download-card-top{flex-direction:column;align-items:flex-start;gap:8px}.download-platform-number{font-size:8px}.download-card h3{font-size:25px}.download-requirement{font-size:11px}.download-card p{font-size:13px}.download-action{font-size:12px;padding:11px 9px;gap:5px}.android-qr-link img{width:105px;height:105px}.android-qr-link{padding:4px}.ios-build-note{padding:12px;gap:8px;flex-direction:column}.ios-build-note small{font-size:11px}.download-build-link{font-size:11px}.release-banner{display:flex;flex-direction:column;padding:22px 20px;gap:14px}.release-banner p{font-size:13px}.release-banner>a{align-self:flex-start}.release-banner strong{font-size:14px}.download-next,.onboarding-footer{justify-content:flex-start;flex-wrap:wrap;gap:10px}.onboarding-steps{grid-template-columns:1fr;gap:27px}.onboarding-step h3{margin:16px 0 12px}.onboarding-step p{font-size:15px}.server-setup>summary{padding:21px 18px;gap:12px}.server-setup>summary strong{font-size:15px}.server-setup>summary small{font-size:12px}.server-setup-icon{font-size:21px}.server-setup-content{padding:20px 15px}.server-config-grid{grid-template-columns:1fr;gap:25px}.server-config-grid h3{font-size:21px}.server-setup .deployment-note{padding:18px 14px}.server-setup .deployment-note p{font-size:13px}}
+@media(max-width:380px){.download-card-top{flex-direction:row;align-items:center}.download-card p{font-size:14px}.download-requirement{font-size:12px}.download-action{font-size:13px}.ios-build-note{flex-direction:row}.ios-build-note small{font-size:12px}.android-qr-link img{width:144px;height:144px}}
 /* Six navigation destinations stay visible at every width. */
 @media(min-width:1201px) and (max-width:1400px){header{padding-inline:36px;gap:20px}header nav{gap:10px}header nav a{padding-inline:8px}.header-actions{gap:15px}}
-@media(max-width:760px){header nav{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 10px}header nav a{justify-content:center;font-size:12px;padding:10px 7px;gap:6px}html{scroll-padding-top:200px}}
+@media(max-width:760px){header nav{display:grid;grid-template-columns:repeat(6,1fr);gap:5px 8px}header nav a{justify-content:center;font-size:12px;padding:10px 7px;gap:6px}html{scroll-padding-top:200px}}
 /* A consistent platform grid, with QR scanning separated from package choices. */
-.download-grid{grid-template-columns:1fr 1fr;gap:22px}
-.download-card{padding:28px 30px;min-height:245px}
 .package-heading{display:flex;align-items:center;justify-content:space-between;gap:18px}
 .package-platform{display:flex;align-items:center;gap:15px}
 .package-icon{width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:#f0efff;border:1px solid #e5e2fb;border-radius:12px;color:#7870bd;flex-shrink:0}
@@ -382,7 +380,7 @@ footer p,footer>div{font-size:13px}
 @media(max-width:760px){.download-grid{grid-template-columns:1fr;gap:16px}.download-card{padding:25px 22px;min-height:0}.package-heading h3{font-size:23px}.download-card>p{font-size:14px;line-height:1.9;margin:20px 0 23px}.package-actions .download-action{min-width:160px}.package-actions .download-build-link{font-size:12px}.download-action{font-size:13px;padding:12px 13px}.android-scan{gap:18px;padding:22px 18px;align-items:flex-start}.android-scan .android-qr-link{align-self:flex-start;margin-top:5px}.android-scan .android-qr-link img{width:90px;height:90px}.android-scan-copy h3{font-size:16px;line-height:1.6;margin-top:8px}.android-scan-copy p{font-size:12px}.scan-eyebrow{font-size:8px;letter-spacing:.4px}.android-scan #android-qr-caption{font-size:11px}.package-hint{flex-basis:100%;font-size:12px}}
 @media(max-width:380px){.android-scan{flex-direction:column}.android-scan .android-qr-link img{width:112px;height:112px}}
 
-.hero-preview .client-showcase{margin-bottom:24px}.hero-preview .client-guide-foot{padding-top:3px}
+.hero-preview .client-showcase{margin-bottom:20px}.hero-preview .client-guide-foot{padding-top:3px}
 /* Compact native platform lanes without reducing readable type sizes. */
 .native-lane .lane-title{padding:12px 14px;gap:9px}
 .native-lane .lane-symbol{width:26px;height:26px;font-size:21px}
@@ -416,9 +414,8 @@ footer p,footer>div{font-size:13px}
 .preview-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:45px;margin-bottom:30px}
 .preview-heading h2{font-size:28px;line-height:1.4;letter-spacing:-.8px;margin:12px 0 0}
 .preview-heading p{font-size:14px;line-height:1.9;max-width:400px;margin:0}
-.hero-preview .client-showcase{margin-bottom:20px}
 .hero-preview .client-guide-foot{margin-top:15px}
-@media(max-width:760px){.hero-preview{padding-top:30px;padding-bottom:50px}.preview-heading{flex-direction:column;align-items:flex-start;gap:15px;margin-bottom:25px}.preview-heading h2{font-size:25px;letter-spacing:-.5px}.preview-heading p{font-size:14px;max-width:none}header nav{display:grid;grid-template-columns:repeat(6,1fr);gap:5px 8px}header nav a{grid-column:span 2}header nav a:nth-last-child(-n+2){grid-column:span 3}}
+@media(max-width:760px){.hero-preview{padding-top:30px;padding-bottom:50px}.preview-heading{flex-direction:column;align-items:flex-start;gap:15px;margin-bottom:25px}.preview-heading h2{font-size:25px;letter-spacing:-.5px}.preview-heading p{font-size:14px;max-width:none}header nav a{grid-column:span 2}header nav a:nth-last-child(-n+2){grid-column:span 3}}
 
 .hero-overview .hero{padding-bottom:40px}.hero-overview .hero-preview{padding-top:15px}@media(max-width:760px){.hero-overview .hero{padding-bottom:30px}.hero-overview .hero-preview{padding-top:10px}}
 /* Softer illustration surfaces in light mode. */

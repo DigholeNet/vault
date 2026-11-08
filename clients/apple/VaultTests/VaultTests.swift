@@ -47,6 +47,34 @@ final class VaultTests: XCTestCase {
         }
     }
 
+    #if os(macOS)
+    func testConnectionAction() {
+        XCTAssertEqual(ConnectionAction(status: .disconnected, configured: false), .configure)
+        XCTAssertEqual(ConnectionAction(status: .disconnected, configured: true), .connect)
+        for status in [VpnStatus.connecting, .connected, .disconnecting] {
+            XCTAssertEqual(ConnectionAction(status: status, configured: false), .disconnect)
+            XCTAssertEqual(ConnectionAction(status: status, configured: true), .disconnect)
+        }
+    }
+
+    func testConnectionTitles() {
+        let data = AppData()
+        XCTAssertEqual(data.connectionActionTitle, "Connect")
+        data.connectionError = "failed"
+        XCTAssertEqual(data.connectionActionTitle, "Retry")
+        data.vpnStatus = .connecting
+        XCTAssertEqual(data.connectionActionTitle, "Cancel Connection")
+        data.isRecovering = true
+        XCTAssertEqual(data.connectionActionTitle, "Disconnect")
+        data.vpnStatus = .connected
+        XCTAssertEqual(data.connectionActionTitle, "Disconnect")
+        data.vpnStatus = .disconnecting
+        XCTAssertEqual(data.connectionActionTitle, "Disconnect")
+        data.connectionError = nil
+        XCTAssertEqual(data.connectionActionTitle, "Disconnecting…")
+    }
+    #endif
+
     func testAssignedAddressParsing() {
         let addresses = "192.168.10.2/2607:8700:5500:d2b6:0:1:0:3".parsedIPv4AndIPv6()
         XCTAssertEqual(addresses.ipv4, "192.168.10.2")
@@ -1165,7 +1193,7 @@ extension VaultTests {
         }
 
         // Explicit diagnostic commands keep their existing tracing behavior.
-        for _ in 0..<2 {
+        for _ in 0 ..< 2 {
             controller.sendProviderCommand(.init(.diagnosticContext)) { _ in }
             try XCTUnwrap(controller.replies.popLast())(Data([1]))
             let data = try XCTUnwrap(controller.messages.last)

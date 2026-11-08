@@ -1120,7 +1120,7 @@ impl ClientInner {
         // authenticated packet arrives within a few seconds.
         let mut rejected_since: Option<Instant> = None;
 
-        'outer: loop {
+        loop {
             tokio::select! {
                 Some(first) = packet_rx.recv() => {
                     receive_metrics.queue.observe(packet_rx.len().saturating_add(1));
@@ -1237,36 +1237,25 @@ impl ClientInner {
                         self.callbacks.on_packets(std::mem::take(&mut batch));
                         report.batch(packet_count, callback_started.elapsed());
                     }
-
-                    if let Some(since) = rejected_since
-                        && since.elapsed() > Duration::from_secs(3)
-                    {
-                        warn!("Session still rejected by {remote_addr} after liveness probe, reconnecting");
-                        self.callbacks.on_error("session rejected by server".to_string());
-                        break 'outer;
-                    }
-
-                    if last_pong.elapsed() > timeout {
-                        warn!("Heartbeat timeout for {remote_addr}, exiting data loop");
-                        self.callbacks.on_error("heartbeat timeout".to_string());
-                        break 'outer;
-                    }
                 }
                 _ = ticker.tick() => {
                     report.report_if_due();
-                    if let Some(since) = rejected_since
-                        && since.elapsed() > Duration::from_secs(3)
-                    {
-                        warn!("Session still rejected by {remote_addr} after liveness probe, reconnecting");
-                        self.callbacks.on_error("session rejected by server".to_string());
-                        break;
-                    }
-                    if last_pong.elapsed() > timeout {
-                        warn!("Heartbeat timeout for {remote_addr}, exiting data loop");
-                        self.callbacks.on_error("heartbeat timeout".to_string());
-                        break;
-                    }
                 }
+            }
+            // Check after either event so sustained incoming traffic cannot
+            // postpone liveness decisions until the maintenance tick.
+            if let Some(since) = rejected_since
+                && since.elapsed() > Duration::from_secs(3)
+            {
+                warn!("Session still rejected by {remote_addr} after liveness probe, reconnecting");
+                self.callbacks
+                    .on_error("session rejected by server".to_string());
+                break;
+            }
+            if last_pong.elapsed() > timeout {
+                warn!("Heartbeat timeout for {remote_addr}, exiting data loop");
+                self.callbacks.on_error("heartbeat timeout".to_string());
+                break;
             }
         }
 

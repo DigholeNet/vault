@@ -31,20 +31,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Verify tag matches workspace version
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
-          MANIFEST_VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
-          if [ "$TAG_VERSION" != "$MANIFEST_VERSION" ]; then
-            echo "Tag v$TAG_VERSION does not match workspace version $MANIFEST_VERSION" >&2
-            exit 1
-          fi
-
       - name: Export version for downstream jobs
         id: version
         run: |
           VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          if [[ "$GITHUB_REF" == refs/tags/* && "${GITHUB_REF#refs/tags/v}" != "$VERSION" ]]; then
+            echo "Tag ${GITHUB_REF#refs/tags/} does not match workspace version $VERSION" >&2
+            exit 1
+          fi
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "All-platform releases require a numeric major.minor.patch version for Apple packaging." >&2
             exit 1
@@ -337,7 +331,7 @@ jobs:
           fi
 
   publish:
-    needs: [linux-packages, android-apk, apple-packages]
+    needs: [version-gate, linux-packages, android-apk, apple-packages]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -366,19 +360,6 @@ jobs:
           name: apple
           path: dist
 
-      - name: Get version
-        id: version
-        # Tag builds take the version from the tag; manual (workflow_dispatch)
-        # runs fall back to the workspace version — GITHUB_REF would otherwise
-        # be "refs/heads/<branch>", whose slashes break the rename below.
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-          else
-            VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Rename artifacts with version
         # Deb artifacts keep cargo-deb's <pkg>_<ver>-<rel>_amd64.deb names;
         # match by package prefix so each lands on its own target name.
@@ -389,10 +370,10 @@ jobs:
         run: |
           cd dist
           rm -f Vault-iOS.ipa
-          for f in *.apk; do mv "$f" "vault-android-v${{ steps.version.outputs.version }}.apk"; done
-          for f in edge_*.deb; do mv "$f" "edge-v${{ steps.version.outputs.version }}-amd64.deb"; done
-          for f in supernode_*.deb; do mv "$f" "supernode-v${{ steps.version.outputs.version }}-amd64.deb"; done
-          mv Vault-macOS.zip "Vault-macOS-v${{ steps.version.outputs.version }}.zip"
+          for f in *.apk; do mv "$f" "vault-android-v${{ needs.version-gate.outputs.version }}.apk"; done
+          for f in edge_*.deb; do mv "$f" "edge-v${{ needs.version-gate.outputs.version }}-amd64.deb"; done
+          for f in supernode_*.deb; do mv "$f" "supernode-v${{ needs.version-gate.outputs.version }}-amd64.deb"; done
+          mv Vault-macOS.zip "Vault-macOS-v${{ needs.version-gate.outputs.version }}.zip"
           ls -la
 
       - name: Create GitHub Release
@@ -401,6 +382,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
-          name: Vault ${{ steps.version.outputs.version }}
+          name: Vault ${{ needs.version-gate.outputs.version }}
           files: dist/*
           generate_release_notes: true

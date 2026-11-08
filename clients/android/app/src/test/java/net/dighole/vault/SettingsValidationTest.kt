@@ -43,4 +43,23 @@ class SettingsValidationTest {
             assertFalse(it, SettingsValidation.domains(it))
         }
     }
+
+    @Test fun domainBounds() {
+        assertTrue(SettingsValidation.domain("EXAMPLE.com."))
+        assertTrue(SettingsValidation.domain("a".repeat(63) + ".example"))
+        assertFalse(SettingsValidation.domain("a".repeat(64) + ".example"))
+        assertFalse(SettingsValidation.domain("example.com.."))
+        assertFalse(SettingsValidation.domain("例子.example"))
+        val longest = listOf("a".repeat(63), "b".repeat(63), "c".repeat(63), "d".repeat(61)).joinToString(".")
+        assertTrue(SettingsValidation.domain(longest))
+        assertFalse(SettingsValidation.domain("$longest."))
+    }
+
+    @Test fun mtuBounds() {
+        assertTrue(SettingsValidation.mtu(""))
+        assertTrue(SettingsValidation.mtu(" 1280 "))
+        assertTrue(SettingsValidation.mtu("1427"))
+        assertFalse(SettingsValidation.mtu("1279"))
+        assertFalse(SettingsValidation.mtu("1428"))
+    }
 }

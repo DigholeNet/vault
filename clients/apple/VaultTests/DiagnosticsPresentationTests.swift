@@ -101,6 +101,48 @@ final class DiagnosticsPresentationTests: XCTestCase {
         XCTAssertTrue(result.lines.contains("[probe] route: wrong route"))
     }
 
+    func testCheckRows() {
+        let idle = DiagnosticsPresentation.checkRow("dns", result: nil, running: false)
+        XCTAssertFalse(idle.active)
+        XCTAssertEqual(idle.resultText, "Not measured")
+        XCTAssertNil(idle.durationMs)
+        XCTAssertEqual(DiagnosticsPresentation.checkRow("dns", result: nil, running: true).resultText, "Checking")
+        XCTAssertEqual(DiagnosticsPresentation.checkRow("https", result: nil, running: true).resultText, "Waiting")
+
+        var native = snapshot()
+        native.activeStage = .https
+        var row = DiagnosticsPresentation.checkRow("https", result: DiagnosticsResult(snapshot: native), running: true)
+        XCTAssertFalse(row.active, "A completed check is not active even before the next progress update")
+        XCTAssertEqual(row.state, .passed)
+        XCTAssertEqual(row.resultText, "1/1")
+        XCTAssertEqual(row.durationMs, 12)
+
+        native.checks[0].durationMs = 0
+        row = DiagnosticsPresentation.checkRow("https", result: DiagnosticsResult(snapshot: native), running: false)
+        XCTAssertEqual(row.durationMs, 0, "Zero milliseconds is a measured duration")
+        native.checks[0].sampleCount = 0
+        row = DiagnosticsPresentation.checkRow("https", result: DiagnosticsResult(snapshot: native), running: false)
+        XCTAssertNil(row.durationMs)
+        native.checks[0].attempted = 0
+        row = DiagnosticsPresentation.checkRow("https", result: DiagnosticsResult(snapshot: native), running: false)
+        XCTAssertEqual(row.resultText, "Not measured")
+        XCTAssertNil(row.durationMs)
+    }
+
+    func testResultTitles() {
+        var result = DiagnosticsResult(snapshot: snapshot())
+        XCTAssertEqual(DiagnosticsPresentation.resultTitle(result, running: false), "Connectivity checks passed")
+        result.message = "session changed"
+        XCTAssertEqual(DiagnosticsPresentation.resultTitle(result, running: false), "Diagnostics incomplete")
+        XCTAssertEqual(DiagnosticsPresentation.resultTitle(result, running: true), "Checking connection…")
+        var failed = snapshot()
+        failed.state = .failed
+        XCTAssertEqual(
+            DiagnosticsPresentation.resultTitle(DiagnosticsResult(snapshot: failed), running: false),
+            "Connectivity issues found"
+        )
+    }
+
     func testSessionClockBounds() {
         XCTAssertEqual(DiagnosticsPresentation.connectionDuration(-5), "00:00:00")
         XCTAssertEqual(DiagnosticsPresentation.connectionDuration(1476.9), "00:24:36")

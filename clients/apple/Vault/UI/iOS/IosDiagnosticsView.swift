@@ -129,8 +129,7 @@ struct IosDiagnosticsView: View {
                     .font(.title2).foregroundStyle(model.passed ? Color.green : .orange)
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text(tr(model.running ? "Checking connection…" : (model.passed ? "Connectivity checks passed"
-                        : (model.incomplete ? "Diagnostics incomplete" : "Connectivity issues found"))))
+                Text(tr(DiagnosticsPresentation.resultTitle(model.result, running: model.running)))
                     .font(.headline)
                 if model.running, let startedAt = model.startedAt {
                     TimelineView(.periodic(from: .now, by: 0.1)) { _ in
@@ -149,25 +148,23 @@ struct IosDiagnosticsView: View {
     }
 
     private func checkRow(_ id: String) -> some View {
-        let check = model.result?.checks?.first { $0.id == id }
-        let active = model.running && (model.result?.activeCheck ?? "dns") == id && check == nil
+        let row = DiagnosticsPresentation.checkRow(id, result: model.result, running: model.running)
         return HStack(spacing: 10) {
-            if active { ProgressView().frame(width: 22) }
+            if row.active { ProgressView().frame(width: 22) }
             else {
-                Image(systemName: check?.state == .passed ? "checkmark.circle.fill"
-                    : (check?.state == .failed ? "exclamationmark.circle.fill" : "minus.circle.fill"))
-                    .foregroundStyle(check?.state == .passed ? Color.green : (check?.state == .failed ? .orange : .gray))
+                Image(systemName: row.state == .passed ? "checkmark.circle.fill"
+                    : (row.state == .failed ? "exclamationmark.circle.fill" : "minus.circle.fill"))
+                    .foregroundStyle(row.state == .passed ? Color.green : (row.state == .failed ? .orange : .gray))
                     .frame(width: 22)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(tr(DiagnosticsPresentation.label(for: id)))
-                Text(check.map { $0.attempted == 0 ? tr("Not measured") : "\($0.passed)/\($0.attempted)" }
-                    ?? tr(active ? "Checking" : (model.running ? "Waiting" : "Not measured")))
+                Text(tr(row.resultText))
                     .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
             }
             Spacer(minLength: 4)
-            if let check, check.attempted > 0, check.sampleCount != 0 {
-                Text("\(check.durationMs) ms").monospacedDigit().fixedSize()
+            if let duration = row.durationMs {
+                Text("\(duration) ms").monospacedDigit().fixedSize()
             } else { Text("—").foregroundStyle(.secondary) }
         }.padding(.vertical, 3)
     }

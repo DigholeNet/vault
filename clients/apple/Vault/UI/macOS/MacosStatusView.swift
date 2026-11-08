@@ -199,9 +199,7 @@ private struct MacosConnectionDiagnostics: View {
                     .font(.system(size: 28)).foregroundStyle(passed ? Color.green : (incomplete ? .orange : .red))
             }
             VStack(alignment: .leading, spacing: 6) {
-                Text(languageManager
-                    .tr(running ? "Checking connection…" :
-                        (passed ? "Connectivity checks passed" : (incomplete ? "Diagnostics incomplete" : "Connectivity issues found"))))
+                Text(languageManager.tr(DiagnosticsPresentation.resultTitle(result, running: running)))
                     .font(.system(size: 14, weight: .semibold))
                 if running, let startedAt {
                     TimelineView(.periodic(from: .now, by: 0.1)) { context in
@@ -252,27 +250,25 @@ private struct MacosConnectionDiagnostics: View {
                 Text(languageManager.tr("Average duration")).frame(width: 100, alignment: .trailing)
             }.font(.body).foregroundStyle(.secondary).padding(12).background(.quaternary.opacity(0.4))
             ForEach(DiagnosticsPresentation.visibleChecks(result), id: \.self) { id in
-                let check = result?.checks?.first { $0.id == id }
-                let active = running && (result?.activeCheck ?? "dns") == id && check == nil
+                let row = DiagnosticsPresentation.checkRow(id, result: result, running: running)
                 HStack(spacing: 8) {
-                    if active { ProgressView().controlSize(.mini).frame(width: 14) }
+                    if row.active { ProgressView().controlSize(.mini).frame(width: 14) }
                     else {
-                        Image(systemName: check?
-                            .state == .passed ? "checkmark.circle.fill" : (check?.state == .failed ? "xmark.circle.fill" : "minus.circle"))
-                            .foregroundStyle(check?.state == .passed ? Color.green : (check?.state == .failed ? Color.red : .secondary))
+                        Image(systemName: row.state == .passed ? "checkmark.circle.fill"
+                            : (row.state == .failed ? "xmark.circle.fill" : "minus.circle"))
+                            .foregroundStyle(row.state == .passed ? Color.green : (row.state == .failed ? Color.red : .secondary))
                             .frame(width: 14)
                     }
                     Text(languageManager.tr(checkLabel(id))).font(.body)
                     Spacer()
-                    Text(check.map { $0.attempted == 0 ? languageManager.tr("Not measured") : "\($0.passed)/\($0.attempted)" }
-                        ?? languageManager.tr(active ? "Checking" : (running ? "Waiting" : "Not measured")))
+                    Text(languageManager.tr(row.resultText))
                         .font(.body).monospacedDigit().foregroundStyle(.secondary).frame(width: 80)
-                    if let check {
-                        Text(check.sampleCount == 0 || check.attempted == 0 ? "—" : "\(check.durationMs) ms")
+                    if row.state != nil {
+                        Text(row.durationMs.map { "\($0) ms" } ?? "—")
                             .font(.system(.body, design: .monospaced)).frame(width: 100, alignment: .trailing)
                             .help(languageManager.tr(DiagnosticsPresentation.pingCheckIDs.contains(id)
                                     ? "Mean round-trip time of received replies." : "Mean request time, including failures and retries."))
-                    } else if active {
+                    } else if row.active {
                         TimelineView(.periodic(from: .now, by: 0.1)) { context in
                             Text("\(max(0, Int((ProcessInfo.processInfo.systemUptime - progressReceived) * 1000))) ms")
                                 .font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)

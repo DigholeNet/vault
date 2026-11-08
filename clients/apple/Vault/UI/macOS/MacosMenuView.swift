@@ -23,7 +23,6 @@ struct MacosMenuLabel: View {
 struct MacosMenuView: View {
     let vpnManager: VpnManager
     @EnvironmentObject var appData: AppData
-    @EnvironmentObject var config: VaultConfig
     @EnvironmentObject var languageManager: LanguageManager
     @Environment(\.dismiss) private var dismiss
     @State private var hoveringConnection = false
@@ -166,8 +165,8 @@ struct MacosMenuView: View {
             }
             .animation(.easeOut(duration: 0.15), value: hoveringConnection)
             .disabled(!appData.canToggleConnection)
-            .help(languageManager.tr(actionTitle))
-            .accessibilityLabel(languageManager.tr(actionTitle))
+            .help(languageManager.tr(appData.connectionActionTitle))
+            .accessibilityLabel(languageManager.tr(appData.connectionActionTitle))
             .macosKeyboardAction(
                 focus: $focusedAction,
                 id: .connection,
@@ -195,15 +194,6 @@ struct MacosMenuView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 7)
             .contentShape(Rectangle())
-    }
-
-    private var actionTitle: String {
-        switch appData.vpnStatus {
-        case .connected: return "Disconnect"
-        case .connecting: return appData.isRecovering ? "Disconnect" : "Cancel Connection"
-        case .disconnecting: return appData.connectionError == nil ? "Disconnecting…" : "Disconnect"
-        case .disconnected: return appData.connectionError == nil ? "Connect" : "Retry"
-        }
     }
 
     private var traffic: some View {
@@ -259,14 +249,7 @@ struct MacosMenuView: View {
     }
 
     private func toggleConnection() {
-        if appData.vpnStatus == .connected || appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
-            vpnManager.disconnect()
-        } else {
-            if config.host.isEmpty || config.password.isEmpty { open("configure")
-                return
-            }
-            vpnManager.connect()
-        }
+        vpnManager.toggleConnection { open("configure") }
     }
 
     private func open(_ id: String) { dismiss()

@@ -6,6 +6,9 @@ plugins {
     alias(libs.plugins.detekt)
 }
 
+@Suppress("UNCHECKED_CAST")
+val androidTargets = rootProject.extra["androidTargets"] as Map<String, String>
+
 val licenseAssets = tasks.register<Sync>("copyLicenseNotices") {
     from(rootProject.file("../..")) { include("LICENSE", "NOTICE") }
     into(layout.buildDirectory.dir("generated/licenseAssets"))
@@ -37,7 +40,7 @@ android {
         targetSdk = libs.versions.target.sdk.get().toInt()
         ndk {
             // Match vaultcore's Rust targets; omit auxiliary libraries for unsupported ABIs.
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += androidTargets.keys
         }
         versionCode = providers.gradleProperty("versionCode").map(String::toInt).orElse(1).get()
         versionName = providers.gradleProperty("versionName").orElse("0.1.0").get()
@@ -139,6 +142,11 @@ android {
         buildConfig = true
     }
 
+    testOptions.unitTests.all {
+        // Validation and defaults use the same host bridge built for UniFFI generation.
+        it.systemProperty("jna.library.path", rootProject.file("../bridge/target/debug").absolutePath)
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_24
         targetCompatibility = JavaVersion.VERSION_24
@@ -176,6 +184,8 @@ dependencies {
     implementation(libs.datastore.preferences)
 
     testImplementation(libs.junit)
+    // The Android JNA AAR omits desktop native libraries needed by JVM tests.
+    testRuntimeOnly(libs.jna)
     androidTestImplementation(libs.androidx.test.junit)
 }
 

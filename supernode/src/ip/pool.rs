@@ -61,6 +61,64 @@ fn u128_to_ipv6(val: u128) -> Ipv6Addr {
     )
 }
 
+/// Allocation bookkeeping shared by both families. CIDR boundaries and
+/// address generation remain with the family-specific pool.
+struct PoolState<A> {
+    allocated: BTreeSet<A>,
+    recycled: BTreeSet<A>,
+    max_recycled: usize,
+}
+
+impl<A: Copy + Ord> PoolState<A> {
+    fn new() -> Self {
+        Self {
+            allocated: BTreeSet::new(),
+            recycled: BTreeSet::new(),
+            max_recycled: 65536,
+        }
+    }
+
+    fn allocate(
+        &mut self,
+        mut next: impl FnMut() -> Option<A>,
+        is_host: impl Fn(A) -> bool,
+    ) -> Result<A, IpPoolError> {
+        if let Some(ip) = self.recycled.pop_first() {
+            if !is_host(ip) {
+                return Err(IpPoolError::IpIsNetworkAddress);
+            }
+            self.allocated.insert(ip);
+            return Ok(ip);
+        }
+
+        // Generate a fresh IP, skipping occupied (including reserved) ones.
+        loop {
+            let ip = next().ok_or(IpPoolError::PoolExhausted)?;
+            if !is_host(ip) {
+                return Err(IpPoolError::PoolExhausted);
+            }
+            if self.allocated.insert(ip) {
+                return Ok(ip);
+            }
+        }
+    }
+
+    fn reserve(&mut self, ip: A, is_host: bool) -> bool {
+        is_host && self.allocated.insert(ip)
+    }
+
+    fn release(&mut self, ip: A) -> Result<(), IpPoolError> {
+        if !self.allocated.remove(&ip) {
+            return Err(IpPoolError::IpNotAllocated);
+        }
+        if self.recycled.len() >= self.max_recycled {
+            self.recycled.pop_first();
+        }
+        self.recycled.insert(ip);
+        Ok(())
+    }
+}
+
 // ==================== IPv4 Pool ====================
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -207,10 +265,8 @@ impl Ipv4Generator {
 
 pub struct Ipv4Pool {
     cidr: Ipv4Cidr,
-    allocated: BTreeSet<Ipv4Addr>,
-    recycled: BTreeSet<Ipv4Addr>,
+    state: PoolState<Ipv4Addr>,
     generator: Ipv4Generator,
-    max_recycled: usize,
 }
 
 impl Ipv4Pool {
@@ -219,10 +275,8 @@ impl Ipv4Pool {
 
         Self {
             cidr,
-            allocated: BTreeSet::new(),
-            recycled: BTreeSet::new(),
+            state: PoolState::new(),
             generator,
-            max_recycled: 65536,
         }
     }
 
@@ -243,41 +297,15 @@ impl Ipv4Pool {
     }
 
     pub fn allocate(&mut self) -> Result<Ipv4Addr, IpPoolError> {
-        if let Some(ip) = self.recycled.pop_first() {
-            if !self.cidr.is_host(ip) {
-                return Err(IpPoolError::IpIsNetworkAddress);
-            }
-            return self.do_allocate(ip);
-        }
-
-        // Generate a fresh IP, skipping occupied (including reserved) ones
-        loop {
-            let ip = self.generator.next().ok_or(IpPoolError::PoolExhausted)?;
-
-            if !self.cidr.is_host(ip) {
-                return Err(IpPoolError::PoolExhausted);
-            }
-
-            if !self.allocated.contains(&ip) {
-                return self.do_allocate(ip);
-            }
-        }
+        self.state
+            .allocate(|| self.generator.next(), |ip| self.cidr.is_host(ip))
     }
 
     /// Reserve an address so it is never allocated (e.g. an address of a
     /// local physical interface). Returns whether it was actually reserved
     /// (only pool host addresses can be reserved).
     pub fn reserve(&mut self, ip: Ipv4Addr) -> bool {
-        if self.cidr.is_host(ip) {
-            self.allocated.insert(ip)
-        } else {
-            false
-        }
-    }
-
-    fn do_allocate(&mut self, ip: Ipv4Addr) -> Result<Ipv4Addr, IpPoolError> {
-        self.allocated.insert(ip);
-        Ok(ip)
+        self.state.reserve(ip, self.cidr.is_host(ip))
     }
 
     pub fn release(&mut self, ip: Ipv4Addr) -> Result<(), IpPoolError> {
@@ -293,15 +321,7 @@ impl Ipv4Pool {
             }
             return Err(IpPoolError::IpNotInPool);
         }
-        if !self.allocated.remove(&ip) {
-            return Err(IpPoolError::IpNotAllocated);
-        }
-
-        if self.recycled.len() >= self.max_recycled {
-            self.recycled.pop_first();
-        }
-        self.recycled.insert(ip);
-        Ok(())
+        self.state.release(ip)
     }
 }
 
@@ -451,10 +471,8 @@ impl Ipv6Generator {
 
 pub struct Ipv6Pool {
     cidr: Ipv6Cidr,
-    allocated: BTreeSet<Ipv6Addr>,
-    recycled: BTreeSet<Ipv6Addr>,
+    state: PoolState<Ipv6Addr>,
     generator: Ipv6Generator,
-    max_recycled: usize,
 }
 
 impl Ipv6Pool {
@@ -463,10 +481,8 @@ impl Ipv6Pool {
 
         Self {
             cidr,
-            allocated: BTreeSet::new(),
-            recycled: BTreeSet::new(),
+            state: PoolState::new(),
             generator,
-            max_recycled: 65536,
         }
     }
 
@@ -486,41 +502,15 @@ impl Ipv6Pool {
     }
 
     pub fn allocate(&mut self) -> Result<Ipv6Addr, IpPoolError> {
-        if let Some(ip) = self.recycled.pop_first() {
-            if !self.cidr.is_host(ip) {
-                return Err(IpPoolError::IpIsNetworkAddress);
-            }
-            return self.do_allocate(ip);
-        }
-
-        // Generate a fresh IP, skipping occupied (including reserved) ones
-        loop {
-            let ip = self.generator.next().ok_or(IpPoolError::PoolExhausted)?;
-
-            if !self.cidr.is_host(ip) {
-                return Err(IpPoolError::PoolExhausted);
-            }
-
-            if !self.allocated.contains(&ip) {
-                return self.do_allocate(ip);
-            }
-        }
+        self.state
+            .allocate(|| self.generator.next(), |ip| self.cidr.is_host(ip))
     }
 
     /// Reserve an address so it is never allocated (e.g. an address of a
     /// local physical interface). Returns whether it was actually reserved
     /// (only pool host addresses can be reserved).
     pub fn reserve(&mut self, ip: Ipv6Addr) -> bool {
-        if self.cidr.is_host(ip) {
-            self.allocated.insert(ip)
-        } else {
-            false
-        }
-    }
-
-    fn do_allocate(&mut self, ip: Ipv6Addr) -> Result<Ipv6Addr, IpPoolError> {
-        self.allocated.insert(ip);
-        Ok(ip)
+        self.state.reserve(ip, self.cidr.is_host(ip))
     }
 
     pub fn release(&mut self, ip: Ipv6Addr) -> Result<(), IpPoolError> {
@@ -537,15 +527,7 @@ impl Ipv6Pool {
             }
             return Err(IpPoolError::IpNotInPool);
         }
-        if !self.allocated.remove(&ip) {
-            return Err(IpPoolError::IpNotAllocated);
-        }
-
-        if self.recycled.len() >= self.max_recycled {
-            self.recycled.pop_first();
-        }
-        self.recycled.insert(ip);
-        Ok(())
+        self.state.release(ip)
     }
 }
 
@@ -600,6 +582,11 @@ mod tests {
         assert_eq!(ip2.to_string(), "192.168.1.2");
 
         assert!(pool.allocate().is_err());
+        pool.release(ip2).unwrap();
+        pool.release(ip1).unwrap();
+        assert_eq!(pool.release(ip1), Err(IpPoolError::IpNotAllocated));
+        assert_eq!(pool.allocate().unwrap(), ip1);
+        assert_eq!(pool.allocate().unwrap(), ip2);
     }
 
     #[test]
@@ -683,10 +670,15 @@ mod tests {
         let cidr = Ipv6Cidr::from_str("2001:db8::/126").unwrap();
         let mut pool = Ipv6Pool::new(cidr);
 
-        pool.allocate().unwrap();
-        pool.allocate().unwrap();
+        let ip1 = pool.allocate().unwrap();
+        let ip2 = pool.allocate().unwrap();
 
         assert!(pool.allocate().is_err());
+        pool.release(ip2).unwrap();
+        pool.release(ip1).unwrap();
+        assert_eq!(pool.release(ip1), Err(IpPoolError::IpNotAllocated));
+        assert_eq!(pool.allocate().unwrap(), ip1);
+        assert_eq!(pool.allocate().unwrap(), ip2);
     }
 
     #[test]
@@ -709,5 +701,37 @@ mod tests {
         pool.release(ip2).unwrap();
         let ip4 = pool.allocate().unwrap();
         assert_eq!(ip4, ip2);
+    }
+
+    #[test]
+    fn ipv6_single_host() {
+        let ip = Ipv6Addr::from_str("2001:db8::1").unwrap();
+        let mut pool = Ipv6Pool::new(Ipv6Cidr::new(ip, 128).unwrap());
+        assert_eq!(pool.allocate().unwrap(), ip);
+        assert_eq!(pool.allocate(), Err(IpPoolError::PoolExhausted));
+        pool.release(ip).unwrap();
+        assert_eq!(pool.allocate().unwrap(), ip);
+    }
+
+    #[test]
+    fn release_bounds() {
+        let mut ipv4 = Ipv4Pool::new(Ipv4Cidr::from_str("192.168.1.0/24").unwrap());
+        for (address, error) in [
+            ("192.168.1.0", IpPoolError::IpIsNetworkAddress),
+            ("192.168.1.255", IpPoolError::IpIsBroadcastAddress),
+            ("192.168.2.1", IpPoolError::IpNotInPool),
+            ("192.168.1.1", IpPoolError::IpNotAllocated),
+        ] {
+            assert_eq!(ipv4.release(address.parse().unwrap()), Err(error));
+        }
+        let mut ipv6 = Ipv6Pool::new(Ipv6Cidr::from_str("2001:db8::/126").unwrap());
+        for (address, error) in [
+            ("2001:db8::", IpPoolError::IpIsNetworkAddress),
+            ("2001:db8::3", IpPoolError::IpIsBroadcastAddress),
+            ("2001:db8::4", IpPoolError::IpNotInPool),
+            ("2001:db8::1", IpPoolError::IpNotAllocated),
+        ] {
+            assert_eq!(ipv6.release(address.parse().unwrap()), Err(error));
+        }
     }
 }

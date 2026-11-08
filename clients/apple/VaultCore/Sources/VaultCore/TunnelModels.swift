@@ -7,8 +7,9 @@ import Foundation
 /// Immutable configuration stored in the OS VPN profile for on-demand restarts.
 /// DNS settings use separate IPv4 and IPv6 fields; the old combined field is ignored.
 public struct TunnelLaunchConfiguration {
-    public static let mtuLowerBound = 1280
-    public static let mtuUpperBound = 1427
+    private static let parameters = tunnelParameters()
+    public static let mtuLowerBound = Int(parameters.mtuMin)
+    public static let mtuUpperBound = Int(parameters.mtuMax)
 
     public enum InvalidField: Error { case host, port, password, peerID, dnsIpv4, dnsIpv6 }
 
@@ -58,8 +59,8 @@ public struct TunnelLaunchConfiguration {
 
     public func effectiveDNS(ipv4: Bool, ipv6: Bool) -> [String] {
         var servers: [String] = []
-        if ipv4 { servers += dnsIpv4.isEmpty ? ["1.1.1.1", "8.8.8.8"] : dnsIpv4 }
-        if ipv6 { servers += dnsIpv6.isEmpty ? ["2001:4860:4860::8888", "2001:4860:4860::8844"] : dnsIpv6 }
+        if ipv4 { servers += dnsIpv4.isEmpty ? Self.parameters.dnsIpv4 : dnsIpv4 }
+        if ipv6 { servers += dnsIpv6.isEmpty ? Self.parameters.dnsIpv6 : dnsIpv6 }
         return servers
     }
 

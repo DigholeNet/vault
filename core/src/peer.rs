@@ -241,24 +241,8 @@ mod tests {
 
     #[test]
     fn bad_or_replayed_ping_ignored() {
-        let (client_private, client_public) = create_ecdh_keypair().unwrap();
-        let (server_private, server_public) = create_ecdh_keypair().unwrap();
-        let sender = CryptoCore::new(
-            client_private,
-            &AlgorithmType::Aes128Gcm,
-            server_public.bytes(),
-            Role::Initiator,
-            b"test",
-        )
-        .unwrap();
-        let receiver = CryptoCore::new(
-            server_private,
-            &AlgorithmType::Aes128Gcm,
-            client_public.bytes(),
-            Role::Responder,
-            b"test",
-        )
-        .unwrap();
+        let (sender, receiver) =
+            crate::crypto::test_crypto_pair(&AlgorithmType::Aes128Gcm, b"test");
         let peer = Peer::<SystemTimeSource>::new(
             PeerId([1; 16]),
             receiver,

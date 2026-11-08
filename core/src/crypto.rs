@@ -439,6 +439,35 @@ fn test_speed(algorithm_type: AlgorithmType, max_time: &Duration) -> f64 {
     data as f64 / duration / 1_000_000.0
 }
 
+/// A normal client/server pair for unit tests. Tests exercising mismatched
+/// roles or key material construct those deliberately invalid pairs explicitly.
+#[cfg(test)]
+pub(crate) fn test_crypto_pair(
+    algorithm: &AlgorithmType,
+    pake_key: &[u8],
+) -> (CryptoCore, CryptoCore) {
+    let (client_private, client_public) = create_ecdh_keypair().unwrap();
+    let (server_private, server_public) = create_ecdh_keypair().unwrap();
+    (
+        CryptoCore::new(
+            client_private,
+            algorithm,
+            server_public.bytes(),
+            Role::Initiator,
+            pake_key,
+        )
+        .unwrap(),
+        CryptoCore::new(
+            server_private,
+            algorithm,
+            client_public.bytes(),
+            Role::Responder,
+            pake_key,
+        )
+        .unwrap(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -448,26 +477,7 @@ mod tests {
     use super::*;
 
     fn crypto_pair(algorithm: &AlgorithmType) -> (CryptoCore, CryptoCore) {
-        let (privk1, pubk1) = create_ecdh_keypair().unwrap();
-        let (privk2, pubk2) = create_ecdh_keypair().unwrap();
-        (
-            CryptoCore::new(
-                privk1,
-                algorithm,
-                pubk2.bytes(),
-                Role::Initiator,
-                b"test-pake-key",
-            )
-            .unwrap(),
-            CryptoCore::new(
-                privk2,
-                algorithm,
-                pubk1.bytes(),
-                Role::Responder,
-                b"test-pake-key",
-            )
-            .unwrap(),
-        )
+        test_crypto_pair(algorithm, b"test-pake-key")
     }
 
     fn encrypt_to_vec(sender: &CryptoCore, data: &[u8]) -> Vec<u8> {

@@ -29,11 +29,8 @@ fun resolveNdkPlatform(ndkHome: File, minSdk: Int, triples: Collection<String>):
     return platform
 }
 
-val androidTargets = linkedMapOf(
-    "arm64-v8a" to "aarch64-linux-android",
-    "armeabi-v7a" to "arm-linux-androideabi",
-    "x86_64" to "x86_64-linux-android"
-)
+@Suppress("UNCHECKED_CAST")
+val androidTargets = rootProject.extra["androidTargets"] as Map<String, String>
 
 android {
     namespace = "net.dighole.vaultcore"

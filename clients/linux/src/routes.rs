@@ -6,9 +6,6 @@ use std::net::IpAddr;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-#[cfg(target_os = "linux")]
-use anyhow::Context;
-
 trait IpCommand: Send {
     fn run(&mut self, args: &[String]) -> anyhow::Result<String>;
 }
@@ -18,17 +15,7 @@ struct SystemIp;
 #[cfg(target_os = "linux")]
 impl IpCommand for SystemIp {
     fn run(&mut self, args: &[String]) -> anyhow::Result<String> {
-        let output = Command::new("ip")
-            .args(args)
-            .output()
-            .context("execute ip")?;
-        anyhow::ensure!(
-            output.status.success(),
-            "ip {} failed ({}): {}",
-            args.join(" "),
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+        let output = vault_core::util::checked_output(Command::new("ip").args(args))?;
         Ok(String::from_utf8(output.stdout)?)
     }
 }

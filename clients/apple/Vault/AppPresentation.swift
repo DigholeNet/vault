@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import Foundation
+import SwiftUI
 import VaultCore
 
 // MARK: - Connection status
@@ -18,6 +19,28 @@ enum VpnStatusUtil {
         LanguageManager.shared.tr(titleKey(for: status))
     }
 }
+
+#if os(macOS)
+enum ConnectionAction {
+    case connect, disconnect, configure
+
+    init(status: VpnStatus, configured: Bool) {
+        self = status != .disconnected ? .disconnect : (configured ? .connect : .configure)
+    }
+}
+
+extension AppData {
+    var connectionActionTitle: String {
+        switch vpnStatus {
+        case .connected: return "Disconnect"
+        case .connecting: return isRecovering ? "Disconnect" : "Cancel Connection"
+        case .disconnecting: return connectionError == nil ? "Disconnecting…" : "Disconnect"
+        case .disconnected: return connectionError == nil ? "Connect" : "Retry"
+        }
+    }
+}
+
+#endif
 
 // MARK: - IP Parsing Helpers
 
@@ -113,6 +136,29 @@ extension DiagnosticProbe {
 
 /// App-only formatting shared by the iOS and macOS layouts.
 enum DiagnosticsPresentation {
+    struct CheckRow {
+        let state: DiagnosticState?
+        let active: Bool
+        /// Localization key or a numeric passed/attempted count.
+        let resultText: String
+        let durationMs: UInt64?
+    }
+
+    static func checkRow(_ id: String, result: DiagnosticsResult?, running: Bool) -> CheckRow {
+        let check = result?.checks?.first { $0.id == id }
+        let active = running && (result?.activeCheck ?? "dns") == id && check == nil
+        let text = check.map { $0.attempted == 0 ? "Not measured" : "\($0.passed)/\($0.attempted)" }
+            ?? (active ? "Checking" : (running ? "Waiting" : "Not measured"))
+        let duration = check.flatMap { $0.attempted > 0 && $0.sampleCount != 0 ? $0.durationMs : nil }
+        return CheckRow(state: check?.state, active: active, resultText: text, durationMs: duration)
+    }
+
+    static func resultTitle(_ result: DiagnosticsResult?, running: Bool) -> String {
+        if running { return "Checking connection…" }
+        if passed(result) { return "Connectivity checks passed" }
+        return incomplete(result) ? "Diagnostics incomplete" : "Connectivity issues found"
+    }
+
     static let checkIDs = [
         "dns", "tcp", "https", "dns6", "tcp6", "https6", "application", "ping", "ping6"
     ]
@@ -178,5 +224,43 @@ extension PacketStats {
         }
 
         return String(format: "%.2f %@", value, units[unitIndex])
+    }
+}
+
+// MARK: - About content
+
+/// Product details shared by the platform-specific About containers.
+struct AboutContent: View {
+    @EnvironmentObject var languageManager: LanguageManager
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Vault")
+                .font(.system(size: 24, weight: .bold))
+                .padding(.bottom, 12)
+            Text(languageManager.tr(
+                "Version %@ (%@)",
+                Bundle.main.appVersionShort,
+                Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+            ))
+            .font(.system(size: 16))
+            .foregroundStyle(.secondary)
+            .padding(.bottom, 32)
+
+            Link(destination: URL(string: "https://github.com/DigholeNet/vault")!) {
+                Text(verbatim: "https://github.com/DigholeNet/vault")
+            }
+            .font(.system(size: 14))
+            .padding(.bottom, 16)
+            Text(languageManager.tr("A secure VPN client for cross-regional connectivity."))
+                .font(.system(size: 14))
+            #if os(macOS)
+                .fixedSize(horizontal: false, vertical: true)
+            #endif
+                .padding(.bottom, 16)
+            Text(verbatim: "© 2026 Dighole Team")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
     }
 }

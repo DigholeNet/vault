@@ -80,20 +80,13 @@ fn select_route<'a>(
 /// Polling this snapshot from the existing runner also detects same-type switches.
 #[cfg(target_os = "linux")]
 pub fn get_default_physical_interface(server: IpAddr, tun: &str) -> anyhow::Result<Interface> {
-    let output = Command::new("ip")
-        .args([
-            "-j",
-            if server.is_ipv6() { "-6" } else { "-4" },
-            "route",
-            "show",
-            "default",
-        ])
-        .output()?;
-    anyhow::ensure!(
-        output.status.success(),
-        "read physical default routes: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let output = vault_core::util::checked_output(Command::new("ip").args([
+        "-j",
+        if server.is_ipv6() { "-6" } else { "-4" },
+        "route",
+        "show",
+        "default",
+    ]))?;
     let routes: Vec<DefaultRoute> = serde_json::from_slice(&output.stdout)?;
     let interfaces = pnet::datalink::interfaces();
     let running: Vec<_> = interfaces

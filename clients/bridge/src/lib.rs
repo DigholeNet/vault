@@ -25,6 +25,27 @@ uniffi::setup_scaffolding!();
 
 static LOGGER_INIT: Once = Once::new();
 
+#[derive(uniffi::Record)]
+pub struct TunnelParameters {
+    pub mtu_min: u16,
+    pub mtu_max: u16,
+    pub overhead: u16,
+    pub dns_ipv4: Vec<String>,
+    pub dns_ipv6: Vec<String>,
+}
+
+/// MTU limits and default resolvers shared by Android and Apple clients.
+#[uniffi::export]
+pub fn tunnel_parameters() -> TunnelParameters {
+    TunnelParameters {
+        mtu_min: vault_core::TUNNEL_MTU_MIN,
+        mtu_max: vault_core::TUNNEL_MTU_MAX,
+        overhead: vault_core::TUNNEL_OVERHEAD as u16,
+        dns_ipv4: vault_core::DEFAULT_DNS_IPV4.map(str::to_owned).into(),
+        dns_ipv6: vault_core::DEFAULT_DNS_IPV6.map(str::to_owned).into(),
+    }
+}
+
 /// Point the Rust file logger at the app's shared vault.log so core/bridge
 /// records land in the same file as the Kotlin/Swift-side logs. Call before
 /// the first `RustEdge` is created; safe to call again to change the path.

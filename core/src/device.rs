@@ -331,14 +331,11 @@ impl TunTapDevice {
     }
 
     fn get_overhead(&self) -> usize {
-        40 /* for outer IPv6 header, can't be sure to only have IPv4 peers */
-        + 8 /* for outer UDP header */
-        + crate::EXTRA_LEN + crate::TAG_LEN /* crypto overhead */
-        + 1 /* message type header */
-        + match self.type_ {
-            DeviceType::Tap => 14, /* inner ethernet header */
-            DeviceType::Tun => 0
-        }
+        crate::TUNNEL_OVERHEAD
+            + match self.type_ {
+                DeviceType::Tap => 14, /* inner ethernet header */
+                DeviceType::Tun => 0,
+            }
     }
 
     /// Largest MTU that still fits the fixed 65535-byte `Buffer` used on the
@@ -516,12 +513,6 @@ fn set_device_addr(ifname: &str, addr: Ipv4Addr) -> io::Result<()> {
 }
 
 fn get_ifindex(ifname: &str) -> io::Result<libc::c_int> {
-    // SAFETY: plain socket creation with valid constants; the returned fd
-    // is checked below and closed before returning.
-    let sock = unsafe { libc::socket(libc::AF_INET6, libc::SOCK_DGRAM, 0) };
-    if sock < 0 {
-        return Err(io::Error::last_os_error());
-    }
     let cname = CString::new(ifname).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -532,10 +523,6 @@ fn get_ifindex(ifname: &str) -> io::Result<libc::c_int> {
     let idx = unsafe { libc::if_nametoindex(cname.as_ptr()) };
     if idx == 0 {
         return Err(io::Error::last_os_error());
-    }
-    // SAFETY: `sock` is a valid fd opened above; closed exactly once.
-    unsafe {
-        libc::close(sock);
     }
     Ok(idx as libc::c_int)
 }
@@ -691,4 +678,34 @@ pub fn setup_device(iface: &str, device_type: &DeviceType) -> anyhow::Result<Tun
     })?;
     info!("set device enable.");
     Ok(device)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ifindex_fd_cleanup() {
+        const CHILD: &str = "VAULT_IFINDEX_FD_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            // Other tests create sockets concurrently; count in an isolated process.
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "device::tests::ifindex_fd_cleanup"])
+                .env(CHILD, "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        let count_fds = || std::fs::read_dir("/proc/self/fd").unwrap().count();
+        let before = count_fds();
+        for _ in 0..32 {
+            assert_eq!(
+                get_ifindex("bad\0name").unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+            assert!(get_ifindex("").is_err());
+        }
+        assert_eq!(count_fds(), before);
+    }
 }

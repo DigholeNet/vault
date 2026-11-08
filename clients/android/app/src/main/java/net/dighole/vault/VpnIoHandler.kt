@@ -61,6 +61,9 @@ class VpnIoHandler(
     private val interfaceGate = SessionGate()
     private var interfaceToken = 0L
 
+    val hasValidInterface: Boolean
+        get() = vpnInterface?.fileDescriptor?.valid() == true
+
     fun enqueueDownlink(packets: List<ByteArray>) {
         when (pendingWritePackets.trySend(packets)) {
             PacketBatchQueue.SendResult.ACCEPTED -> Unit

@@ -5,14 +5,8 @@ import os.log
 import VaultCore
 
 enum TunnelConstants {
-    /// Bytes of tunnel overhead added to every inner packet:
-    /// 40 outer IPv6 header (worst case, even for IPv4 peers)
-    /// + 8 outer UDP header
-    /// + 8 packet counter (EXTRA_LEN in core/src/lib.rs)
-    /// + 16 AEAD tag (TAG_LEN in core/src/lib.rs)
-    /// + 1 message type header.
-    /// Keep in sync with get_overhead() in core/src/device.rs.
-    static let tunnelOverhead: Int = 73
+    /// Worst-case outer headers and protocol overhead, owned by the Rust core.
+    static let tunnelOverhead = Int(tunnelParameters().overhead)
     /// Upper bound for the tunnel MTU: 1500 (typical Ethernet link MTU)
     /// minus tunnelOverhead. Jumbo-frame links do not inflate the tunnel
     /// MTU beyond this. Also the fallback when the underlying link MTU

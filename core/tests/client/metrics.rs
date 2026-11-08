@@ -41,6 +41,7 @@ impl DownlinkEvents {
 struct DeliveryCallbacks {
     delivered: mpsc::UnboundedSender<Vec<Vec<u8>>>,
     delay: Duration,
+    errors: Option<mpsc::UnboundedSender<String>>,
 }
 
 impl ClientCallbacks for DeliveryCallbacks {
@@ -56,7 +57,11 @@ impl ClientCallbacks for DeliveryCallbacks {
     }
 
     fn on_error(&self, error: String) {
-        panic!("unexpected data-loop error: {error}");
+        if let Some(errors) = &self.errors {
+            errors.send(error).unwrap();
+        } else {
+            panic!("unexpected data-loop error: {error}");
+        }
     }
 }
 
@@ -73,30 +78,17 @@ struct DataLoop {
 
 impl DataLoop {
     async fn start() -> Self {
+        Self::start_with_errors(None).await
+    }
+
+    async fn start_with_errors(errors: Option<mpsc::UnboundedSender<String>>) -> Self {
         let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let client_address = socket.local_addr().unwrap();
         let server_address = server.local_addr().unwrap();
-        let (client_private, client_public) = create_ecdh_keypair().unwrap();
-        let (server_private, server_public) = create_ecdh_keypair().unwrap();
-        let receiver_crypto = Arc::new(
-            CryptoCore::new(
-                client_private,
-                &crate::AlgorithmType::Aes128Gcm,
-                server_public.bytes(),
-                Role::Initiator,
-                b"metrics-test-key",
-            )
-            .unwrap(),
-        );
-        let sender_crypto = CryptoCore::new(
-            server_private,
-            &crate::AlgorithmType::Aes128Gcm,
-            client_public.bytes(),
-            Role::Responder,
-            b"metrics-test-key",
-        )
-        .unwrap();
+        let (receiver_crypto, sender_crypto) =
+            crate::crypto::test_crypto_pair(&crate::AlgorithmType::Aes128Gcm, b"metrics-test-key");
+        let receiver_crypto = Arc::new(receiver_crypto);
         let (delivered_tx, delivered) = mpsc::unbounded_channel();
         let inner = Arc::new(ClientInner {
             uplink: Arc::new(UplinkCounters::default()),
@@ -112,6 +104,7 @@ impl DataLoop {
             callbacks: Arc::new(DeliveryCallbacks {
                 delivered: delivered_tx,
                 delay: Duration::from_millis(2),
+                errors,
             }),
             runtime: Arc::new(SessionRuntime::new().unwrap()),
             algorithms: Vec::new(),
@@ -199,6 +192,61 @@ fn number(fields: &Fields, name: &str) -> f64 {
         .unwrap_or_else(|| panic!("missing metric {name}: {fields:?}"))
         .parse()
         .unwrap()
+}
+
+async fn rejection_timeout(keep_receiving: bool) {
+    let (errors_tx, mut errors) = mpsc::unbounded_channel();
+    let mut data_loop = DataLoop::start_with_errors(Some(errors_tx)).await;
+    let started = Instant::now();
+    data_loop.send_raw(&[protocol::REJECTED]).await;
+    let mut traffic = interval(Duration::from_millis(10));
+    let error = tokio::time::timeout(Duration::from_secs(6), async {
+        loop {
+            tokio::select! {
+                error = errors.recv() => break error,
+                _ = traffic.tick(), if keep_receiving => {
+                    // Repeated unauthenticated packets must neither refresh
+                    // liveness nor restart the three-second rejection window.
+                    data_loop.send_raw(&[protocol::REJECTED]).await;
+                }
+            }
+        }
+    })
+    .await
+    .expect("rejected sessions must exit even while UDP packets keep arriving");
+    assert_eq!(error.as_deref(), Some("session rejected by server"));
+    assert!(started.elapsed() >= Duration::from_secs(3));
+    tokio::time::timeout(Duration::from_secs(1), &mut data_loop.task)
+        .await
+        .expect("data loop should finish after reporting rejection")
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejected_idle() {
+    rejection_timeout(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejected_busy() {
+    rejection_timeout(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejection_cleared() {
+    let (errors_tx, mut errors) = mpsc::unbounded_channel();
+    let mut data_loop = DataLoop::start_with_errors(Some(errors_tx)).await;
+    data_loop.send_raw(&[protocol::REJECTED]).await;
+    data_loop.send(false).await;
+    data_loop.wait_for_delivery().await;
+    // Wait beyond the rejection deadline. Authenticated traffic proves the
+    // existing session is alive even if the server previously sent REJECTED.
+    assert!(
+        tokio::time::timeout(Duration::from_secs(4), errors.recv())
+            .await
+            .is_err()
+    );
+    data_loop.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

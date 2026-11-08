@@ -101,68 +101,17 @@ struct IosStatusView: View {
 
                                 // Statistics Section - Same width as IP section
                                 HStack(spacing: 0) {
-                                    // Sent Stats - takes half width
-                                    VStack(spacing: 6) {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "arrow.up.circle.fill")
-                                                .foregroundColor(.blue)
-                                                .font(.system(size: 18))
-                                            Text(languageManager.tr("Uplink"))
-                                                .font(.system(size: 13))
-                                                .foregroundColor(.gray)
-                                        }
-
-                                        Text("\(appData.packetsSent)")
-                                            .font(.system(size: 15, weight: .semibold, design: .monospaced))
-
-                                        Text(PacketStats.formatBytes(appData.bytesSent))
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.gray)
-
-                                        HStack(spacing: 2) {
-                                            Text("+")
-                                                .font(.system(size: 10))
-                                                .foregroundColor(.blue)
-                                            Text(PacketStats.formatBytes(appData.bytesSentPerSecond) + "/s")
-                                                .font(.system(size: 10, design: .monospaced))
-                                                .foregroundColor(.blue)
-                                        }
-                                        .padding(.top, 2)
-                                    }
-                                    .frame(maxWidth: .infinity)
-
-                                    Divider()
-                                        .frame(height: 70)
-
-                                    // Received Stats - takes half width
-                                    VStack(spacing: 6) {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "arrow.down.circle.fill")
-                                                .foregroundColor(.green)
-                                                .font(.system(size: 18))
-                                            Text(languageManager.tr("Downlink"))
-                                                .font(.system(size: 13))
-                                                .foregroundColor(.gray)
-                                        }
-
-                                        Text("\(appData.packetsReceived)")
-                                            .font(.system(size: 15, weight: .semibold, design: .monospaced))
-
-                                        Text(PacketStats.formatBytes(appData.bytesReceived))
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.gray)
-
-                                        HStack(spacing: 2) {
-                                            Text("+")
-                                                .font(.system(size: 10))
-                                                .foregroundColor(.green)
-                                            Text(PacketStats.formatBytes(appData.bytesReceivedPerSecond) + "/s")
-                                                .font(.system(size: 10, design: .monospaced))
-                                                .foregroundColor(.green)
-                                        }
-                                        .padding(.top, 2)
-                                    }
-                                    .frame(maxWidth: .infinity)
+                                    TrafficColumn(
+                                        title: "Uplink", symbol: "arrow.up.circle.fill", color: .blue,
+                                        packets: appData.packetsSent, bytes: appData.bytesSent,
+                                        rate: appData.bytesSentPerSecond
+                                    )
+                                    Divider().frame(height: 70)
+                                    TrafficColumn(
+                                        title: "Downlink", symbol: "arrow.down.circle.fill", color: .green,
+                                        packets: appData.packetsReceived, bytes: appData.bytesReceived,
+                                        rate: appData.bytesReceivedPerSecond
+                                    )
                                 }
                             }
                             .padding(.horizontal, 20)
@@ -175,6 +124,44 @@ struct IosStatusView: View {
                 }.frame(minHeight: geometry.size.height)
             }
         }
+    }
+}
+
+private struct TrafficColumn: View {
+    let title: String
+    let symbol: String
+    let color: Color
+    let packets: UInt64
+    let bytes: UInt64
+    let rate: UInt64
+    @EnvironmentObject var languageManager: LanguageManager
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: symbol)
+                    .foregroundColor(color)
+                    .font(.system(size: 18))
+                Text(languageManager.tr(title))
+                    .font(.system(size: 13))
+                    .foregroundColor(.gray)
+            }
+            Text("\(packets)")
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+            Text(PacketStats.formatBytes(bytes))
+                .font(.system(size: 11))
+                .foregroundColor(.gray)
+            HStack(spacing: 2) {
+                Text("+")
+                    .font(.system(size: 10))
+                    .foregroundColor(color)
+                Text(PacketStats.formatBytes(rate) + "/s")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(color)
+            }
+            .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

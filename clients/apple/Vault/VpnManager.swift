@@ -711,3 +711,16 @@ extension VpnManager {
         DispatchQueue.main.asyncAfter(deadline: .now() + tunnelStopTimeout, execute: timeout)
     }
 }
+
+#if os(macOS)
+extension VpnManager {
+    /// Menu and popover share the connection decision; each owns its navigation.
+    func toggleConnection(showConfiguration: () -> Void) {
+        switch ConnectionAction(status: vpnStatus, configured: !config.host.isEmpty && !config.password.isEmpty) {
+        case .disconnect: disconnect()
+        case .configure: showConfiguration()
+        case .connect: connect()
+        }
+    }
+}
+#endif

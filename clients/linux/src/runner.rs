@@ -230,15 +230,7 @@ fn update_dns(dns: &mut Option<DnsGuard>, servers: &[String], tun: &str) -> anyh
 }
 
 fn required_command(program: &str, args: &[&str]) -> anyhow::Result<()> {
-    let output = Command::new(program).args(args).output()?;
-    anyhow::ensure!(
-        output.status.success(),
-        "{} {} failed ({}): {}",
-        program,
-        args.join(" "),
-        output.status,
-        String::from_utf8_lossy(&output.stderr).trim()
-    );
+    util::checked_output(Command::new(program).args(args))?;
     Ok(())
 }
 

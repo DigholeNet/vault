@@ -277,26 +277,7 @@ fn crypto() -> Arc<CryptoCore> {
 }
 
 fn crypto_pair() -> (CryptoCore, CryptoCore) {
-    let (private, public) = create_ecdh_keypair().unwrap();
-    let (peer_private, peer_public) = create_ecdh_keypair().unwrap();
-    (
-        CryptoCore::new(
-            private,
-            &crate::AlgorithmType::Aes128Gcm,
-            peer_public.bytes(),
-            Role::Initiator,
-            b"test",
-        )
-        .unwrap(),
-        CryptoCore::new(
-            peer_private,
-            &crate::AlgorithmType::Aes128Gcm,
-            public.bytes(),
-            Role::Responder,
-            b"test",
-        )
-        .unwrap(),
-    )
+    crate::crypto::test_crypto_pair(&crate::AlgorithmType::Aes128Gcm, b"test")
 }
 
 #[test]

@@ -7,13 +7,13 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.TextView
-import androidx.core.content.edit
 import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import net.dighole.vault.data.VaultConfig
+import net.dighole.vault.data.deviceId
 import net.dighole.vault.data.readVaultConfig
 import net.dighole.vault.data.splitLegacyDns
 import net.dighole.vault.data.writeVaultConfig
@@ -31,10 +31,11 @@ class ConfigureFragment : Fragment() {
     override fun onViewCreated(view: View, state: Bundle?) {
         fields = listOf(R.id.edtHost, R.id.edtPort, R.id.edtPassword, R.id.edtMtu,
             R.id.edtDnsIpv4, R.id.edtDnsIpv6, R.id.edtProbeDomains).map { view.findViewById(it) }
-        val prefs = requireContext().getSharedPreferences(VaultVpnService.PREFS_NAME, 0)
-        val id = prefs.getString("device_id", null) ?: java.util.UUID.randomUUID().toString()
-            .replace("-", "").also { value -> prefs.edit(commit = true) { putString("device_id", value) } }
-        view.findViewById<EditText>(R.id.edtId).setText(id)
+        view.findViewById<EditText>(R.id.edtId).apply {
+            try { setText(requireContext().deviceId().hex) } catch (_: IllegalStateException) {
+                setText(R.string.config_load_failed)
+            }
+        }
         LanguageSelector(this, view.findViewById(R.id.languageSpinner)).bind()
         fields.forEach { it.doAfterTextChanged { saved = false; updateValidation() } }
         view.findViewById<com.google.android.material.button.MaterialButton>(R.id.action_save).setOnClickListener { save() }
@@ -73,7 +74,7 @@ class ConfigureFragment : Fragment() {
             if (SettingsValidation.server(v[0].trim())) null else R.string.error_host_invalid,
             if (v[1].toIntOrNull() in 1..65535) null else R.string.error_port_invalid,
             if (v[2].isNotEmpty()) null else R.string.error_password_required,
-            if (v[3].isBlank() || v[3].trim().toIntOrNull() in 1280..1427) null else R.string.error_mtu,
+            if (SettingsValidation.mtu(v[3])) null else R.string.error_mtu,
             if (SettingsValidation.dns(v[4], ipv6 = false)) null else R.string.error_dns_ipv4,
             if (SettingsValidation.dns(v[5], ipv6 = true)) null else R.string.error_dns_ipv6,
             if (SettingsValidation.domains(v[6])) null else R.string.error_probe

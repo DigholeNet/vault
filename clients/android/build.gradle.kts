@@ -9,6 +9,12 @@ plugins {
     alias(libs.plugins.detekt) apply false
 }
 
+extra["androidTargets"] = linkedMapOf(
+    "arm64-v8a" to "aarch64-linux-android",
+    "armeabi-v7a" to "arm-linux-androideabi",
+    "x86_64" to "x86_64-linux-android"
+)
+
 fun readNdkVersion(ndkHome: File): String? {
     val sourceProperties = ndkHome.resolve("source.properties")
     if (!sourceProperties.isFile) return null
