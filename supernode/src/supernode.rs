@@ -23,7 +23,9 @@ use crate::handshake::{
 };
 use crate::ip::{IpManager, Ipv4Cidr, Ipv4Pool, Ipv6Cidr, Ipv6Pool};
 use crate::limiter::InitLimiter;
-use crate::network::{NetworkSetup, SystemBackend, udp_socket_sample};
+use crate::network::{
+    NetworkSetup, SystemBackend, configure_udp_buffers, recv_batch, udp_socket_sample,
+};
 
 /// Peers idle longer than this are dropped from the routing tables; the IP
 /// lease (300s) survives so a reconnecting peer reuses its old address.
@@ -103,6 +105,7 @@ impl<TS: TimeSource> SuperNode<TS> {
                 ))?
             }
         };
+        configure_udp_buffers(&socket)?;
         // Non-blocking: a full send buffer must not stall every client.
         socket
             .set_nonblocking(true)
@@ -254,9 +257,7 @@ impl<TS: TimeSource> SuperNode<TS> {
                 }
                 WaitResult::Timeout => {}
                 WaitResult::Socket => {
-                    let started = Instant::now();
                     self.handle_net_data(&mut buffer);
-                    self.metrics.handled(started.elapsed());
                 }
                 WaitResult::Device => {
                     let started = Instant::now();
@@ -312,34 +313,25 @@ impl<TS: TimeSource> SuperNode<TS> {
     }
 
     fn handle_net_data(&mut self, buffer: &mut Buffer) {
-        buffer.clear(); // recv_from writes at the cursor; reset the drift
-        match self.socket.recv_from(buffer.buffer()) {
-            Ok((size, addr)) => {
-                self.metrics.observe(IoEvent::UdpReceived(size));
-                // A zero-length datagram carries no message; without this
-                // guard the parser would read stale bytes from the backing
-                // array.
-                if size == 0 {
-                    self.metrics.observe(IoEvent::InvalidNetPacket);
-                    return;
-                }
-                buffer.set_length(size);
+        let socket = Arc::clone(&self.socket);
+        let result = recv_batch(&socket, buffer, |buffer, addr, started| {
+            self.metrics.observe(IoEvent::UdpReceived(buffer.len()));
+            // Empty datagrams must not reach take_prefix(), which would read
+            // stale bytes. Invalid packets do not interrupt the receive batch.
+            if buffer.is_empty() {
+                self.metrics.observe(IoEvent::InvalidNetPacket);
+            } else {
                 let addr = mapped_addr(addr);
                 if let Err(e) = self.do_handle_net_data(buffer, addr) {
                     self.metrics.observe(IoEvent::NetError(&e));
                     debug!("Handle net data error., {} : {}", addr, e);
                 }
             }
-            Err(e) => {
-                // Non-blocking socket: a spurious readiness event is not an
-                // error.
-                if e.kind() == std::io::ErrorKind::WouldBlock {
-                    debug!("Spurious socket readiness, no data available");
-                } else {
-                    self.metrics.observe(IoEvent::UdpReceiveError(&e));
-                    debug!("Receive net data error. {}", e);
-                }
-            }
+            self.metrics.handled(started.elapsed());
+        });
+        if let Err(e) = result {
+            self.metrics.observe(IoEvent::UdpReceiveError(&e));
+            debug!("Receive net data error. {}", e);
         }
     }
 

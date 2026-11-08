@@ -1,9 +1,91 @@
 // SPDX-License-Identifier: MIT
-//! Host network setup and Linux socket sampling.
+//! Host network setup and Linux socket configuration/sampling.
+use std::{
+    io,
+    net::{SocketAddr, UdpSocket},
+    time::{Duration, Instant},
+};
+
 #[cfg(target_os = "linux")]
 use anyhow::Context;
+use vault_core::Buffer;
 #[cfg(any(target_os = "linux", test))]
 use vault_core::metrics::forwarding::SocketSample;
+
+#[cfg(target_os = "linux")]
+const UDP_BUFFER_BYTES: usize = 2 * 1024 * 1024;
+const UDP_BATCH_PACKETS: usize = 32;
+const UDP_BATCH_TIME: Duration = Duration::from_millis(1);
+
+#[cfg(target_os = "linux")]
+pub(crate) fn configure_udp_buffers(socket: &UdpSocket) -> anyhow::Result<()> {
+    let socket = socket2::SockRef::from(socket);
+    // Leave buffers already at or above the target unchanged. Linux reports
+    // twice the requested size; smaller buffers are subject to kernel caps.
+    if socket
+        .recv_buffer_size()
+        .context("read UDP receive buffer")?
+        < UDP_BUFFER_BYTES * 2
+    {
+        socket
+            .set_recv_buffer_size(UDP_BUFFER_BYTES)
+            .context("set UDP receive buffer")?;
+    }
+    if socket.send_buffer_size().context("read UDP send buffer")? < UDP_BUFFER_BYTES * 2 {
+        socket
+            .set_send_buffer_size(UDP_BUFFER_BYTES)
+            .context("set UDP send buffer")?;
+    }
+    let recv_bytes = socket
+        .recv_buffer_size()
+        .context("read UDP receive buffer")?;
+    let send_bytes = socket.send_buffer_size().context("read UDP send buffer")?;
+    // Linux doubles the requested size for bookkeeping, after applying the
+    // rmem_max/wmem_max caps. Report getsockopt values, as shown by ss -m.
+    if recv_bytes < UDP_BUFFER_BYTES * 2 || send_bytes < UDP_BUFFER_BYTES * 2 {
+        tracing::warn!(
+            requested_bytes = UDP_BUFFER_BYTES,
+            recv_bytes,
+            send_bytes,
+            "UDP socket buffers limited by kernel; check net.core.rmem_max and net.core.wmem_max"
+        );
+    } else {
+        tracing::info!(
+            requested_bytes = UDP_BUFFER_BYTES,
+            recv_bytes,
+            send_bytes,
+            "UDP socket buffers configured"
+        );
+    }
+    Ok(())
+}
+
+/// Drain a nonblocking socket, yielding to TUN/maintenance after a bounded burst.
+/// The callback gets the receive start time for per-packet handling metrics.
+pub(crate) fn recv_batch(
+    socket: &UdpSocket,
+    buffer: &mut Buffer,
+    mut handle: impl FnMut(&mut Buffer, SocketAddr, Instant),
+) -> io::Result<()> {
+    let batch_started = Instant::now();
+    for _ in 0..UDP_BATCH_PACKETS {
+        let started = Instant::now();
+        buffer.clear();
+        match socket.recv_from(buffer.buffer()) {
+            Ok((size, addr)) => {
+                buffer.set_length(size);
+                handle(buffer, addr, started);
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+            Err(error) => return Err(error),
+        }
+        // A packet already in progress (e.g. a handshake) cannot be preempted.
+        if batch_started.elapsed() >= UDP_BATCH_TIME {
+            break;
+        }
+    }
+    Ok(())
+}
 
 // Keep /proc access in the server; shared metrics only consume the sample.
 #[cfg(target_os = "linux")]
@@ -365,6 +447,87 @@ mod tests {
     use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
     #[test]
+    fn receive_burst() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver.set_nonblocking(true).unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = receiver.local_addr().unwrap();
+        for value in 0..65_u8 {
+            sender.send_to(&[value], address).unwrap();
+        }
+
+        let mut buffer = Buffer::new(128);
+        let capacity = buffer.buffer().len();
+        let mut received = 0_u8;
+        while received < 65 {
+            let before = received;
+            recv_batch(&receiver, &mut buffer, |buffer, source, _| {
+                assert_eq!(source, sender.local_addr().unwrap());
+                assert_eq!(buffer.buffer().len(), capacity);
+                assert_eq!(buffer.as_ref(), &[received]);
+                // Packet parsing advances the cursor; the next receive must
+                // restore it, including across batch boundaries.
+                buffer.take_prefix();
+                received += 1;
+            })
+            .unwrap();
+            assert!(received > before);
+            assert!(usize::from(received - before) <= UDP_BATCH_PACKETS);
+        }
+        recv_batch(&receiver, &mut buffer, |_, _, _| {
+            panic!("empty socket must not invoke the handler")
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn receive_empty_packet() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver.set_nonblocking(true).unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let packets: [&[u8]; 3] = [&[0xaa; 64], &[], &[0xbb; 128]];
+        for packet in packets {
+            sender
+                .send_to(packet, receiver.local_addr().unwrap())
+                .unwrap();
+        }
+        let mut buffer = Buffer::new(128);
+        let mut received = 0;
+        while received < packets.len() {
+            let before = received;
+            recv_batch(&receiver, &mut buffer, |buffer, _, _| {
+                assert_eq!(buffer.as_ref(), packets[received]);
+                received += 1;
+            })
+            .unwrap();
+            assert!(received > before);
+        }
+    }
+
+    #[test]
+    fn receive_yields() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver.set_nonblocking(true).unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        for _ in 0..2 {
+            sender
+                .send_to(&[1], receiver.local_addr().unwrap())
+                .unwrap();
+        }
+        let mut buffer = Buffer::new(128);
+        let mut received = 0;
+        recv_batch(&receiver, &mut buffer, |_, _, _| {
+            received += 1;
+            std::thread::sleep(UDP_BATCH_TIME + Duration::from_millis(1));
+        })
+        .unwrap();
+        assert_eq!(received, 1);
+        // Returning at the time limit leaves the next packet queued for a
+        // later level-triggered readiness event.
+        assert_eq!(receiver.recv_from(buffer.buffer()).unwrap().0, 1);
+    }
+
+    #[test]
     fn socket_rows() {
         let rows = "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode ref pointer drops\n\
                     1: 00000000:4C47 00000000:0000 07 00000010:00000020 00:00000000 00000000 1000 0 123 2 0000000000000000 7\n\
@@ -400,6 +563,28 @@ mod tests {
         let sample = udp_socket_sample(inode).expect("bound UDP socket appears in proc");
         assert_eq!(sample.drops, 0);
         assert_eq!(sample.rx_queue, 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn socket_buffers() {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let sockref = socket2::SockRef::from(&socket);
+        sockref.set_recv_buffer_size(4096).unwrap();
+        sockref.set_send_buffer_size(4096).unwrap();
+        configure_udp_buffers(&socket).unwrap();
+
+        for (actual, limit) in [
+            (sockref.recv_buffer_size().unwrap(), "rmem_max"),
+            (sockref.send_buffer_size().unwrap(), "wmem_max"),
+        ] {
+            let maximum: usize = std::fs::read_to_string(format!("/proc/sys/net/core/{limit}"))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            assert_eq!(actual, UDP_BUFFER_BYTES.min(maximum) * 2);
+        }
     }
 
     #[derive(Default)]

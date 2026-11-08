@@ -56,6 +56,46 @@ pub const DATA_BATCH_CAPACITY: usize = 32;
 /// Bounded uplink queue; packets are dropped when full (UDP semantics).
 pub const UPLINK_QUEUE_CAPACITY: usize = 1024;
 pub const DOWNLINK_QUEUE_CAPACITY: usize = 256;
+const UDP_RECEIVE_BUFFER_BYTES: usize = 2 * 1024 * 1024;
+
+fn configure_udp_receive_buffer(socket: &UdpSocket) {
+    let socket = socket2::SockRef::from(socket);
+    // Linux/Android report twice the requested size; Apple reports it directly.
+    let target_bytes = UDP_RECEIVE_BUFFER_BYTES
+        * if cfg!(any(target_os = "linux", target_os = "android")) {
+            2
+        } else {
+            1
+        };
+    let set_error = if socket
+        .recv_buffer_size()
+        .is_ok_and(|bytes| bytes >= target_bytes)
+    {
+        None
+    } else {
+        socket.set_recv_buffer_size(UDP_RECEIVE_BUFFER_BYTES).err()
+    };
+    // Buffer tuning must not prevent a connection on a constrained device.
+    // Read back even after a failed set so the log shows the retained capacity.
+    match socket.recv_buffer_size() {
+        Ok(recv_bytes) if set_error.is_none() && recv_bytes >= target_bytes => info!(
+            requested_bytes = UDP_RECEIVE_BUFFER_BYTES,
+            recv_bytes, "VPN UDP receive buffer configured"
+        ),
+        Ok(recv_bytes) => warn!(
+            requested_bytes = UDP_RECEIVE_BUFFER_BYTES,
+            recv_bytes,
+            error = ?set_error,
+            "VPN UDP receive buffer limited; continuing with effective capacity"
+        ),
+        Err(error) => warn!(
+            requested_bytes = UDP_RECEIVE_BUFFER_BYTES,
+            set_error = ?set_error,
+            %error,
+            "Cannot read VPN UDP receive buffer; continuing connection"
+        ),
+    }
+}
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -827,6 +867,7 @@ impl ClientInner {
         let socket = UdpSocket::bind(bind_addr)
             .await
             .map_err(|e| ClientError::BindFailed(e.to_string()))?;
+        configure_udp_receive_buffer(&socket);
 
         #[cfg(unix)]
         {

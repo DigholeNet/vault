@@ -35,6 +35,54 @@ fn idle_session() -> ClientSession {
 }
 
 #[tokio::test]
+async fn receive_buffer() {
+    for address in ["127.0.0.1:0", "[::1]:0"] {
+        let socket = UdpSocket::bind(address).await.unwrap();
+        let probe = UdpSocket::bind(address).await.unwrap();
+        let options = socket2::SockRef::from(&socket);
+        let probe_options = socket2::SockRef::from(&probe);
+        options.set_recv_buffer_size(4096).unwrap();
+        probe_options.set_recv_buffer_size(4096).unwrap();
+        let send_before = options.send_buffer_size().unwrap();
+
+        // Compare against what this kernel accepts, including caps and Linux's
+        // doubled readback. A rejected request must leave the socket usable.
+        let _ = probe_options.set_recv_buffer_size(UDP_RECEIVE_BUFFER_BYTES);
+        let expected = probe_options.recv_buffer_size().unwrap();
+        configure_udp_receive_buffer(&socket);
+        assert_eq!(options.recv_buffer_size().unwrap(), expected);
+        assert_eq!(options.send_buffer_size().unwrap(), send_before);
+
+        probe
+            .send_to(b"buffer", socket.local_addr().unwrap())
+            .await
+            .unwrap();
+        let mut packet = [0; 6];
+        let (length, source) =
+            tokio::time::timeout(Duration::from_secs(1), socket.recv_from(&mut packet))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(&packet[..length], b"buffer");
+        assert_eq!(source, probe.local_addr().unwrap());
+    }
+}
+
+#[tokio::test]
+async fn receive_buffer_preserves_larger() {
+    for address in ["127.0.0.1:0", "[::1]:0"] {
+        let socket = UdpSocket::bind(address).await.unwrap();
+        let options = socket2::SockRef::from(&socket);
+        // Some kernels cap or reject this larger request; in either case the
+        // configuration must preserve or grow the actual existing buffer.
+        let _ = options.set_recv_buffer_size(UDP_RECEIVE_BUFFER_BYTES * 2);
+        let before = options.recv_buffer_size().unwrap();
+        configure_udp_receive_buffer(&socket);
+        assert!(options.recv_buffer_size().unwrap() >= before);
+    }
+}
+
+#[tokio::test]
 async fn network_change_shutdown() {
     let (stop_tx, mut stop_rx) = mpsc::channel(1);
     let (change_tx, mut change_rx) = mpsc::channel(1);
