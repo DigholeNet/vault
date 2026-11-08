@@ -181,6 +181,57 @@ fn reconnect_handshake() {
     assert!(!session.is_active());
 }
 
+#[cfg(feature = "test")]
+#[tokio::test]
+async fn receiver_exit() {
+    let (server, server_task) = crate::test_utils::run_mock_server_sessions("password", 2).await;
+    let session = ClientSession::start(
+        ClientConfig {
+            password: "password".into(),
+            hosts: vec!["127.0.0.1".into()],
+            port: server.port(),
+            id: PeerId([1; 16]),
+            device_name: String::new(),
+            platform: String::new(),
+            socket_protect: None,
+        },
+        Arc::new(NoCallbacks),
+    )
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while session.traffic_stats().packets_received == 0 {
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("initial session did not receive data");
+    let generation = session.connection_status().generation;
+    // A receive error ends this task and drops its sole channel sender.
+    // Abort the actual receiver to reproduce that state without OS-specific faults.
+    session
+        .lock_state()
+        .unwrap()
+        .receive_handle
+        .as_ref()
+        .unwrap()
+        .abort();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while session.traffic_stats().packets_received < 2 {
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("receiver exit did not reconnect and resume data");
+    let status = session.connection_status();
+    assert!(status.connected);
+    assert!(status.generation > generation);
+    session.shutdown().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), server_task)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
 #[test]
 fn reconnect_backoff() {
     let (attempt_tx, attempt_rx) = std::sync::mpsc::channel();

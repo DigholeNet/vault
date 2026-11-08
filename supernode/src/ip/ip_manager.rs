@@ -7,7 +7,7 @@ use std::{
 use sqlite::{Connection, State, Statement};
 use tracing::{debug, error, info};
 
-use vault_core::{PeerId, Time, TimeSource};
+use vault_core::{PeerId, Peers, Time, TimeSource};
 
 use crate::{
     error::StorageError,
@@ -28,8 +28,12 @@ pub trait Storage {
     /// Look up the IP address already assigned to a peer id.
     fn find_by_id(&self, id: &PeerId) -> anyhow::Result<IpAddress>;
 
-    /// Remove expired IP leases.
-    fn clean_expired_items<F: FnMut(&IpAddress)>(&self, f: F) -> anyhow::Result<()>;
+    /// Renew active leases and remove the remaining expired leases.
+    fn clean_expired_items<K: FnMut(&IpAddress) -> bool, F: FnMut(&IpAddress)>(
+        &self,
+        keep: K,
+        f: F,
+    ) -> anyhow::Result<()>;
 
     /// Insert an IP lease record.
     fn insert(
@@ -110,7 +114,11 @@ impl<T: TimeSource> Storage for SqliteStorage<T> {
         Err(anyhow::anyhow!(StorageError::NotFound(id_str)))
     }
 
-    fn clean_expired_items<F: FnMut(&IpAddress)>(&self, mut f: F) -> anyhow::Result<()> {
+    fn clean_expired_items<K: FnMut(&IpAddress) -> bool, F: FnMut(&IpAddress)>(
+        &self,
+        mut keep: K,
+        mut f: F,
+    ) -> anyhow::Result<()> {
         let time = T::now() - IP_LEASE_TIMEOUT;
 
         let query = "SELECT id,ipv4,ipv6,gmt_create,gmt_modify FROM peer WHERE gmt_modify < ?";
@@ -124,6 +132,10 @@ impl<T: TimeSource> Storage for SqliteStorage<T> {
         drop(select_stmt);
 
         for item in expired_items {
+            if keep(&item) {
+                self.update(&item.id)?;
+                continue;
+            }
             let id_str = hex::encode(item.id.0);
             let delete_query = "DELETE FROM peer WHERE id = ?";
             let mut delete_stmt = self.connection.prepare(delete_query)?;
@@ -212,25 +224,36 @@ impl<T: TimeSource> IpManager<T> {
         })
     }
 
-    pub fn clean_expired_items(&mut self) -> anyhow::Result<()> {
+    /// Call after removing idle peers so only live sessions retain their leases.
+    pub fn clean_expired_items(&mut self, peers: &Peers<T>) -> anyhow::Result<()> {
         let ipv4_pool = &mut self.ipv4_allocator;
         let ipv6_pool = &mut self.ipv6_allocator;
 
-        self.storage.clean_expired_items(|ip| {
-            if let Some(ipv4) = &ip.ipv4
-                && let Some(pool) = ipv4_pool
-                && let Err(e) = pool.release(*ipv4)
-            {
-                error!("Release ipv4 error: {:?}", e);
-            }
+        self.storage.clean_expired_items(
+            |lease| {
+                lease
+                    .ipv4
+                    .map(IpAddr::V4)
+                    .or_else(|| lease.ipv6.map(IpAddr::V6))
+                    .and_then(|ip| peers.find_peer_by_ip(&ip))
+                    .is_some_and(|peer| peer.id() == &lease.id)
+            },
+            |ip| {
+                if let Some(ipv4) = &ip.ipv4
+                    && let Some(pool) = ipv4_pool
+                    && let Err(e) = pool.release(*ipv4)
+                {
+                    error!("Release ipv4 error: {:?}", e);
+                }
 
-            if let Some(ipv6) = &ip.ipv6
-                && let Some(pool) = ipv6_pool
-                && let Err(e) = pool.release(*ipv6)
-            {
-                error!("Release ipv6 error: {:?}", e);
-            }
-        })?;
+                if let Some(ipv6) = &ip.ipv6
+                    && let Some(pool) = ipv6_pool
+                    && let Err(e) = pool.release(*ipv6)
+                {
+                    error!("Release ipv6 error: {:?}", e);
+                }
+            },
+        )?;
 
         Ok(())
     }
@@ -447,7 +470,7 @@ mod tests {
         advance(200);
         manager.update(&peer_id(1)).unwrap();
         advance(200);
-        manager.clean_expired_items().unwrap();
+        manager.clean_expired_items(&Peers::default()).unwrap();
 
         // Lease still held: same id gets it back, another id gets a fresh one.
         assert_eq!(manager.assign(&peer_id(1)).unwrap(), lease);
@@ -464,17 +487,82 @@ mod tests {
 
         let lease = manager.assign(&peer_id(1)).unwrap();
         advance(IP_LEASE_TIMEOUT);
-        manager.clean_expired_items().unwrap();
+        manager.clean_expired_items(&Peers::default()).unwrap();
         // Not yet past the boundary.
         let pending = manager.reserve(&peer_id(1)).unwrap();
         assert_eq!((pending.ipv4, pending.ipv6), lease);
         manager.cancel(pending).unwrap();
 
         advance(1);
-        manager.clean_expired_items().unwrap();
+        manager.clean_expired_items(&Peers::default()).unwrap();
         // Lease row deleted and the address returned to the pool.
         let second = manager.assign(&peer_id(2)).unwrap();
         assert_eq!(second, lease);
+    }
+
+    #[test]
+    fn live_lease() {
+        use std::sync::Arc;
+        use vault_core::{AlgorithmType, CryptoCore, Role, create_ecdh_keypair};
+
+        let _guard = lock_clock(1_000);
+        let mut manager = dual_stack_manager();
+        let lease = manager.assign(&peer_id(1)).unwrap();
+        let (private, _) = create_ecdh_keypair().unwrap();
+        let (_, public) = create_ecdh_keypair().unwrap();
+        let crypto = CryptoCore::new(
+            private,
+            &AlgorithmType::Aes128Gcm,
+            public.bytes(),
+            Role::Responder,
+            b"test",
+        )
+        .unwrap();
+        let socket = socket2::Socket::new(
+            socket2::Domain::IPV4,
+            socket2::Type::DGRAM,
+            Some(socket2::Protocol::UDP),
+        )
+        .unwrap();
+        let mut peers = Peers::<MockTime>::default();
+        let endpoint = "192.0.2.1:10001".parse().unwrap();
+        peers.create_peer(
+            peer_id(1),
+            crypto,
+            endpoint,
+            Arc::new(socket.into()),
+            lease.0,
+            lease.1,
+            false,
+            String::new(),
+            String::new(),
+        );
+
+        // DATA keeps the peer active without refreshing the lease directly.
+        for _ in 0..14 {
+            advance(50);
+            peers
+                .find_peer_by_socket(&endpoint)
+                .unwrap()
+                .update_active_time();
+            assert!(peers.remove_inactive_peers(60).is_empty());
+            manager.clean_expired_items(&peers).unwrap();
+        }
+        assert_eq!(
+            manager.storage.find_by_id(&peer_id(1)).unwrap().gmt_modify,
+            1_700
+        );
+        let other = manager.assign(&peer_id(2)).unwrap();
+        assert_ne!(other.0, lease.0);
+        assert_ne!(other.1, lease.1);
+
+        // Once idle and expired, the same addresses can be reused.
+        advance(IP_LEASE_TIMEOUT + 1);
+        assert_eq!(peers.remove_inactive_peers(60).len(), 1);
+        // Keep the other lease live to make the recycled address unambiguous.
+        manager.update(&peer_id(2)).unwrap();
+        manager.clean_expired_items(&peers).unwrap();
+        assert_eq!(manager.assign(&peer_id(3)).unwrap(), lease);
     }
 
     #[test]
@@ -530,7 +618,7 @@ mod tests {
         let pending = manager.reserve(&peer_id(1)).unwrap();
         let addresses = (pending.ipv4, pending.ipv6);
         advance(IP_LEASE_TIMEOUT + 1);
-        manager.clean_expired_items().unwrap();
+        manager.clean_expired_items(&Peers::default()).unwrap();
         let other = manager.assign(&peer_id(2)).unwrap();
         assert_ne!(other.0, addresses.0);
         manager.cancel(pending).unwrap();
@@ -544,7 +632,7 @@ mod tests {
         let addresses = manager.assign(&peer_id(1)).unwrap();
         let mut pending = manager.reserve(&peer_id(1)).unwrap();
         advance(IP_LEASE_TIMEOUT + 1);
-        manager.clean_expired_items().unwrap();
+        manager.clean_expired_items(&Peers::default()).unwrap();
         assert_eq!(manager.assign(&peer_id(2)).unwrap(), addresses);
         assert!(manager.commit(&mut pending).is_err());
         manager.cancel(pending).unwrap();

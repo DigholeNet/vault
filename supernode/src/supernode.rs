@@ -271,9 +271,6 @@ impl<TS: TimeSource> SuperNode<TS> {
                 }
                 self.next_check_time = TS::now() + 1;
                 let started = Instant::now();
-                if let Err(e) = self.ip_manager.clean_expired_items() {
-                    error!("{:?}", e)
-                }
                 self.replay.sweep(TS::now());
                 // Unconfirmed attempts may be cancelled Happy-Eyeballs losers
                 // or lost responses. Reclaim them without banning the NAT IP.
@@ -296,6 +293,9 @@ impl<TS: TimeSource> SuperNode<TS> {
                         peer.get_ipv4(),
                         peer.get_ipv6()
                     );
+                }
+                if let Err(e) = self.ip_manager.clean_expired_items(&self.peers) {
+                    error!("{:?}", e)
                 }
                 let inode = self.socket_inode;
                 self.metrics

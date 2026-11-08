@@ -42,7 +42,7 @@ class Edge(
     private val pendingCompletion: (Throwable?) -> Unit,
     private val protectSocket: ((Int) -> Boolean)? = null
 ) {
-    private val rustEdge: RustEdge
+    private var rustEdge: RustEdge?
 
     init {
         val callbacks = object : EdgeCallbacks {
@@ -81,16 +81,30 @@ class Edge(
     }
 
     suspend fun connect() = withContext(Dispatchers.IO) {
-        rustEdge.connect()
+        synchronized(this@Edge) {
+            rustEdge?.connect() ?: throw VpnException.NotConnected("Edge is closed")
+        }
     }
 
     fun close() {
-        rustEdge.shutdown()
+        val current = synchronized(this) {
+            val current = rustEdge ?: return
+            rustEdge = null
+            current
+        }
+        // Shutdown waits for callbacks, so never hold the Edge monitor here.
+        try {
+            current.shutdown()
+        } finally {
+            current.close()
+        }
     }
 
     /** Used on network changes. */
     suspend fun reconnect() = withContext(Dispatchers.IO) {
-        rustEdge.reconnect()
+        synchronized(this@Edge) {
+            rustEdge?.reconnect() ?: throw VpnException.NotConnected("Edge is closed")
+        }
     }
 
     companion object {
@@ -102,9 +116,10 @@ class Edge(
      * Returns true if the packet was accepted, false if sending failed
      * (tunnel not connected or an internal error).
      */
+    @Synchronized
     fun writeData(data: ByteArray): Boolean {
         return try {
-            rustEdge.writeData(data)
+            rustEdge?.writeData(data) ?: return false
             true
         } catch (e: VpnException) {
             // Drops are expected during reconnect; the Rust runtime will retry
@@ -117,9 +132,11 @@ class Edge(
         }
     }
 
-    fun isConnected(): Boolean = rustEdge.isConnected()
+    @Synchronized
+    fun isConnected(): Boolean = rustEdge?.isConnected() ?: false
 
+    @Synchronized
     fun getTrafficStats(): TrafficStats {
-        return rustEdge.getTrafficStats()
+        return rustEdge?.getTrafficStats() ?: TrafficStats(0, 0, 0, 0, 0, 0)
     }
 }

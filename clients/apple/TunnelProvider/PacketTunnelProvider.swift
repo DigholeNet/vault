@@ -477,6 +477,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         )
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.edge != nil else { return }
+            if let path = self.pathMonitor?.currentPath { self.refreshMTU(path) }
             self.notifyNetworkChanged(reason: "wake")
         }
     }
@@ -499,6 +500,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 self.notifyNetworkChanged(reason: "network unavailable")
                 return
             }
+            self.refreshMTU(path)
             // The first callback establishes the baseline; it is not a switch.
             if previous != nil && previous != signature {
                 self.notifyNetworkChanged(reason: "network path changed")
@@ -506,6 +508,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         pathMonitor = monitor
         monitor.start(queue: .main)
+    }
+
+    private func refreshMTU(_ path: Network.NWPath) {
+        guard !stopRequested, startFinished, path.status == .satisfied,
+              let mtu = TunnelNetworkSettings.mtu(cap: mtuCap, sessionID: sessionID, path: path),
+              let update = tunnelSettings.updateMTU(mtu) else { return }
+        diagnostics.cancel()
+        applySettings(update)
     }
 
     /// Forward OS events; Rust debounces notifications and restarts transport.
@@ -536,8 +546,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             prefix: ipv6PrefixLen,
             mtu: TunnelNetworkSettings.mtu(
                 cap: mtuCap,
-                sessionID: sessionID
-            ),
+                sessionID: sessionID,
+                path: pathMonitor?.currentPath
+            ) ?? tunnelSettings.latestMTU ?? mtuCap,
             dns: launchConfiguration?.effectiveDNS(ipv4: !ipv4.isEmpty, ipv6: !ipv6.isEmpty) ?? []
         )
         if let update = tunnelSettings.enqueue(configuration) { applySettings(update) }

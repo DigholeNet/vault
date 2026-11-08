@@ -1122,7 +1122,11 @@ impl ClientInner {
 
         loop {
             tokio::select! {
-                Some(first) = packet_rx.recv() => {
+                packet = packet_rx.recv() => {
+                    let Some(first) = packet else {
+                        warn!("Receiver ended for {remote_addr}, exiting data loop");
+                        break;
+                    };
                     receive_metrics.queue.observe(packet_rx.len().saturating_add(1));
                     // Opportunistically drain queued packets (non-blocking) so a
                     // burst is processed and delivered with a single callback.

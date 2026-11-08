@@ -68,14 +68,21 @@ android {
 
             // The keystore travels as base64 text (same variable as CI), so
             // no real keystore file ever needs to live in the repository
-            // tree; it is decoded into the build directory when configured.
+            // tree; it is decoded into the build directory before signing.
             // Debug APKs use the Android debug signing key.
             val keystoreFile =
                 layout.buildDirectory.file("signing/vault-release.keystore").get().asFile
-            if (!keystoreBase64.isNullOrEmpty()) {
-                keystoreFile.parentFile?.mkdirs()
-                // Mime decoder: tolerates line-wrapped base64 output.
-                keystoreFile.writeBytes(Base64.getMimeDecoder().decode(keystoreBase64))
+            tasks.matching { it.name == "validateSigningRelease" }.configureEach {
+                // The key may change without the alias changing; always refresh it.
+                outputs.upToDateWhen { false }
+                doFirst {
+                    if (keystoreBase64.isNullOrEmpty()) {
+                        throw GradleException("Release signing keystore not configured")
+                    }
+                    keystoreFile.parentFile?.mkdirs()
+                    // Mime decoder: tolerates line-wrapped base64 output.
+                    keystoreFile.writeBytes(Base64.getMimeDecoder().decode(keystoreBase64))
+                }
             }
             storeFile = keystoreFile
             storePassword = storePasswordValue.orEmpty()

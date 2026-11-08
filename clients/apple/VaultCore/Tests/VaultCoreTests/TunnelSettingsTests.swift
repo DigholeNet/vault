@@ -2,8 +2,8 @@
 import Testing
 @testable import VaultCore
 
-private func configuration(_ ip: String) -> TunnelConfiguration {
-    TunnelConfiguration(ipv4: ip, mask: "255.255.255.0", ipv6: "fd00::2", prefix: 64, mtu: 1427)
+private func configuration(_ ip: String, mtu: Int = 1427, dns: [String] = []) -> TunnelConfiguration {
+    TunnelConfiguration(ipv4: ip, mask: "255.255.255.0", ipv6: "fd00::2", prefix: 64, mtu: mtu, dns: dns)
 }
 
 @Test func settingsCommit() throws {
@@ -169,4 +169,53 @@ private func configuration(_ ip: String) -> TunnelConfiguration {
     let retried = state.complete(retry, succeeded: true)
     #expect(retried)
     #expect(state.applied?.dns == second.dns)
+}
+
+@Test func mtuRevision() throws {
+    var state = TunnelSettingsState()
+    let initialRequest = state.enqueue(configuration("10.0.0.2"))
+    let initial = try #require(initialRequest)
+    #expect(state.complete(initial, succeeded: true) == true)
+    let updateRequest = state.updateMTU(1280)
+    let update = try #require(updateRequest)
+    #expect(state.applied?.mtu == 1427)
+    #expect(update.configuration == configuration("10.0.0.2", mtu: 1280))
+    #expect(state.complete(update, succeeded: true) == true)
+    #expect(state.applied?.mtu == 1280)
+    #expect(state.updateMTU(1280) == nil)
+}
+
+@Test func mtuQueued() throws {
+    for hasPending in [false, true] {
+        var state = TunnelSettingsState()
+        let initialRequest = state.enqueue(configuration("10.0.0.2"))
+        let initial = try #require(initialRequest)
+        #expect(state.complete(initial, succeeded: true) == true)
+        let applyingRequest = state.enqueue(configuration("10.0.0.3", dns: ["1.1.1.1"]))
+        let applying = try #require(applyingRequest)
+        let latestIP = hasPending ? "10.0.0.4" : "10.0.0.3"
+        if hasPending { #expect(state.enqueue(configuration(latestIP, dns: ["1.1.1.1"])) == nil) }
+        #expect(state.updateMTU(1280) == nil)
+        #expect(state.latestMTU == 1280)
+        #expect(state.complete(applying, succeeded: true) == true)
+        let nextRequest = state.next()
+        let next = try #require(nextRequest)
+        #expect(next.configuration == configuration(latestIP, mtu: 1280, dns: ["1.1.1.1"]))
+    }
+}
+
+@Test func mtuReset() throws {
+    var state = TunnelSettingsState()
+    #expect(state.updateMTU(1280) == nil)
+    let initialRequest = state.enqueue(configuration("10.0.0.2"))
+    let initial = try #require(initialRequest)
+    #expect(state.complete(initial, succeeded: true) == true)
+    let applyingRequest = state.enqueue(configuration("10.0.0.3"))
+    let applying = try #require(applyingRequest)
+    state.reset()
+    #expect(state.latestMTU == nil)
+    #expect(state.updateMTU(1280) == nil)
+    #expect(state.complete(applying, succeeded: true) == false)
+    #expect(state.next() == nil)
+    #expect(state.applied == nil)
 }
