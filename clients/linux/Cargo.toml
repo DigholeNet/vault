@@ -18,7 +18,7 @@ serde.workspace = true
 serde_json = {version = "1"}
 toml = {workspace = true}
 tracing = {workspace = true}
-vault-core = {path = "../../core", features = ["client"]}
+vault-core = {path = "../../core"}
 
 [package.metadata.deb]
 assets = [

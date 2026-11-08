@@ -1868,6 +1868,7 @@ dependencies = [
  "clap",
  "daemonize",
  "dashmap",
+ "hex",
  "libc",
  "once_cell",
  "pnet",

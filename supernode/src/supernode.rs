@@ -2,11 +2,13 @@
 use std::collections::HashMap;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
-    os::fd::AsRawFd,
+    os::{fd::AsRawFd, unix::fs::MetadataExt},
     sync::Arc,
+    time::Instant,
 };
 use tracing::{debug, error, info, warn};
 use vault_core::device::{Address, DeviceType, Ipv4, Ipv6, parse};
+use vault_core::metrics::forwarding::{ForwardingMetrics, IoEvent, PeerEvent};
 use vault_core::{
     Algorithm, Buffer, CryptoCore, Handshake, PROTOCOL_VERSION, Peer, PeerId, Peers, Role,
     SysSignal, Time, TimeSource, WaitImpl, WaitResult, create_ecdh_keypair,
@@ -21,7 +23,7 @@ use crate::handshake::{
 };
 use crate::ip::{IpManager, Ipv4Cidr, Ipv4Pool, Ipv6Cidr, Ipv6Pool};
 use crate::limiter::InitLimiter;
-use crate::network::{NetworkSetup, SystemBackend};
+use crate::network::{NetworkSetup, SystemBackend, udp_socket_sample};
 
 /// Peers idle longer than this are dropped from the routing tables; the IP
 /// lease (300s) survives so a reconnecting peer reuses its old address.
@@ -67,6 +69,8 @@ pub struct SuperNode<TS: TimeSource> {
     next_check_time: Time,
     supported_algorithms: Vec<Algorithm>,
     id: PeerId,
+    metrics: ForwardingMetrics,
+    socket_inode: Option<u64>,
 }
 
 fn init_ipv4_pool(ipv4: &Ipv4Cidr) -> anyhow::Result<Ipv4Pool> {
@@ -212,6 +216,11 @@ impl<TS: TimeSource> SuperNode<TS> {
             &interfaces,
         )?;
 
+        let socket_inode = std::fs::metadata(format!("/proc/self/fd/{}", socket.as_raw_fd()))
+            .ok()
+            .map(|metadata| metadata.ino());
+        let metrics = ForwardingMetrics::new(socket_inode.and_then(udp_socket_sample));
+
         Ok(Self {
             config,
             signal,
@@ -226,6 +235,8 @@ impl<TS: TimeSource> SuperNode<TS> {
             next_check_time: TS::now(),
             supported_algorithms: supported_algorithms(),
             id: PeerId::default(),
+            metrics,
+            socket_inode,
         })
     }
 
@@ -238,11 +249,20 @@ impl<TS: TimeSource> SuperNode<TS> {
             // HOT PATH
             match evt {
                 WaitResult::Error(err) => {
+                    self.metrics.observe(IoEvent::PollError);
                     debug!("Poll wait failed: {}, retrying...", err);
                 }
                 WaitResult::Timeout => {}
-                WaitResult::Socket => self.handle_net_data(&mut buffer),
-                WaitResult::Device => self.handle_device_data(&mut buffer),
+                WaitResult::Socket => {
+                    let started = Instant::now();
+                    self.handle_net_data(&mut buffer);
+                    self.metrics.handled(started.elapsed());
+                }
+                WaitResult::Device => {
+                    let started = Instant::now();
+                    self.handle_device_data(&mut buffer);
+                    self.metrics.handled(started.elapsed());
+                }
             }
 
             if self.next_check_time < TS::now() {
@@ -250,6 +270,7 @@ impl<TS: TimeSource> SuperNode<TS> {
                     break;
                 }
                 self.next_check_time = TS::now() + 1;
+                let started = Instant::now();
                 if let Err(e) = self.ip_manager.clean_expired_items() {
                     error!("{:?}", e)
                 }
@@ -265,6 +286,7 @@ impl<TS: TimeSource> SuperNode<TS> {
                 self.init_limiter.sweep();
                 // Peer routing entries expire fast; IP leases last 300s.
                 for peer in self.peers.remove_inactive_peers(PEER_IDLE_TIMEOUT_SECS) {
+                    self.metrics.remove(peer.id());
                     info!(
                         target: "client",
                         "{}, {},{}, Peer idle timeout, removed. {:?}/{:?}",
@@ -275,8 +297,16 @@ impl<TS: TimeSource> SuperNode<TS> {
                         peer.get_ipv6()
                     );
                 }
+                let inode = self.socket_inode;
+                self.metrics
+                    .report_if_due(|| inode.and_then(udp_socket_sample));
+                // Include sampling/reporting; if the report reset the window,
+                // this completed maintenance cycle belongs to the next one.
+                self.metrics.maintained(started.elapsed());
             }
         }
+        self.metrics
+            .finish(self.socket_inode.and_then(udp_socket_sample));
         info!("Shutting down...");
         Ok(())
     }
@@ -285,26 +315,29 @@ impl<TS: TimeSource> SuperNode<TS> {
         buffer.clear(); // recv_from writes at the cursor; reset the drift
         match self.socket.recv_from(buffer.buffer()) {
             Ok((size, addr)) => {
+                self.metrics.observe(IoEvent::UdpReceived(size));
                 // A zero-length datagram carries no message; without this
                 // guard the parser would read stale bytes from the backing
                 // array.
                 if size == 0 {
+                    self.metrics.observe(IoEvent::InvalidNetPacket);
                     return;
                 }
                 buffer.set_length(size);
                 let addr = mapped_addr(addr);
                 if let Err(e) = self.do_handle_net_data(buffer, addr) {
-                    error!("Handle net data error., {} : {}", addr, e);
+                    self.metrics.observe(IoEvent::NetError(&e));
+                    debug!("Handle net data error., {} : {}", addr, e);
                 }
             }
             Err(e) => {
-                let e = anyhow::Error::from(e);
                 // Non-blocking socket: a spurious readiness event is not an
                 // error.
-                if is_would_block(&e) {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
                     debug!("Spurious socket readiness, no data available");
                 } else {
-                    error!("Receive net data error. {}", e);
+                    self.metrics.observe(IoEvent::UdpReceiveError(&e));
+                    debug!("Receive net data error. {}", e);
                 }
             }
         }
@@ -450,19 +483,28 @@ impl<TS: TimeSource> SuperNode<TS> {
                 }
             }
             protocol::HEARTBEAT => {
-                let Some(peer) = self.receive_authenticated(&addr, buffer, r#type)? else {
+                let Some(peer) = self
+                    .receive_authenticated(&addr, buffer, r#type)
+                    .inspect_err(|_| {
+                        self.metrics.observe(IoEvent::AuthenticationFailure);
+                    })?
+                else {
+                    self.metrics.observe(IoEvent::UnknownPeer);
                     protocol::build_rejected(buffer);
                     self.socket.send_to(buffer.as_ref(), addr)?;
                     return Ok(());
                 };
                 let ping = protocol::decode_ping(buffer)?;
                 peer.update_active_time();
+                if let Some(metrics) = self.metrics.peer(peer.id()) {
+                    metrics.heartbeat();
+                }
                 protocol::build_heartbeat_pong(buffer, peer.crypto(), &self.id, TS::now())?;
                 self.socket.send_to(buffer.as_ref(), addr)?;
                 if let Err(e) = self.ip_manager.update(peer.id()) {
                     error!("Update ip error: {:?}", e)
                 }
-                info!(
+                debug!(
                     target: "client",
                     "{},{},{}, Received ping: {}, timestamp: {}",
                     hex::encode(peer.id().0),
@@ -473,11 +515,23 @@ impl<TS: TimeSource> SuperNode<TS> {
                 );
             }
             protocol::DATA_INTERFACE => {
-                let peer = self.receive_authenticated(&addr, buffer, r#type)?;
+                let peer = self
+                    .receive_authenticated(&addr, buffer, r#type)
+                    .inspect_err(|_| {
+                        self.metrics.observe(IoEvent::AuthenticationFailure);
+                    })?;
                 if let Some(peer) = peer {
                     peer.update_active_time();
 
-                    let p = parse(&DeviceType::Tun, buffer.as_ref())?;
+                    if let Some(metrics) = self.metrics.peer(peer.id()) {
+                        metrics.decrypted(buffer.len());
+                    }
+
+                    let p = parse(&DeviceType::Tun, buffer.as_ref()).inspect_err(|_| {
+                        if let Some(metrics) = self.metrics.peer(peer.id()) {
+                            metrics.observe(PeerEvent::InvalidPacket);
+                        }
+                    })?;
                     let (src, dst) = p.address;
 
                     // The tunnel source address must be the assigned one.
@@ -487,7 +541,10 @@ impl<TS: TimeSource> SuperNode<TS> {
                             IpAddr::V6(ip) => peer.get_ipv6().as_ref() == Some(&ip),
                         };
                         if !valid {
-                            warn!(
+                            if let Some(metrics) = self.metrics.peer(peer.id()) {
+                                metrics.observe(PeerEvent::SpoofedSource);
+                            }
+                            debug!(
                                 target: "client",
                                 "{},{},{},{}, Dropping packet with spoofed source {} (assigned {:?}/{:?})",
                                 hex::encode(peer.id().0),
@@ -502,18 +559,13 @@ impl<TS: TimeSource> SuperNode<TS> {
                         }
                     }
 
-                    match self.device.write(buffer.as_ref()) {
-                        Ok(_) => {}
-                        // TUN queue full: drop rather than stall the loop.
-                        Err(e) if is_would_block(&e) => {
-                            warn!(
-                                target: "client",
-                                "{}, TUN write queue full, dropping packet for {}",
-                                hex::encode(peer.id().0),
-                                addr
-                            );
-                        }
-                        Err(e) => return Err(e),
+                    let written = self.device.write(buffer.as_ref());
+                    if let Some(metrics) = self.metrics.peer(peer.id()) {
+                        metrics.tun_write(buffer.len(), &written);
+                    }
+                    // Preserve nonblocking drop behavior; report losses in bounded windows.
+                    if let Err(e) = written {
+                        debug!(peer = %addr, "TUN write failed: {e}");
                     }
 
                     if let (Address::Ip(src), Address::Ip(dst)) = (src, dst) {
@@ -526,6 +578,7 @@ impl<TS: TimeSource> SuperNode<TS> {
                         );
                     }
                 } else {
+                    self.metrics.observe(IoEvent::UnknownPeer);
                     protocol::build_rejected(buffer);
                     self.socket.send_to(buffer.as_ref(), addr)?;
                     debug!("Peer not found: {}, must be reinitialized.", addr);
@@ -545,6 +598,7 @@ impl<TS: TimeSource> SuperNode<TS> {
                                 client_label(peer.device_name()),
                                 addr
                             );
+                            self.metrics.remove(peer.id());
                             self.peers.remove_peer_by_socket(&addr);
                         }
                         Ok(id) => {
@@ -565,7 +619,8 @@ impl<TS: TimeSource> SuperNode<TS> {
                 }
             }
             _ => {
-                error!("Type {} not supported.", r#type);
+                self.metrics.observe(IoEvent::InvalidNetPacket);
+                debug!("Type {} not supported.", r#type);
             }
         }
 
@@ -653,6 +708,11 @@ impl<TS: TimeSource> SuperNode<TS> {
             pending.reservation.ipv4,
             pending.reservation.ipv6
         );
+        // create_peer also replaces a different device id reusing this endpoint.
+        if let Some(previous) = self.peers.find_peer_by_socket(addr) {
+            self.metrics.remove(previous.id());
+        }
+        self.metrics.register(pending.id, *addr);
         self.peers.create_peer(
             pending.id,
             pending.crypto,
@@ -670,18 +730,24 @@ impl<TS: TimeSource> SuperNode<TS> {
     fn handle_device_data(&mut self, buffer: &mut Buffer) {
         match self.device.read(buffer) {
             Ok(_) => {
+                self.metrics.observe(IoEvent::TunRead(buffer.len()));
                 if let Err(e) = self.do_handle_device_data(buffer) {
-                    error!("Handle device data error. {}", e);
+                    debug!("Handle device data error. {}", e);
                 }
             }
             // Non-blocking fd: a spurious readiness event is not an error.
             Err(e) if is_would_block(&e) => {}
-            Err(e) => error!("Receive device data error. {}", e),
+            Err(e) => {
+                self.metrics.observe(IoEvent::TunReadError(&e));
+                debug!("Receive device data error. {}", e);
+            }
         }
     }
 
     fn do_handle_device_data(&mut self, buffer: &mut Buffer) -> anyhow::Result<()> {
-        let p = parse(&DeviceType::Tun, buffer.as_ref())?;
+        let p = parse(&DeviceType::Tun, buffer.as_ref()).inspect_err(|_| {
+            self.metrics.observe(IoEvent::InvalidTunPacket);
+        })?;
         let (src, dst) = p.address;
         debug!(
             "Received device data, src: {}, dst: {} {} bytes",
@@ -691,15 +757,21 @@ impl<TS: TimeSource> SuperNode<TS> {
         );
         if let (Address::Ip(src), Address::Ip(dst)) = (src, dst) {
             if let Some(peer) = self.peers.find_peer_by_ip(&dst) {
-                protocol::build_data_interface(buffer, peer.crypto())?;
-                match peer.send_to(buffer.as_ref()) {
-                    Ok(_) => {}
-                    // Send buffer full: drop rather than stall the loop.
-                    // debug level: at high pps this would flood the log.
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        debug!("UDP send buffer full, dropping packet for {}", dst);
+                let payload_len = buffer.len();
+                if let Some(metrics) = self.metrics.peer(peer.id()) {
+                    metrics.tun_read(payload_len);
+                }
+                protocol::build_data_interface(buffer, peer.crypto()).inspect_err(|_| {
+                    if let Some(metrics) = self.metrics.peer(peer.id()) {
+                        metrics.observe(PeerEvent::BuildFailure);
                     }
-                    Err(e) => warn!("Failed to send to {}: {}", peer.get_address(), e),
+                })?;
+                let sent = peer.send_to(buffer.as_ref());
+                if let Some(metrics) = self.metrics.peer(peer.id()) {
+                    metrics.udp_send(payload_len, buffer.len(), &sent);
+                }
+                if let Err(e) = sent {
+                    debug!("Failed to send to {}: {}", peer.get_address(), e);
                 }
                 debug!(
                     "Writing data to peer: src: {}, dst: {} {} bytes",
@@ -708,7 +780,8 @@ impl<TS: TimeSource> SuperNode<TS> {
                     buffer.len()
                 );
             } else {
-                warn!("Destination {} not found.", dst);
+                self.metrics.observe(IoEvent::UnknownDestination);
+                debug!("Destination {} not found.", dst);
             }
         }
 

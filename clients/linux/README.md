@@ -2,7 +2,7 @@
 
 The Linux client of the [Vault VPN](../../README.md) system.
 Built on the platform-independent client session provided by
-[`vault-core`](../../core) (`client` feature) — the same session
+[`vault-core`](../../core) — the same session
 implementation used by the Vault Android/iOS clients.
 
 ## Features
@@ -173,17 +173,22 @@ lives in `vault-core::client`; this crate is a thin Linux platform adapter:
 
 Logs are written only to files, including when running in the foreground.
 `--log-dir` selects the directory; the default is `/var/log/vault/`.
-Current files have fixed names (`default.log`, `error.log`, and server
-`client.log`). On the first write after a UTC date change, the previous file
+Current files have fixed names (`default.log`, `error.log`, and
+`metrics.log`). On the first write after a UTC date change, the previous file
 is archived as `<name>.log.YYYY-MM-DD`, using its last-write date. Same-day
 restarts append to the current file. Files from the previous dated naming
 scheme are retained; today's dated file is adopted if no current file exists.
-Each stream (`default`, `error`, and server `client` logs)
+Each stream (`default`, `error`, and `metrics` logs)
 keeps at most 30 files, including the current file. Older files are removed when
 that stream first writes a log or rotates; existing history is cleaned up then too.
 This limits file count, not total size or age; a busy day can still produce a large file.
 `RUST_LOG` controls filtering unless `--verbose` or `--quiet` overrides it.
 Unknown TOML fields are rejected, so configuration typos fail startup.
+
+`VPN uplink metrics` and `VPN downlink metrics` use the `metrics` target and
+write to `metrics.log`, including warnings; they are not duplicated in
+`default.log` or `error.log`. See [runtime measurements](../../docs/performance.md#runtime-measurements)
+for field definitions.
 
 
 ## License

@@ -1,7 +1,40 @@
 // SPDX-License-Identifier: MIT
-//! Scoped firewall rules with transactional startup and owned-resource cleanup.
+//! Host network setup and Linux socket sampling.
 #[cfg(target_os = "linux")]
 use anyhow::Context;
+#[cfg(any(target_os = "linux", test))]
+use vault_core::metrics::forwarding::SocketSample;
+
+// Keep /proc access in the server; shared metrics only consume the sample.
+#[cfg(target_os = "linux")]
+pub(crate) fn udp_socket_sample(inode: u64) -> Option<SocketSample> {
+    for path in ["/proc/net/udp", "/proc/net/udp6"] {
+        if let Ok(text) = std::fs::read_to_string(path)
+            && let Some(sample) = parse_socket(&text, inode)
+        {
+            return Some(sample);
+        }
+    }
+    None
+}
+
+// Linux udp4_format_sock()/udp6_seq_show(): queues are socket memory accounting,
+// not payload bytes or queue peaks; sk_drops includes more than buffer overflow.
+#[cfg(any(target_os = "linux", test))]
+fn parse_socket(text: &str, inode: u64) -> Option<SocketSample> {
+    text.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let (tx, rx) = fields.nth(4)?.split_once(':')?;
+        if fields.nth(4)?.parse::<u64>().ok()? != inode {
+            return None;
+        }
+        Some(SocketSample {
+            drops: fields.nth(2)?.parse().ok()?,
+            rx_queue: u64::from_str_radix(rx, 16).ok()?,
+            tx_queue: u64::from_str_radix(tx, 16).ok()?,
+        })
+    })
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rule {
@@ -330,6 +363,44 @@ impl Backend for SystemBackend {
 mod tests {
     use super::*;
     use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
+    #[test]
+    fn socket_rows() {
+        let rows = "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode ref pointer drops\n\
+                    1: 00000000:4C47 00000000:0000 07 00000010:00000020 00:00000000 00000000 1000 0 123 2 0000000000000000 7\n\
+                    2: 00000000000000000000000000000000:4C47 00000000000000000000000000000000:0000 07 00000030:00000040 00:00000000 00000000 1000 0 456 2 0000000000000000 9";
+        assert_eq!(
+            parse_socket(rows, 123),
+            Some(SocketSample {
+                drops: 7,
+                rx_queue: 32,
+                tx_queue: 16
+            })
+        );
+        assert_eq!(
+            parse_socket(rows, 456),
+            Some(SocketSample {
+                drops: 9,
+                rx_queue: 64,
+                tx_queue: 48
+            })
+        );
+        assert_eq!(parse_socket(rows, 999), None);
+        assert_eq!(parse_socket("1: malformed", 123), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn socket_probe() {
+        use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let inode = std::fs::metadata(format!("/proc/self/fd/{}", socket.as_raw_fd()))
+            .unwrap()
+            .ino();
+        let sample = udp_socket_sample(inode).expect("bound UDP socket appears in proc");
+        assert_eq!(sample.drops, 0);
+        assert_eq!(sample.rx_queue, 0);
+    }
 
     #[derive(Default)]
     struct State {

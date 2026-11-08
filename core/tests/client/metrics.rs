@@ -2,7 +2,7 @@
 //! Exercise metrics through actual UDP receive/decrypt/callback work, not
 //! just the counter helpers. Subscribers are scoped to each data-loop future.
 
-use super::*;
+use crate::client::*;
 use std::collections::BTreeMap;
 use std::fmt;
 use tracing::field::{Field, Visit};

@@ -318,6 +318,7 @@ fn logger_init(
     log_dir: Option<&String>,
 ) -> anyhow::Result<LoggerGuard> {
     let targets = DashMap::new();
+    targets.insert("metrics", "metrics");
     Ok(init_logger(
         log_dir.map_or("/var/log/vault/", |d| d),
         targets,

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Integration test: handshake, heartbeat and data flow against the shared
+//! Public API integration tests: handshake, heartbeat and data flow against the shared
 //! mock server (vault_core::test_utils).
 
 use std::sync::Arc;

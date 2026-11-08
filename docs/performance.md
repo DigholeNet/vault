@@ -71,78 +71,83 @@ not a battery-impact measurement. Avoid including credentials in shared reports.
 
 ## Runtime measurements
 
-The shared client core emits concise `VPN uplink metrics` and `VPN downlink
-metrics` summaries about every thirty seconds when there is data traffic.
-Apple providers additionally emit `TUN write metrics` on the same cadence.
-Failures and receive backpressure retain detailed warnings with a five-second
-minimum reporting interval; healthy summaries omit error fields and repeated
-connection details. Successful heartbeats are DEBUG-only and do not produce
-empty data summaries. These are aggregate records, not per-packet logs.
-`elapsed_s` is the actual monotonic time covered
-by a window, so a delayed timer does not turn a longer interval into a claimed
-one-second sample. Core maintenance still runs on a persistent one-second
-timer for liveness checks; missed ticks do not cause a burst of reports.
-Partial windows are flushed when tasks are cancelled or the provider stops.
+Client `VPN uplink metrics`, `VPN downlink metrics` and Apple `TUN write metrics`
+summarize active traffic about every 30 seconds. Errors/backpressure produce
+more detailed warnings at a minimum interval of five seconds. Successful
+heartbeats are DEBUG-only; idle client windows are omitted.
+Linux edge writes Rust metrics to `/var/log/vault/metrics.log` (or `--log-dir`);
+Apple and Android keep them in `vault.log`.
 
-At connection start, `Transport ready` records the selected UDP peer,
-`outer_ip` (`IPv4` or `IPv6`), connection `generation`, queue capacities, and
-the session's cumulative `session_not_connected_total`. Apple logs `Tunnel
-settings applied` with the successfully applied MTU and configuration revision.
-The MTU is the configured TUN MTU, not a measurement of the remote path MTU.
-An HTTPS test's `-4`/`-6` option does not identify the outer tunnel IP family.
-The table below includes fields present only in detailed warnings.
-
-| Record / fields | Meaning |
+| Fields | Interpretation |
 |---|---|
-| Uplink `packets`, `payload_bytes`, `payload_Bps` | Payload accepted by UDP sends in this window; not peer acknowledgements |
-| `queue_depth`, `queue_peak`, `queue_capacity` | Current queue occupancy, sampled peak, and packet capacity; the peak can miss brief occupancy changes |
-| Uplink `queue_full_drops`, `queue_closed_drops`, `build_failures` | Packets discarded locally because the queue is full/closed or packet construction fails |
-| Uplink `send_failures`, `send_emsgsize`, `send_enobufs`, `send_would_block`, `send_unreachable`, `send_other`, `last_errno` | UDP data-send errors, grouped into mutually exclusive categories; errno uses the running OS's values |
-| Downlink `decrypted_packets`, `payload_bytes`, `decrypt_failures` | Authenticated data packets and failed data decryption attempts before platform delivery |
-| Downlink `queue_waits`, `queue_wait_total_ms`, `queue_wait_max_ms` | Completed waits for receive-channel space; **backpressure, not measured packet loss** |
-| Downlink `receive_errors`, `last_receive_errno` | Errors returned by UDP receive calls |
-| Downlink `batches`, `batch_packets_avg`, `batch_packets_max` | Actual batches handed to the platform callback |
-| Downlink `callback_avg_ms`, `callback_max_ms` | Synchronous callback duration, including FFI/platform work before it returns |
-| Apple `calls`, `submitted_packets`, `submitted_bytes` | Calls and data submitted to `packetFlow.writePackets` |
-| Apple `packets_per_call_avg`, `packets_per_call_max` | Mean and largest packet count per system write call in this window |
-| Apple `failed_calls`, `failed_packets` | Calls returning false and packets submitted in those calls; not an end-to-end loss count |
-| Apple `write_mean_ms`, `write_max_ms` | Wall time per system write call, excluding protocol-array preparation and metrics recording; includes scheduling delays |
+| `payload_Bps`, `payload_bytes` | Inner-packet bytes per second and window total; uplink counts accepted UDP sends, downlink counts decrypted data |
+| `queue_depth`, `queue_peak`, `queue_capacity` | Current occupancy, sampled peak and packet capacity |
+| `queue_full_drops`, `queue_closed_drops`, `build_failures` | Local uplink drops before sending |
+| `send_failures`, `send_emsgsize`, `send_enobufs`, `send_would_block` | UDP send failures; inspect packet size for `emsgsize`, local pressure for `enobufs`/`would_block` |
+| `decrypt_failures`, `receive_errors` | Data authentication failures and UDP receive-call errors |
+| `queue_waits`, `queue_wait_total_ms`, `queue_wait_max_ms` | Downlink delivery backpressure; completed waits, not measured packet loss |
+| `batch_packets_avg`, `batch_packets_max`, `callback_avg_ms`, `callback_max_ms` | Packets per callback and synchronous delivery time, including platform work |
+| Apple `calls`, `submitted_packets`, `packets_per_call_avg`, `packets_per_call_max` | System write calls and batching effectiveness; sparse traffic may use single-packet calls |
+| Apple `failed_calls`, `failed_packets`, `write_mean_ms`, `write_max_ms` | Rejected write calls/packets and wall time per batch, including scheduling delays |
 
-Apple forwards each existing Rust downlink batch to one `writePackets` call,
-preserving packet order and the matching IPv4/IPv6 protocol entries. It does
-not wait for more packets to fill a batch. Empty batches are ignored; calls
-that return false are counted without retrying the batch. The core currently
-delivers at most 32 packets per batch. Under load, `packets_per_call_avg`
-should rise above 1; sparse traffic
-may still arrive as single packets. A metric update now occurs once per write
-call rather than once per packet.
+A queue near capacity plus uplink drops indicates send-side pressure; downlink
+waits plus slow callbacks point to platform delivery. Compare throughput and
+CPU alongside these counters. Batch write time cannot be compared directly
+with the old per-packet time, and a successful write does not prove delivery.
 
-When comparing before and after batching, `write_mean_ms` and `write_max_ms`
-now describe a whole batch rather than one packet. A larger per-call time
-alone does not mean a regression. Compare call count, packets per call, Rust
-callback duration, receive-queue waits, workload throughput and CPU together.
-Rust and Apple report windows are independent, so adjacent records do not
-necessarily cover the same packets or the same slow event.
+`elapsed_s` is the actual window duration. Client and Apple windows are
+independent; compare several windows rather than adjacent log lines. Core
+`generation` identifies each transport, Apple session IDs identify providers,
+and `final_window=true` marks a partial final window. Session failure totals
+are cumulative and must not be added to window counts. `Transport ready`
+records the outer IP family; an HTTPS test's `-4`/`-6` does not identify it.
+These client counters do not measure kernel UDP overflow, server drops, TCP
+retransmissions or end-to-end loss. Keep runtime logs with the HTTPS reports.
 
-Core records identify the generation; the peer is included in `Transport ready`
-and detailed warnings. Per-transport windows do not
-reuse their predecessors' counters on reconnect. Apple counters belong to a
-provider session, which may contain several transport generations. Core
-`final_window=true` marks a partial final window. `VPN session uplink failure
-totals` is emitted once at shutdown and includes `not_connected` attempts made
-while no transport existed; it is cumulative and must not be added to the
-interval counts. Shared atomic snapshots may place concurrent updates into
-adjacent windows. If shutdown was requested from the client's own runtime,
-`workers_joined=false` identifies a shutdown snapshot taken without waiting
-for its worker tasks; their last updates may still be pending. An ongoing
-queue wait/callback is timed only when it finishes.
+### Supernode forwarding diagnostics
 
-To investigate a slow run, retain the runtime logs alongside the HTTPS report.
-A queue peak near capacity plus increasing `queue_full_drops` indicates local
-uplink pressure; downlink waits plus slow callbacks point to the delivery side.
-`send_emsgsize` is useful evidence for packet-size/path-MTU investigation.
-These counters do **not** measure kernel UDP receive overflow, server-side
-drops, TCP retransmissions or end-to-end packet loss. Zero local errors alone
-does not establish a lossless network, and low callback times alone do not
-establish sufficient throughput. Compare them with workload, CPU and network
-measurements before changing buffers or forwarding architecture.
+`Supernode peer metrics` and `Supernode I/O metrics` appear in
+`/var/log/vault/metrics.log` (or `--log-dir`). Normal windows are about 30 seconds;
+application errors or targeted DEBUG reporting shorten them to about five.
+Connected peers include zero-traffic windows; `final_window=true` marks a
+partial final window on peer removal/replacement or shutdown.
+
+For a short comparison, run `sudo systemctl edit supernode.service` and add:
+
+```ini
+[Service]
+Environment="RUST_LOG=info,metrics=debug"
+```
+
+Apply it and watch the logs (restarting interrupts existing VPN connections):
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl restart supernode.service
+sudo tail -F /var/log/vault/metrics.log
+```
+
+This enables five-second reporting without per-packet DEBUG logs. Do not use
+`--verbose`/`--quiet`, which override `RUST_LOG`. Afterwards, remove this
+`Environment` override and repeat the reload/restart commands to restore normal reporting.
+Linux metrics use the `metrics` target; normal and warning records go only to
+`metrics.log`, with daily rotation and at most 30 files, including the current file.
+
+| Fields | Interpretation |
+|---|---|
+| Peer `up_bytes`, `up_Bps` → `tun_written_bytes` | Decrypted client data → successful server TUN writes |
+| Peer `down_bytes`, `down_Bps` → `udp_sent_payload_bytes` | TUN packets mapped to this client → successful UDP sends; gaps warrant checking build/send failures |
+| Peer `last_up_s`, `last_down_s`, `last_heartbeat_s` | Seconds since decrypted data, successful data send or authenticated heartbeat; `None` means none yet |
+| Peer `invalid_packets`, `spoofed_source`, `build_failures`, `tun_*`, `send_*` | Validation/build/write failures; `would_block`/`enobufs` suggest local pressure, `emsgsize` warrants MTU checks |
+| I/O receive/read/parse/poll errors, `first_net_error` | Server-wide processing failures; some counters overlap, so do not sum them as dropped packets |
+| I/O `socket_rx_drops_delta`, `socket_rx_queue_bytes`, `socket_tx_queue_bytes` | This UDP socket's Linux drop-counter delta and sampled queue memory; unavailable/reset samples are `None`, not zero |
+| I/O `handler_*_ms`, `maintenance_*_ms` | Handling/maintenance wall time, including sampling/reporting but excluding poll waits; not process CPU time |
+
+Peer records cover all traffic for one client; I/O records cover the entire
+server. UDP send success means kernel acceptance, not client delivery. Kernel
+drops are sampled at the reporting cadence, and queue sizes are not peaks.
+Maintenance is counted when it finishes; a cycle that emits a report is included
+in the next window.
+Compare several timestamp-aligned client/server windows: continuing server
+sends with falling client receives points to the outer path or client; falling
+server TUN traffic calls for checking requests, routing and the upstream path.

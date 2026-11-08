@@ -11,16 +11,13 @@ version.workspace = true
 
 [features]
 default = []
-# Platform-independent VPN client session (handshake, heartbeat, reconnect,
-# data pump). Used by the Android/iOS/macOS edge bindings and the Linux
-# edge client; not needed by the supernode.
-client = []
 # Shared mock server for the integration tests of vault-core and
 # vault-bridge; never enable in production builds.
-test = ["client"]
+test = []
 
 [dependencies]
 anyhow.workspace = true
+hex.workspace = true
 libc = {version = "0.2"}
 prost = {version = "0.13"}
 ring = {version = "0.17"}
@@ -43,7 +40,7 @@ zeroize.workspace = true
 caps = {version = "0.5"}
 
 # Dependencies used on Linux/Android (TUN device, daemonize, CLI parsing);
-# excluded on iOS where only the client feature is used.
+# excluded on iOS, which uses the platform VPN extension.
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 clap = {version = "4", features = ["derive"]}
 daemonize = {version = "0.5"}
@@ -59,5 +56,5 @@ prost-build = {version = "0.13"}
 
 [[test]]
 name = "client"
-path = "tests/client.rs"
+path = "tests/client/integration.rs"
 required-features = ["test"]

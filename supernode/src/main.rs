@@ -32,6 +32,7 @@ mod imp {
     ) -> anyhow::Result<LoggerGuard> {
         let targets = DashMap::new();
         targets.insert("client", "client");
+        targets.insert("metrics", "metrics");
         Ok(init_logger(
             log_dir.map_or("/var/log/vault/", |d| d),
             targets,

@@ -25,7 +25,7 @@ default = []
 bindgen = ["uniffi/cli"]
 
 [dependencies]
-vault-core = { path = "../../core", features = ["client"] }
+vault-core = { path = "../../core" }
 uniffi = "0.32"
 thiserror = "1"
 tracing.workspace = true

@@ -3,7 +3,6 @@
 #[cfg(not(target_os = "ios"))]
 mod app;
 mod buf;
-#[cfg(feature = "client")]
 pub mod client;
 mod crypto;
 pub mod diagnostics;
@@ -16,6 +15,7 @@ mod epoll;
 // Logging backends: `logger::shared` (mobile, all platforms) and
 // `logger::rolling` (server/edge daemons, not on iOS).
 pub mod logger;
+pub mod metrics;
 pub mod pake;
 mod peer;
 pub mod protocol;

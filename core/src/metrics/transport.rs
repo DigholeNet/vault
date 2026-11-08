@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-//! Per-transport counters and log windows for client diagnostics.
-//! Independent of the application's traffic-speed polling and platform records.
+//! Client transport diagnostics: outbound queues, UDP delivery, and platform callbacks.
+//! Owned by one client transport; independent of UI speed polling and server forwarding.
 //!
 //! Shared counters use relaxed atomics: snapshots are observations, not a
 //! transaction across tasks. Activity concurrent with a snapshot can land in
@@ -11,34 +11,32 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::sync::mpsc;
 use tokio::time::{Interval, MissedTickBehavior, interval_at};
 use tracing::{info, warn};
 
-const REPORT_INTERVAL: Duration = Duration::from_secs(30);
-// Failures/backpressure keep the shorter window; only healthy summaries slow down.
-const ERROR_REPORT_INTERVAL: Duration = Duration::from_secs(5);
+use super::{IoErrors, Metrics, PacketCounters, ReportWindow, WindowSnapshot};
 const NO_ERRNO: i64 = i64::MIN;
 
 /// Keep the one-second liveness cadence without recreating a sleep whenever
 /// traffic arrives. Missed ticks must not produce a burst of log reports.
-pub(super) fn maintenance_interval() -> Interval {
+pub(crate) fn maintenance_interval() -> Interval {
     let period = Duration::from_secs(1);
     let mut ticker = interval_at(tokio::time::Instant::now() + period, period);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     ticker
 }
 
-pub(super) struct QueueMetrics {
+pub(crate) struct QueueMetrics {
     sender: mpsc::WeakSender<Vec<u8>>,
     capacity: usize,
     peak: AtomicUsize,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub(super) struct QueueSnapshot {
+pub(crate) struct QueueSnapshot {
     pub depth: usize,
     pub peak: usize,
     pub capacity: usize,
@@ -75,7 +73,7 @@ impl QueueMetrics {
     }
 }
 
-pub(super) struct ReceiveMetrics {
+pub(crate) struct ReceiveMetrics {
     pub queue: QueueMetrics,
     waits: AtomicU64,
     wait_total_ns: AtomicU64,
@@ -85,7 +83,7 @@ pub(super) struct ReceiveMetrics {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub(super) struct ReceiveSnapshot {
+pub(crate) struct ReceiveSnapshot {
     pub queue: QueueSnapshot,
     pub waits: u64,
     pub wait_total_ms: f64,
@@ -131,50 +129,6 @@ impl ReceiveMetrics {
             wait_max_ms: self.wait_max_ns.swap(0, Ordering::Relaxed) as f64 / 1_000_000.0,
             receive_errors: self.receive_errors.swap(0, Ordering::Relaxed),
             last_errno: (errno != NO_ERRNO).then_some(errno as i32),
-        }
-    }
-}
-
-/// Local to the single uplink task; no atomics or per-error allocations.
-#[derive(Debug, Default)]
-struct UdpSendErrors {
-    pub total: u64,
-    pub message_too_large: u64,
-    pub would_block: u64,
-    pub no_buffer_space: u64,
-    pub unreachable: u64,
-    pub other: u64,
-    pub last_errno: Option<i32>,
-}
-
-impl UdpSendErrors {
-    fn record(&mut self, error: &io::Error) {
-        self.total += 1;
-        self.last_errno = error.raw_os_error();
-        // These errno values are platform-specific, so compare the target's
-        // libc constants before the portable ErrorKind fallback.
-        #[cfg(unix)]
-        match error.raw_os_error() {
-            Some(libc::EMSGSIZE) => {
-                self.message_too_large += 1;
-                return;
-            }
-            Some(libc::ENOBUFS) => {
-                self.no_buffer_space += 1;
-                return;
-            }
-            Some(libc::ENETUNREACH | libc::EHOSTUNREACH) => {
-                self.unreachable += 1;
-                return;
-            }
-            _ => {}
-        }
-        match error.kind() {
-            io::ErrorKind::WouldBlock => self.would_block += 1,
-            io::ErrorKind::NetworkUnreachable | io::ErrorKind::HostUnreachable => {
-                self.unreachable += 1;
-            }
-            _ => self.other += 1,
         }
     }
 }
@@ -227,14 +181,14 @@ fn duration_ns(duration: Duration) -> u64 {
 
 /// Queue failures belong to one transport, unlike the session-wide UI totals.
 /// An aborted task may finish dropping after its replacement has already run.
-pub(super) struct UplinkQueueMetrics {
+pub(crate) struct UplinkQueueMetrics {
     pub queue: QueueMetrics,
     pub full_drops: AtomicU64,
     pub closed_drops: AtomicU64,
 }
 
 impl UplinkQueueMetrics {
-    pub(super) fn new(sender: &mpsc::Sender<Vec<u8>>) -> Self {
+    pub(crate) fn new(sender: &mpsc::Sender<Vec<u8>>) -> Self {
         Self {
             queue: QueueMetrics::new(sender),
             full_drops: AtomicU64::new(0),
@@ -243,66 +197,78 @@ impl UplinkQueueMetrics {
     }
 }
 
-pub(super) struct UplinkReport {
+pub(crate) struct UplinkReport {
     queue: Arc<UplinkQueueMetrics>,
     peer: SocketAddr,
     generation: u64,
-    started: Instant,
-    bytes: u64,
-    packets: u64,
+    window: ReportWindow,
+    traffic: PacketCounters,
     build_failures: u64,
-    errors: UdpSendErrors,
+    errors: IoErrors,
 }
 
 impl UplinkReport {
-    pub(super) fn new(queue: Arc<UplinkQueueMetrics>, peer: SocketAddr, generation: u64) -> Self {
+    pub(crate) fn new(queue: Arc<UplinkQueueMetrics>, peer: SocketAddr, generation: u64) -> Self {
         Self {
             queue,
             peer,
             generation,
-            started: Instant::now(),
-            bytes: 0,
-            packets: 0,
+            window: ReportWindow::default(),
+            traffic: PacketCounters::default(),
             build_failures: 0,
-            errors: UdpSendErrors::default(),
+            errors: IoErrors::default(),
         }
     }
 
-    pub(super) fn sent(&mut self, bytes: usize) {
-        self.bytes += bytes as u64;
-        self.packets += 1;
+    pub(crate) fn sent(&mut self, bytes: usize) {
+        self.traffic.record(bytes);
     }
 
-    pub(super) fn build_failure(&mut self) {
+    pub(crate) fn build_failure(&mut self) {
         self.build_failures += 1;
     }
 
-    pub(super) fn send_error(&mut self, error: &io::Error) {
+    pub(crate) fn send_error(&mut self, error: &io::Error) {
         self.errors.record(error);
     }
 
-    pub(super) fn report_if_due(&mut self) {
-        let elapsed = self.started.elapsed();
-        let has_failures = self.build_failures > 0
-            || self.errors.total > 0
-            || self.queue.full_drops.load(Ordering::Relaxed) > 0
-            || self.queue.closed_drops.load(Ordering::Relaxed) > 0;
-        if elapsed >= REPORT_INTERVAL || (has_failures && elapsed >= ERROR_REPORT_INTERVAL) {
-            self.report(false);
-        }
+    pub(crate) fn report_if_due(&mut self) {
+        Metrics::report_if_due(self, || ());
+    }
+}
+
+impl Metrics for UplinkReport {
+    type Sample = ();
+
+    fn window(&self) -> &ReportWindow {
+        &self.window
     }
 
-    fn report(&mut self, final_window: bool) {
-        let now = Instant::now();
-        let elapsed = now.duration_since(self.started).as_secs_f64();
-        self.started = now;
-        let bytes = std::mem::take(&mut self.bytes);
-        let packets = std::mem::take(&mut self.packets);
+    fn window_mut(&mut self) -> &mut ReportWindow {
+        &mut self.window
+    }
+
+    fn has_anomalies(&self) -> bool {
+        self.build_failures > 0
+            || self.errors.total > 0
+            || self.queue.full_drops.load(Ordering::Relaxed) > 0
+            || self.queue.closed_drops.load(Ordering::Relaxed) > 0
+    }
+
+    fn emit(&mut self, window: WindowSnapshot, (): Self::Sample) {
+        let WindowSnapshot {
+            elapsed_s: elapsed,
+            final_window,
+            ..
+        } = window;
+        let traffic = self.traffic.take();
+        let packets = traffic.packets;
+        let bytes = traffic.bytes;
         let build_failures = std::mem::take(&mut self.build_failures);
         let queue = self.queue.queue.snapshot();
         let queue_full_drops = self.queue.full_drops.swap(0, Ordering::Relaxed);
         let queue_closed_drops = self.queue.closed_drops.swap(0, Ordering::Relaxed);
-        let errors = std::mem::take(&mut self.errors);
+        let errors = self.errors.take();
         if packets == 0
             && build_failures == 0
             && queue_full_drops == 0
@@ -316,13 +282,14 @@ impl UplinkReport {
         {
             // Keep failures visible and detailed even with warning-only filters.
             warn!(
+                target: "metrics",
                 generation = self.generation,
                 peer = %self.peer,
                 final_window,
                 elapsed_s = elapsed,
                 packets,
                 payload_bytes = bytes,
-                payload_Bps = bytes as f64 / elapsed.max(1e-6),
+                payload_Bps = traffic.bytes_per_second(elapsed),
                 queue_depth = queue.depth,
                 queue_peak = queue.peak,
                 queue_capacity = queue.capacity,
@@ -340,12 +307,13 @@ impl UplinkReport {
             );
         } else {
             info!(
+                target: "metrics",
                 generation = self.generation,
                 final_window,
                 elapsed_s = format_args!("{elapsed:.3}"),
                 packets,
                 payload_bytes = bytes,
-                payload_Bps = (bytes as f64 / elapsed.max(1e-6)).round(),
+                payload_Bps = traffic.bytes_per_second(elapsed).round(),
                 queue_depth = queue.depth,
                 queue_peak = queue.peak,
                 "VPN uplink metrics"
@@ -358,64 +326,76 @@ impl Drop for UplinkReport {
     fn drop(&mut self) {
         // Task cancellation on reconnect/shutdown also flushes the partial
         // window; otherwise short failures disappear before the first tick.
-        self.report(true);
+        Metrics::finish(self, ());
     }
 }
 
-pub(super) struct DownlinkReport {
+pub(crate) struct DownlinkReport {
     receive: Arc<ReceiveMetrics>,
     peer: SocketAddr,
     generation: u64,
-    started: Instant,
-    packets: u64,
-    bytes: u64,
+    window: ReportWindow,
+    traffic: PacketCounters,
     decrypt_failures: u64,
     batches: BatchMetrics,
 }
 
 impl DownlinkReport {
-    pub(super) fn new(receive: Arc<ReceiveMetrics>, peer: SocketAddr, generation: u64) -> Self {
+    pub(crate) fn new(receive: Arc<ReceiveMetrics>, peer: SocketAddr, generation: u64) -> Self {
         Self {
             receive,
             peer,
             generation,
-            started: Instant::now(),
-            packets: 0,
-            bytes: 0,
+            window: ReportWindow::default(),
+            traffic: PacketCounters::default(),
             decrypt_failures: 0,
             batches: BatchMetrics::default(),
         }
     }
 
-    pub(super) fn packet(&mut self, bytes: usize) {
-        self.packets += 1;
-        self.bytes += bytes as u64;
+    pub(crate) fn packet(&mut self, bytes: usize) {
+        self.traffic.record(bytes);
     }
 
-    pub(super) fn decrypt_failure(&mut self) {
+    pub(crate) fn decrypt_failure(&mut self) {
         self.decrypt_failures += 1;
     }
 
-    pub(super) fn batch(&mut self, packets: usize, duration: Duration) {
+    pub(crate) fn batch(&mut self, packets: usize, duration: Duration) {
         self.batches.record(packets, duration);
     }
 
-    pub(super) fn report_if_due(&mut self) {
-        let elapsed = self.started.elapsed();
-        let has_anomalies = self.decrypt_failures > 0
-            || self.receive.waits.load(Ordering::Relaxed) > 0
-            || self.receive.receive_errors.load(Ordering::Relaxed) > 0;
-        if elapsed >= REPORT_INTERVAL || (has_anomalies && elapsed >= ERROR_REPORT_INTERVAL) {
-            self.report(false);
-        }
+    pub(crate) fn report_if_due(&mut self) {
+        Metrics::report_if_due(self, || ());
+    }
+}
+
+impl Metrics for DownlinkReport {
+    type Sample = ();
+
+    fn window(&self) -> &ReportWindow {
+        &self.window
     }
 
-    fn report(&mut self, final_window: bool) {
-        let now = Instant::now();
-        let elapsed = now.duration_since(self.started).as_secs_f64();
-        self.started = now;
-        let packets = std::mem::take(&mut self.packets);
-        let bytes = std::mem::take(&mut self.bytes);
+    fn window_mut(&mut self) -> &mut ReportWindow {
+        &mut self.window
+    }
+
+    fn has_anomalies(&self) -> bool {
+        self.decrypt_failures > 0
+            || self.receive.waits.load(Ordering::Relaxed) > 0
+            || self.receive.receive_errors.load(Ordering::Relaxed) > 0
+    }
+
+    fn emit(&mut self, window: WindowSnapshot, (): Self::Sample) {
+        let WindowSnapshot {
+            elapsed_s: elapsed,
+            final_window,
+            ..
+        } = window;
+        let traffic = self.traffic.take();
+        let packets = traffic.packets;
+        let bytes = traffic.bytes;
         let decrypt_failures = std::mem::take(&mut self.decrypt_failures);
         let batches = std::mem::take(&mut self.batches);
         let receive = self.receive.snapshot();
@@ -429,13 +409,14 @@ impl DownlinkReport {
         }
         if decrypt_failures > 0 || receive.waits > 0 || receive.receive_errors > 0 {
             warn!(
+                target: "metrics",
                 generation = self.generation,
                 peer = %self.peer,
                 final_window,
                 elapsed_s = elapsed,
                 decrypted_packets = packets,
                 payload_bytes = bytes,
-                payload_Bps = bytes as f64 / elapsed.max(1e-6),
+                payload_Bps = traffic.bytes_per_second(elapsed),
                 decrypt_failures,
                 queue_depth = receive.queue.depth,
                 queue_peak = receive.queue.peak,
@@ -454,12 +435,13 @@ impl DownlinkReport {
             );
         } else {
             info!(
+                target: "metrics",
                 generation = self.generation,
                 final_window,
                 elapsed_s = format_args!("{elapsed:.3}"),
                 decrypted_packets = packets,
                 payload_bytes = bytes,
-                payload_Bps = (bytes as f64 / elapsed.max(1e-6)).round(),
+                payload_Bps = traffic.bytes_per_second(elapsed).round(),
                 queue_depth = receive.queue.depth,
                 queue_peak = receive.queue.peak,
                 batch_packets_avg = format_args!("{:.2}", batches.avg_packets()),
@@ -474,15 +456,17 @@ impl DownlinkReport {
 
 impl Drop for DownlinkReport {
     fn drop(&mut self) {
-        self.report(true);
+        Metrics::finish(self, ());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metrics::{ERROR_REPORT_INTERVAL, REPORT_INTERVAL};
     use std::io::Write;
     use std::sync::Mutex;
+    use std::time::Instant;
 
     #[test]
     fn queue_window() {
@@ -570,7 +554,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn udp_error_categories() {
-        let mut metrics = UdpSendErrors::default();
+        let mut metrics = IoErrors::default();
         for errno in [
             libc::EMSGSIZE,
             libc::ENOBUFS,
@@ -589,7 +573,7 @@ mod tests {
         ] {
             metrics.record(&io::Error::from(kind));
         }
-        let window = std::mem::take(&mut metrics);
+        let window = metrics.take();
         assert_eq!(window.total, 10);
         assert_eq!(window.message_too_large, 1);
         assert_eq!(window.would_block, 2);
@@ -622,6 +606,7 @@ mod tests {
         let logs = CapturedLogs::default();
         let output = logs.clone();
         let subscriber = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::new("off,metrics=info"))
             .without_time()
             .with_ansi(false)
             .with_writer(move || output.clone())
@@ -641,15 +626,17 @@ mod tests {
             uplink.sent(128);
             downlink.packet(128);
             downlink.batch(1, Duration::from_millis(2));
-            uplink.started = Instant::now() - Duration::from_secs(6);
-            downlink.started = uplink.started;
+            let started = Instant::now() - Duration::from_secs(6);
+            uplink.window = ReportWindow::new(started);
+            downlink.window = ReportWindow::new(started);
             uplink.report_if_due();
             downlink.report_if_due();
             assert!(logs.0.lock().unwrap().is_empty());
 
             // Waiting for the longer window must not clear its counters.
-            uplink.started = Instant::now() - REPORT_INTERVAL;
-            downlink.started = uplink.started;
+            let started = Instant::now() - REPORT_INTERVAL;
+            uplink.window = ReportWindow::new(started);
+            downlink.window = ReportWindow::new(started);
             uplink.report_if_due();
             downlink.report_if_due();
         });
@@ -658,6 +645,7 @@ mod tests {
         assert_eq!(lines.len(), 2, "{output}");
         for line in lines {
             assert!(line.contains("INFO"), "{line}");
+            assert!(line.contains(" metrics:"), "{line}");
             assert!(line.contains("payload_bytes=128 "), "{line}");
             assert!(!line.contains("failures="), "{line}");
             assert!(!line.contains("queue_capacity="), "{line}");
@@ -670,7 +658,7 @@ mod tests {
         let logs = CapturedLogs::default();
         let output = logs.clone();
         let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::WARN)
+            .with_env_filter(tracing_subscriber::EnvFilter::new("off,metrics=warn"))
             .without_time()
             .with_ansi(false)
             .with_writer(move || output.clone())
@@ -687,18 +675,24 @@ mod tests {
             receive.record_wait(Duration::from_millis(2));
             receive.record_receive_error(&io::Error::other("receive failed"));
             downlink.decrypt_failure();
-            uplink.started = Instant::now() - Duration::from_secs(4);
-            downlink.started = uplink.started;
+            let started = Instant::now() - Duration::from_secs(4);
+            uplink.window = ReportWindow::new(started);
+            downlink.window = ReportWindow::new(started);
             uplink.report_if_due();
             downlink.report_if_due();
             assert!(logs.0.lock().unwrap().is_empty());
-            uplink.started = Instant::now() - ERROR_REPORT_INTERVAL;
-            downlink.started = uplink.started;
+            let started = Instant::now() - ERROR_REPORT_INTERVAL;
+            uplink.window = ReportWindow::new(started);
+            downlink.window = ReportWindow::new(started);
             uplink.report_if_due();
             downlink.report_if_due();
         });
         let output = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
         assert_eq!(output.lines().count(), 2, "{output}");
+        assert!(
+            output.lines().all(|line| line.contains("WARN metrics:")),
+            "{output}"
+        );
         for field in [
             "queue_full_drops=2 ",
             "send_would_block=1 ",
@@ -725,7 +719,7 @@ mod tests {
             let mut report =
                 DownlinkReport::new(receive.clone(), "127.0.0.1:1001".parse().unwrap(), 1);
             receive.queue.observe(1);
-            report.started = Instant::now() - REPORT_INTERVAL;
+            report.window = ReportWindow::new(Instant::now() - REPORT_INTERVAL);
             report.report_if_due();
         });
         assert!(logs.0.lock().unwrap().is_empty());
