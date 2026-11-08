@@ -6,6 +6,7 @@ package net.dighole.vault
  * and consumed by UI components (e.g. [StatusFragment]).
  */
 sealed class VpnStatusEvent {
+    data object Connecting : VpnStatusEvent()
     data class Connected(val ipv4: String, val ipv6: String) : VpnStatusEvent()
     data object Reconnecting : VpnStatusEvent()
     data object Disconnected : VpnStatusEvent()

@@ -84,33 +84,7 @@ android {
             // password different from the store password; use it for both.
             keyPassword = storePasswordValue.orEmpty()
 
-            // Defer validation so debug builds do not fail when release signing
-            // is not configured. Only enforce when a release task is actually executed.
-            project.afterEvaluate {
-                val isReleaseBuild = gradle.startParameter.taskNames.any {
-                    it.contains("Release", ignoreCase = true)
-                }
-                if (isReleaseBuild) {
-                    if (keystoreBase64.isNullOrEmpty()) {
-                        throw GradleException(
-                            "Release signing keystore not configured. " +
-                                "Set signing.keyStoreBase64 in local.properties or ANDROID_SIGNING_KEY_STORE_BASE64 env var."
-                        )
-                    }
-                    if (storePasswordValue.isNullOrEmpty()) {
-                        throw GradleException(
-                            "Release signing store password not configured. " +
-                                "Set signing.keyStorePassword in local.properties or ANDROID_SIGNING_KEY_STORE_PASSWORD env var."
-                        )
-                    }
-                    if (keyAliasValue.isNullOrEmpty()) {
-                        throw GradleException(
-                            "Release signing key alias not configured. " +
-                                "Set signing.keyAlias in local.properties or ANDROID_SIGNING_KEY_ALIAS env var."
-                        )
-                    }
-                }
-            }
+            // AGP validates signing when packaging, without blocking lint or unit tests.
 
             enableV1Signing = true
             enableV2Signing = true

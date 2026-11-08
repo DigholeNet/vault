@@ -70,6 +70,7 @@ final class WindowManager {
         var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable]
         if resizable { style.insert(.resizable) }
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: style, backing: .buffered, defer: false)
+        window.identifier = NSUserInterfaceItemIdentifier(id)
         window.title = LanguageManager.shared.tr(title)
         window.minSize = minimum
         window.isReleasedWhenClosed = false

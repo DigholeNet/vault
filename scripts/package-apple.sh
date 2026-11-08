@@ -111,7 +111,7 @@ if [[ -n "${ASC_KEY_PATH:-}" && -n "${ASC_KEY_ID:-}" && -n "${ASC_KEY_ISSUER:-}"
 fi
 
 # Prints the exportOptions plist to use: the source file as-is, or a copy
-# under BUILD_DIR with teamID inserted when TEAM_ID is set.
+# under BUILD_DIR with teamID updated when TEAM_ID is set.
 resolve_export_options() {
     local src="$1"
     if [[ -z "$TEAM_ID" ]]; then
@@ -121,13 +121,18 @@ resolve_export_options() {
     mkdir -p "$BUILD_DIR/export-options"
     local dst="$BUILD_DIR/export-options/$(basename "$src")"
     cp "$src" "$dst"
-    plutil -insert teamID -string "$TEAM_ID" "$dst"
+    plutil -replace teamID -string "$TEAM_ID" "$dst"
     printf '%s\n' "$dst"
 }
 
 # Use full Xcode when the Command Line Tools are selected (no iOS SDK there).
-if ! xcode-select -p | grep -q "Xcode.app"; then
-    export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+if ! xcrun --show-sdk-path --sdk iphoneos >/dev/null 2>&1; then
+    if [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
+        export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+    else
+        echo "error: iOS SDK not found; install Xcode or set DEVELOPER_DIR." >&2
+        exit 1
+    fi
 fi
 
 if [[ "${SKIP_RUST:-0}" != "1" ]]; then

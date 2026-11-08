@@ -9,6 +9,7 @@ struct MacosStatusView: View {
     @State private var tab = 0
     @StateObject private var model = DiagnosticsViewModel()
     @State private var followsTail = true
+    @State private var windowVisible = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,8 +46,16 @@ struct MacosStatusView: View {
                 .disabled(tab == 0 ? model.result == nil : model.filteredLogText.isEmpty)
             }.padding(16)
         }
-        .task(id: tab) {
-            guard tab == 1 else { return }
+        .onAppear {
+            windowVisible = NSApp.windows.first { $0.identifier?.rawValue == "status" }?
+                .occlusionState.contains(.visible) ?? false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)) { notification in
+            guard let window = notification.object as? NSWindow, window.identifier?.rawValue == "status" else { return }
+            windowVisible = window.occlusionState.contains(.visible)
+        }
+        .task(id: tab == 1 && windowVisible) {
+            guard tab == 1, windowVisible else { return }
             await model.refreshLogs(using: vpnManager)
         }
     }

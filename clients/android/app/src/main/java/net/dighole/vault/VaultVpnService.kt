@@ -9,7 +9,6 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.VpnService
-import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import kotlinx.coroutines.CancellationException
@@ -133,14 +132,12 @@ class VaultVpnService : VpnService() {
         return START_REDELIVER_INTENT
     }
 
-    override fun onBind(intent: Intent?): IBinder? {
-        return null
-    }
-
     override fun onRevoke() {
-        super.onRevoke()
-        Log.d(TAG, "onRevoke called by system")
-        handleDisconnect()
+        mainExecutor.execute {
+            super.onRevoke()
+            Log.d(TAG, "onRevoke called by system")
+            handleDisconnect()
+        }
     }
 
     // Native/Android setup can throw varied exceptions; cancellation is rethrown.
@@ -197,6 +194,7 @@ class VaultVpnService : VpnService() {
             return
         }
 
+        emitVpnEvent(VpnStatusEvent.Connecting)
         connectJob = scope.launch {
             // Blocking Rust shutdown runs here on the IO dispatcher, not the
             // main thread. Closing before creating the new Edge below also

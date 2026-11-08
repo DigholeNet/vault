@@ -4,6 +4,7 @@ import VaultCore
 #if os(iOS)
 struct IosDiagnosticsView: View {
     let vpnManager: VpnManager
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject var appData: AppData
     @EnvironmentObject var languageManager: LanguageManager
     @StateObject private var model = DiagnosticsViewModel()
@@ -36,8 +37,9 @@ struct IosDiagnosticsView: View {
                 }
             }
         }
-        .task(id: tab) {
-            if tab == 1 { await model.refreshLogs(using: vpnManager) }
+        .task(id: tab == 1 && scenePhase == .active) {
+            guard tab == 1, scenePhase == .active else { return }
+            await model.refreshLogs(using: vpnManager)
         }
     }
 

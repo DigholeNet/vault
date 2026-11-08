@@ -14,7 +14,6 @@ use vault_core::{
     SysSignal, Time, TimeSource, WaitImpl, WaitResult, create_ecdh_keypair,
     device::{self, TunTapDevice},
     pake, protocol, select_algorithm, supported_algorithms,
-    util::mapped_addr,
 };
 
 use crate::config::SuperNodeConfig;
@@ -321,7 +320,6 @@ impl<TS: TimeSource> SuperNode<TS> {
             if buffer.is_empty() {
                 self.metrics.observe(IoEvent::InvalidNetPacket);
             } else {
-                let addr = mapped_addr(addr);
                 if let Err(e) = self.do_handle_net_data(buffer, addr) {
                     self.metrics.observe(IoEvent::NetError(&e));
                     debug!("Handle net data error., {} : {}", addr, e);

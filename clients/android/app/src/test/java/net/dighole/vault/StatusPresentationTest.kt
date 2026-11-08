@@ -33,6 +33,22 @@ class StatusPresentationTest {
 
     private val connected = VpnStatusEvent.Connected("192.0.2.1", "2001:db8::1")
 
+    @Test fun connecting() {
+        val live = VpnUiState().applying(connected).applying(VpnStatusEvent.Connecting)
+        assertEquals(VpnUiState().applying(VpnStatusEvent.Connecting), live)
+        assertTrue(live.isConnecting)
+        assertFalse(live.isConnected)
+        assertEquals("", live.ipv4)
+        assertEquals("", live.ipv6)
+        assertEquals(live, live.applying(VpnStatusEvent.TrafficStats(0, 0, 0, 0)))
+    }
+
+    @Test fun cancelled() {
+        val state = VpnUiState().applying(VpnStatusEvent.Connecting)
+        assertEquals(VpnUiState(), state.applying(VpnStatusEvent.Disconnected))
+        assertEquals(VpnUiState(), state.applying(VpnStatusEvent.Error("failed")))
+    }
+
     @Test fun stateRestore() {
         val live = VpnUiState(isConnecting = true).applying(connected)
         val restored = VpnUiState().applying(connected)

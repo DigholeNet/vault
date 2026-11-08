@@ -13,8 +13,11 @@ struct ConnectionDurationView: View {
                 .monospacedDigit()
                 .tracking(2)
                 .foregroundStyle(.primary)
+#if !os(macOS)
+                // macOS keeps rendering this animation while the menu popover is hidden.
                 .contentTransition(.numericText())
                 .animation(.easeOut(duration: 0.2), value: elapsed)
+#endif
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
                 .accessibilityLabel(languageManager.tr("Connected for") + " " + elapsed)

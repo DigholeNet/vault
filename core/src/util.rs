@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-use std::net::{IpAddr, SocketAddr};
 use std::process;
 
 use anyhow::Context;
@@ -70,15 +69,6 @@ fn run_command_inner(program: &str, args: &[&str], log_failure: bool) -> bool {
             error!("Failed to execute {:?}: {}", cmd, e);
             false
         }
-    }
-}
-
-pub fn mapped_addr(addr: SocketAddr) -> SocketAddr {
-    match addr {
-        SocketAddr::V4(addr4) => {
-            SocketAddr::new(IpAddr::V6(addr4.ip().to_ipv6_mapped()), addr4.port())
-        }
-        _ => addr,
     }
 }
 

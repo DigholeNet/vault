@@ -10,6 +10,14 @@ trait IpCommand: Send {
     fn run(&mut self, args: &[String]) -> anyhow::Result<String>;
 }
 
+fn tunnel_prefixes(ipv6: bool) -> [&'static str; 2] {
+    if ipv6 {
+        ["::/1", "8000::/1"]
+    } else {
+        ["0.0.0.0/1", "128.0.0.0/1"]
+    }
+}
+
 #[cfg(target_os = "linux")]
 struct SystemIp;
 #[cfg(target_os = "linux")]
@@ -62,15 +70,14 @@ impl OwnedRoute {
             if self.prefix == "default" {
                 return *prefix == "default";
             }
-            prefix
-                .split('/')
-                .next()
-                .and_then(|ip| ip.parse::<IpAddr>().ok())
-                == self
-                    .prefix
-                    .split('/')
-                    .next()
-                    .and_then(|ip| ip.parse::<IpAddr>().ok())
+            let host_length = if self.ipv6 { "128" } else { "32" };
+            let (address, length) = prefix.split_once('/').unwrap_or((prefix, host_length));
+            let (expected, expected_length) = self
+                .prefix
+                .split_once('/')
+                .unwrap_or((&self.prefix, host_length));
+            length == expected_length
+                && address.parse::<IpAddr>().ok() == expected.parse::<IpAddr>().ok()
         });
         prefix_matches
             && field("dev") == Some(self.interface.as_str())
@@ -219,13 +226,17 @@ impl RouteState {
     }
 
     pub fn set_default(&mut self, source: IpAddr) -> anyhow::Result<()> {
-        self.install(OwnedRoute {
-            ipv6: source.is_ipv6(),
-            prefix: "default".into(),
-            interface: self.tun.clone(),
-            gateway: None,
-            source: Some(source),
-        })
+        // More-specific routes win even when the physical default has metric 0.
+        for prefix in tunnel_prefixes(source.is_ipv6()) {
+            self.install(OwnedRoute {
+                ipv6: source.is_ipv6(),
+                prefix: prefix.into(),
+                interface: self.tun.clone(),
+                gateway: None,
+                source: Some(source),
+            })?;
+        }
+        Ok(())
     }
 
     /// Remove our defaults before flushing TUN addresses. In particular,
@@ -234,8 +245,10 @@ impl RouteState {
     /// Keep the server host route in place for the ongoing handshake.
     pub fn clear_tunnel_defaults(&mut self) -> anyhow::Result<()> {
         for index in (0..self.installed.len()).rev() {
-            if self.installed[index].prefix == "default"
-                && self.installed[index].interface == self.tun
+            let route = &self.installed[index];
+            if route.interface == self.tun
+                && (route.prefix == "default"
+                    || tunnel_prefixes(route.ipv6).contains(&route.prefix.as_str()))
             {
                 self.remove_owned(index)?;
             }
@@ -245,31 +258,28 @@ impl RouteState {
         // metric and no gateway, including those whose src was already lost.
         // Physical defaults and borrowed server host routes remain untouched.
         for ipv6 in [false, true] {
-            let output = self.run(
-                ipv6,
-                vec![
-                    "route".into(),
-                    "show".into(),
-                    "exact".into(),
-                    "default".into(),
-                ],
-            )?;
-            for line in output.lines() {
-                let words: Vec<_> = line.split_whitespace().collect();
-                let source = words
-                    .windows(2)
-                    .find(|pair| pair[0] == "src")
-                    .map(|pair| pair[1].parse::<IpAddr>())
-                    .transpose()?;
-                let route = OwnedRoute {
+            for prefix in tunnel_prefixes(ipv6).into_iter().chain(["default"]) {
+                let output = self.run(
                     ipv6,
-                    prefix: "default".into(),
-                    interface: self.tun.clone(),
-                    gateway: None,
-                    source,
-                };
-                if route.matches(line) {
-                    self.run(ipv6, route.args("del"))?;
+                    vec!["route".into(), "show".into(), "exact".into(), prefix.into()],
+                )?;
+                for line in output.lines() {
+                    let words: Vec<_> = line.split_whitespace().collect();
+                    let source = words
+                        .windows(2)
+                        .find(|pair| pair[0] == "src")
+                        .map(|pair| pair[1].parse::<IpAddr>())
+                        .transpose()?;
+                    let route = OwnedRoute {
+                        ipv6,
+                        prefix: prefix.into(),
+                        interface: self.tun.clone(),
+                        gateway: None,
+                        source,
+                    };
+                    if route.matches(line) {
+                        self.run(ipv6, route.args("del"))?;
+                    }
                 }
             }
         }
@@ -345,7 +355,7 @@ mod tests {
             routes: vec![
                 (
                     false,
-                    "default via 192.0.2.1 dev eth0 metric 100 proto dhcp".into(),
+                    "default via 192.0.2.1 dev eth0 metric 0 proto static".into(),
                 ),
                 (
                     false,
@@ -430,31 +440,25 @@ mod tests {
 
     #[test]
     fn conflicting_route_changes_nothing() {
-        let (guard, state) = fixture();
-        state
-            .lock()
-            .unwrap()
-            .routes
-            .push((false, "default dev eth9 metric 1 proto static".into()));
-        let original = state.lock().unwrap().routes.clone();
-        assert!(
-            guard
-                .shared()
+        for prefix in tunnel_prefixes(false) {
+            let (guard, state) = fixture();
+            state
                 .lock()
                 .unwrap()
-                .set_default("10.0.0.2".parse().unwrap())
-                .is_err()
-        );
-        drop(guard);
-        assert_eq!(state.lock().unwrap().routes, original);
-        assert!(
-            !state
-                .lock()
-                .unwrap()
-                .calls
-                .iter()
-                .any(|call| call.contains("route del"))
-        );
+                .routes
+                .push((false, format!("{prefix} dev eth9 metric 1 proto static")));
+            let original = state.lock().unwrap().routes.clone();
+            assert!(
+                guard
+                    .shared()
+                    .lock()
+                    .unwrap()
+                    .set_default("10.0.0.2".parse().unwrap())
+                    .is_err()
+            );
+            drop(guard);
+            assert_eq!(state.lock().unwrap().routes, original);
+        }
     }
 
     #[test]
@@ -463,20 +467,21 @@ mod tests {
             ("203.0.113.1", "192.0.2.1", false, "203.0.113.1/32"),
             ("2001:db8::1", "2001:db8::2", true, "2001:db8::1/128"),
         ] {
+            let mut routes = vec![(
+                ipv6,
+                format!("{prefix} dev eth0 via {gateway} metric 1 proto static"),
+            )];
+            routes.extend(tunnel_prefixes(ipv6).map(|prefix| {
+                (
+                    ipv6,
+                    format!(
+                        "{prefix} dev vpn0 src {} metric 1 proto static",
+                        if ipv6 { "fd00::2" } else { "10.0.0.2" }
+                    ),
+                )
+            }));
             let state = Arc::new(Mutex::new(FakeState {
-                routes: vec![
-                    (
-                        ipv6,
-                        format!("{prefix} dev eth0 via {gateway} metric 1 proto static"),
-                    ),
-                    (
-                        ipv6,
-                        format!(
-                            "default dev vpn0 src {} metric 1 proto static",
-                            if ipv6 { "fd00::2" } else { "10.0.0.2" }
-                        ),
-                    ),
-                ],
+                routes,
                 ..Default::default()
             }));
             let original = state.lock().unwrap().routes.clone();
@@ -602,7 +607,7 @@ mod tests {
                 // remain by the time the runner flushes the addresses.
                 let mut kernel = state.lock().unwrap();
                 for (ipv6, line) in &mut kernel.routes {
-                    if *ipv6 && line.starts_with("default dev vpn0 src ") {
+                    if *ipv6 && line.contains(" dev vpn0 src ") {
                         let words: Vec<_> = line.split_whitespace().collect();
                         *line = words[..3]
                             .iter()
@@ -619,7 +624,7 @@ mod tests {
                     routes
                         .installed
                         .iter()
-                        .any(|route| route.prefix != "default")
+                        .any(|route| route.prefix == "203.0.113.1/32")
                 );
             }
         }
@@ -655,6 +660,9 @@ mod tests {
             (true, "default dev eth9 metric 1 proto static".into()),
             (true, "default dev vpn0 metric 100 proto static".into()),
             (true, "default dev vpn0 metric 1 proto dhcp".into()),
+            (true, "::/1 dev eth9 metric 1 proto static".into()),
+            (true, "8000::/1 dev vpn0 metric 100 proto static".into()),
+            (true, "::/1 dev vpn0 metric 1 proto dhcp".into()),
         ]);
         let original = state.lock().unwrap().routes.clone();
         guard
@@ -671,10 +679,16 @@ mod tests {
         for source in [" src fd00::2", ""] {
             let (guard, state) = fixture();
             let original = state.lock().unwrap().routes.clone();
-            state.lock().unwrap().routes.push((
-                true,
-                format!("default dev vpn0{source} metric 1 proto static"),
-            ));
+            state
+                .lock()
+                .unwrap()
+                .routes
+                .extend(["default", "::/1", "8000::/1"].map(|prefix| {
+                    (
+                        true,
+                        format!("{prefix} dev vpn0{source} metric 1 proto static"),
+                    )
+                }));
             {
                 let shared = guard.shared();
                 let mut routes = shared.lock().unwrap();
@@ -706,7 +720,7 @@ mod tests {
                 .iter()
                 .filter(|call| call.contains("route add"))
                 .count(),
-            1
+            2
         );
         routes.set_default("10.0.0.3".parse().unwrap()).unwrap();
         // Flushing TUN addresses can remove the associated route on reconnect.
@@ -726,6 +740,26 @@ mod tests {
                 .iter()
                 .any(|(_, line)| line.contains("dev vpn0"))
         );
+    }
+
+    #[test]
+    fn prefix_length() {
+        let route = OwnedRoute {
+            ipv6: true,
+            prefix: "::/1".into(),
+            interface: "vpn0".into(),
+            gateway: None,
+            source: None,
+        };
+        assert!(route.matches("::/1 dev vpn0 metric 1 proto static"));
+        for prefix in ["default", "::/0", "::/128", "::"] {
+            assert!(!route.matches(&format!("{prefix} dev vpn0 metric 1 proto static")));
+        }
+        let host = OwnedRoute {
+            prefix: "::1/128".into(),
+            ..route
+        };
+        assert!(host.matches("::1 dev vpn0 metric 1 proto static"));
     }
 
     #[cfg(target_os = "linux")]
@@ -768,7 +802,7 @@ mod tests {
             "dev",
             "vault-eth",
             "metric",
-            "100",
+            "0",
         ]);
         ip(&[
             "-6",
@@ -859,18 +893,36 @@ mod tests {
                         ]);
                         routes.set_default("10.0.0.2".parse().unwrap()).unwrap();
                         routes.set_default(address.parse().unwrap()).unwrap();
-                        assert!(
-                            ip(&["-6", "route", "show", "default"])
-                                .contains(&format!("src {address}"))
-                        );
+                        for target in ["2001:db9::1", "9000::1"] {
+                            let selected = ip(&["-6", "route", "get", target]);
+                            assert!(selected.contains("dev vault-tun"));
+                            assert!(selected.contains(&format!("src {address}")));
+                        }
                     }
                 }
             }
-            assert!(ip(&["route", "get", "198.51.100.1"]).contains("dev vault-tun"));
+            for target in ["1.1.1.1", "198.51.100.1"] {
+                assert!(ip(&["route", "get", target]).contains("dev vault-tun"));
+            }
+            assert!(ip(&["route", "get", "203.0.113.1"]).contains("dev vault-eth"));
             guard.restore().unwrap();
             guard.restore().unwrap();
             assert_eq!(ip(&["route", "show", "default"]), original_v4);
             assert_eq!(ip(&["-6", "route", "show", "default"]), original_v6);
+            for ipv6 in [false, true] {
+                for prefix in tunnel_prefixes(ipv6) {
+                    assert!(
+                        ip(&[
+                            if ipv6 { "-6" } else { "-4" },
+                            "route",
+                            "show",
+                            "exact",
+                            prefix
+                        ])
+                        .is_empty()
+                    );
+                }
+            }
             assert_eq!(
                 ip(&["route", "show", "exact", "203.0.113.1/32"]),
                 original_host

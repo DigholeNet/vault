@@ -135,6 +135,13 @@ object VaultFileLogger {
                 if (clear) {
                     logFile?.let { FileOutputStream(it, false).use { stream -> stream.flush() } }
                     prevLogFile?.delete()
+                    eventFile?.let { file ->
+                        FileOutputStream(file, false).use { stream -> stream.flush() }
+                        val backup = File(file.parentFile, "vpn-events.prev.log")
+                        if (backup.exists() && !backup.delete()) {
+                            throw java.io.IOException("Failed to clear event log backup")
+                        }
+                    }
                 }
                 val content = listOfNotNull(prevLogFile, logFile).filter { it.exists() }
                     .joinToString("\n") { it.readText() }
