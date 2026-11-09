@@ -19,24 +19,28 @@ struct IosMainView: View {
                 IosStatusView(vpnManager: vpnManager)
             }.tabItem {
                 Label(languageManager.tr("Status"), systemImage: "bolt.heart")
+                    .environment(\.symbolVariants, .none)
             }.tag(0)
 
             NavigationStack {
                 IosConfigureView(selectedTab: $selectedTab)
             }.tabItem {
-                Label(languageManager.tr("Configure"), systemImage: "server.rack")
+                Label(languageManager.tr("Configure"), systemImage: "gearshape")
+                    .environment(\.symbolVariants, .none)
             }.tag(1)
 
             NavigationStack {
                 IosDiagnosticsView(vpnManager: vpnManager)
             }.tabItem {
                 Label(languageManager.tr("Diagnostics"), systemImage: "stethoscope")
+                    .environment(\.symbolVariants, .none)
             }.tag(2)
 
             NavigationStack {
                 IosAboutView()
             }.tabItem {
-                Label(languageManager.tr("About"), systemImage: "questionmark.app")
+                Label(languageManager.tr("About"), systemImage: "info.circle")
+                    .environment(\.symbolVariants, .none)
             }.tag(3)
         }
         .alert(
