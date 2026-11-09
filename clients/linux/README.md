@@ -20,7 +20,8 @@ implementation used by the Vault Android/iOS clients.
 
 ## Runtime dependencies
 
-The Debian package installs `iproute2` (`ip`) and `procps` (`sysctl`).
+The Debian package installs `iproute2` (`ip`), `procps` (`sysctl`) and
+`adduser` (for the dedicated service account).
 It recommends `systemd-resolved` for systems where it manages `/etc/resolv.conf`;
 `resolvectl` is required in that case. Other systems use the file-based DNS backend.
 For source installations, install these tools separately before starting Edge.
@@ -96,12 +97,24 @@ sudo install -d -m 700 /etc/vault
 sudo ./target/release/edge --config /etc/vault/edge.toml
 ```
 
+To change identity, add `--user USER --group GROUP`. This must still start as
+root. The switch happens before any logging, Tokio or TUN reader threads start.
+The selected log directory and storage parent must support file creation,
+append, rename and deletion by the target user. Edge retains `CAP_NET_ADMIN`,
+`CAP_NET_RAW` and `CAP_DAC_OVERRIDE` for route/DNS changes and cleanup, so this
+is not a complete privilege sandbox.
+
 ### Run as systemd service:
 
-The Debian package installs the binary and service units. For a source build,
-install them from the repository root before enabling the service:
+The Debian package creates a shared `vault` system user/group and starts the
+service directly with that identity and the required capabilities. It also
+migrates ownership of logs and state created as root by earlier versions.
+For a source build, create the account and install the units from the
+repository root before enabling the service:
 
 ```bash
+sudo addgroup --system vault
+sudo adduser --system --ingroup vault --no-create-home --home /var/lib/vault --disabled-login vault
 sudo install -m 755 target/release/edge /usr/bin/edge
 sudo install -m 644 clients/linux/assets/edge.service /lib/systemd/system/edge.service
 sudo install -m 644 clients/linux/assets/edge.target /lib/systemd/system/edge.target

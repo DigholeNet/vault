@@ -50,27 +50,12 @@ struct Args {
     s: Option<String>,
 }
 
-/// Deferred privilege-drop request handed to the do_run closure. The caller
-/// applies it after all root-only initialization (TUN device, iptables,
-/// resolv.conf) and before entering the run loop. With no --user/--group it
-/// is a no-op.
-pub struct PrivDropRequest {
-    user: Option<String>,
-    group: Option<String>,
-}
-
-impl PrivDropRequest {
-    pub fn apply(self) -> anyhow::Result<()> {
-        if self.user.is_none() && self.group.is_none() {
-            return Ok(());
-        }
-        info!("Dropping privileges");
-        drop_privileges(self.user.as_deref(), self.group.as_deref())
-    }
-}
-
 #[cfg(target_os = "linux")]
-fn drop_privileges(user: Option<&str>, group: Option<&str>) -> anyhow::Result<()> {
+fn drop_privileges(
+    user: Option<&str>,
+    group: Option<&str>,
+    bind_service: bool,
+) -> anyhow::Result<()> {
     use caps::{CapSet, Capability};
     use std::collections::HashSet;
 
@@ -90,13 +75,16 @@ fn drop_privileges(user: Option<&str>, group: Option<&str>) -> anyhow::Result<()
     // TUN/route/iptables management, NET_RAW for raw packet sockets, and
     // DAC_OVERRIDE so the edge client can rewrite the root-owned
     // /etc/resolv.conf on exit.
-    let wanted: HashSet<Capability> = [
+    let mut wanted: HashSet<Capability> = [
         Capability::CAP_NET_ADMIN,
         Capability::CAP_NET_RAW,
         Capability::CAP_DAC_OVERRIDE,
     ]
     .into_iter()
     .collect();
+    if bind_service {
+        wanted.insert(Capability::CAP_NET_BIND_SERVICE);
+    }
     caps::set(None, CapSet::Permitted, &wanted)?;
     caps::set(None, CapSet::Effective, &wanted)?;
     // PR_CAP_AMBIENT_RAISE requires the capability to be in both Permitted
@@ -110,7 +98,11 @@ fn drop_privileges(user: Option<&str>, group: Option<&str>) -> anyhow::Result<()
 }
 
 #[cfg(not(target_os = "linux"))]
-fn drop_privileges(user: Option<&str>, group: Option<&str>) -> anyhow::Result<()> {
+fn drop_privileges(
+    user: Option<&str>,
+    group: Option<&str>,
+    _bind_service: bool,
+) -> anyhow::Result<()> {
     // Linux capabilities do not exist elsewhere; plain UID/GID change.
     let mut pd = privdrop::PrivDrop::default();
     if let Some(user) = user {
@@ -130,7 +122,7 @@ pub fn app_main<T: DeserializeOwned, F, F2>(
 ) -> anyhow::Result<()>
 where
     F: FnOnce(bool, bool, Option<&String>) -> anyhow::Result<LoggerGuard>,
-    F2: FnOnce(Arc<SysSignal>, T, PrivDropRequest) -> anyhow::Result<()>,
+    F2: FnOnce(Arc<SysSignal>, T) -> anyhow::Result<()>,
 {
     let args: Args = Args::parse();
     if args.version {
@@ -150,9 +142,26 @@ where
         return Ok(());
     }
 
+    if args.user.is_some() || args.group.is_some() {
+        anyhow::ensure!(
+            unsafe { libc::geteuid() } == 0,
+            "--user/--group require starting as root"
+        );
+    }
+
     // Validate before daemonizing or touching control paths. Acquire the
     // instance lock before forking so duplicate starts fail in the caller.
     let (config, signal) = load_and_lock::<T>(args.config.as_deref(), sock_path)?;
+
+    if args.user.is_some() || args.group.is_some() {
+        // Capabilities are per-thread. Establish the final identity before
+        // daemonization, logging, Tokio or the client creates any threads.
+        drop_privileges(
+            args.user.as_deref(),
+            args.group.as_deref(),
+            name == "supernode",
+        )?;
+    }
 
     // Declared before the runtime so it drains logs after runtime/daemon cleanup.
     let _logger_guard = if args.daemon {
@@ -160,10 +169,6 @@ where
         if let Some(pid_file) = &args.pid_file {
             daemonize = daemonize.pid_file(pid_file).chown_pid_file(true);
         }
-        // --user/--group are NOT set on the daemonizer: the fork keeps root
-        // privileges so TUN/iptables setup can still run; the do_run closure
-        // applies the deferred privilege drop itself once initialization is
-        // done.
         daemonize.start().context("Failed to daemonize")?;
         // The logger must start after the fork: the non-blocking file
         // writer's background thread does not survive daemonize, so a
@@ -184,14 +189,10 @@ where
     let signal_init = signal.clone();
     rt.spawn(async move { signal_init.init().await });
 
-    let privdrop = PrivDropRequest {
-        user: args.user,
-        group: args.group,
-    };
     // Retain the instance lock until do_run has finished *all* cleanup,
     // even when its own signal field is dropped before its network guards.
     let run_signal = signal.clone();
-    rt.block_on(async move { do_run(run_signal, config, privdrop) })?;
+    rt.block_on(async move { do_run(run_signal, config) })?;
 
     Ok(())
 }

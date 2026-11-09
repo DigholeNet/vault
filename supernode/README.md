@@ -212,6 +212,11 @@ supernode --config /etc/vault/supernode.toml --verbose
 supernode --config /etc/vault/supernode.toml --daemon --log-dir /var/log/vault
 ```
 
+For a manual identity change, append `--user USER --group GROUP` to a root
+invocation. The switch happens before any background threads start. The log
+directory must support file creation, append, rename and deletion by the target
+user.
+
 ## Deployment
 
 ### systemd service
@@ -220,24 +225,29 @@ The project includes systemd unit files:
 
 - **supernode.service**: main service unit
   - Type: forking; Restart: on-failure (5s delay)
+  - Runs directly as the dedicated `vault` user and group
   - Resource limits: 256 tasks, 1024M memory
-  - Capabilities: NET_ADMIN, NET_BIND_SERVICE, NET_RAW, etc.
+  - Capabilities: NET_ADMIN, NET_BIND_SERVICE, NET_RAW and DAC_OVERRIDE
   - Device access: `/dev/net/tun` (read-write)
 - **supernode.target**: target unit for grouping
 
 ### Debian package installation
 
+The package creates the shared `vault` system account and migrates ownership of
+logs created as root by earlier versions. The account is not deleted on package
+removal.
+
 ```bash
 # Install a locally built package (adjust the filename to your build)
-dpkg -i target/debian/supernode_0.1.0-1_amd64.deb
+sudo dpkg -i target/debian/supernode_0.1.0-1_amd64.deb
 
 # Create the configuration on a fresh installation. Set a strong password
 # and review the address pools before starting the service.
-install -m 600 /etc/vault/supernode.toml.example /etc/vault/supernode.toml
+sudo install -m 600 /etc/vault/supernode.toml.example /etc/vault/supernode.toml
 sudoedit /etc/vault/supernode.toml
 
 # Start the service and enable auto-start
-systemctl enable --now supernode
+sudo systemctl enable --now supernode
 ```
 
 File locations (Debian):
@@ -249,8 +259,9 @@ File locations (Debian):
 
 ## Security considerations
 
-1. **Root privileges required**: the server needs `CAP_NET_ADMIN` to create
-   TUN devices and modify iptables rules
+1. **Service capabilities**: the `vault` service retains `CAP_NET_ADMIN`,
+   `CAP_NET_BIND_SERVICE`, `CAP_NET_RAW` and `CAP_DAC_OVERRIDE`; changing UID is
+   not a complete privilege sandbox
 2. **Password security**: the shared password is used for authentication;
    use strong, unique passwords
 3. **Network exposure**: the UDP port is exposed to the network; open it only

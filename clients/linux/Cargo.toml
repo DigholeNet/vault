@@ -29,7 +29,7 @@ assets = [
   ["assets/edge.target", "/lib/systemd/system/edge.target", "644"],
   ["target/edge.1.gz", "/usr/share/man/man1/edge.1.gz", "644"],
 ]
-depends = "$auto, iproute2, procps"
+depends = "$auto, iproute2, procps, adduser"
 # resolvectl is optional: use it for systemd-resolved-managed resolv.conf.
 recommends = "systemd-resolved"
 extended-description = """\
@@ -42,4 +42,4 @@ section = "net"
 # retain automatic shared-library dependency detection above.
 [package.metadata.deb.variants.musl]
 name = "edge"
-depends = "iproute2, procps"
+depends = "iproute2, procps, adduser"

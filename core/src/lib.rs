@@ -25,8 +25,6 @@ pub mod test_utils;
 pub mod util;
 
 #[cfg(not(target_os = "ios"))]
-pub use app::PrivDropRequest;
-#[cfg(not(target_os = "ios"))]
 pub use app::app_main;
 pub use buf::Buffer;
 pub use crypto::CryptoCore;

@@ -10,7 +10,7 @@ use std::{
 use dashmap::DashMap;
 use tracing::{error, info, warn};
 use vault_core::{
-    PrivDropRequest, SysSignal, app_main,
+    SysSignal, app_main,
     device::{Ipv4, Ipv6, TunTapDevice},
     logger::rolling::{LoggerGuard, cli_log_levels, init_logger},
     util,
@@ -28,10 +28,10 @@ const RESOLV_CONF_PATH: &str = "/etc/resolv.conf";
 const RESOLV_CONF_BACKUP_PATH: &str = "/run/edge/resolv.conf.backup";
 
 pub fn run() -> anyhow::Result<()> {
-    app_main::<EdgeConfig, _, _>("edge", logger_init, |signal, config, privdrop| {
+    app_main::<EdgeConfig, _, _>("edge", logger_init, |signal, config| {
         // Log errors explicitly: in daemon mode stderr is /dev/null, so an
         // error returned from here would otherwise be lost.
-        if let Err(e) = run_inner(signal, config, privdrop) {
+        if let Err(e) = run_inner(signal, config) {
             error!("edge exited with error: {:#}", e);
             return Err(e);
         }
@@ -39,11 +39,7 @@ pub fn run() -> anyhow::Result<()> {
     })
 }
 
-fn run_inner(
-    signal: Arc<SysSignal>,
-    config: EdgeConfig,
-    privdrop: PrivDropRequest,
-) -> anyhow::Result<()> {
+fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     // Recover before DNS lookup: the previous process may have left DNS
     // pointing into a tunnel that no longer exists.
     DnsGuard::restore_backup(
@@ -111,12 +107,6 @@ fn run_inner(
             Ok(())
         },
     )?;
-
-    // TUN creation is complete; retain network capabilities for the async
-    // assignment callback and cleanup, and drop privileges before entering
-    // the wait loop. The exit-time route/DNS rollback below relies on the
-    // retained capabilities.
-    privdrop.apply()?;
 
     // Wait for the quit signal; log traffic stats periodically. The
     // session reconnects itself with exponential backoff on failures.
