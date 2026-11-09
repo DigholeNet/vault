@@ -438,9 +438,10 @@ mod tests {
         socket
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
-        // Peek leaves the datagram queued, including a zero-length datagram.
+        // A non-empty peek buffer waits for a datagram and leaves it queued,
+        // including a zero-length datagram.
         socket
-            .peek_from(&mut [0])
+            .peek_from(&mut [0; 1])
             .expect("UDP packet did not arrive");
         socket.set_nonblocking(true).unwrap();
     }
