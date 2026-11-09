@@ -73,7 +73,7 @@ These checks do not activate a real tunnel; real tunnel tests need signed target
 
 ### Configuration options
 
-- `Device ID`: Peer identifier generated on the device; editable on iOS
+- `Device ID`: Peer identifier generated on the device
 - `Host`: Vault server hostname or IP address; required
 - `Port`: Server UDP port; defaults to 9527
 - `Password`: Authentication password; required

@@ -135,10 +135,11 @@ impl ResolvedDns {
 }
 
 /// Publish only a complete, synced backup. A unique sibling temporary file
-/// can be abandoned by SIGKILL without becoming a recovery source. hard_link
-/// publishes atomically and refuses to overwrite an existing recovery copy.
+/// can be abandoned by SIGKILL without becoming a recovery source. Initial
+/// publication refuses to overwrite a backup; refreshes replace it atomically.
 fn publish_backup(
     backup: &Path,
+    replace: bool,
     write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
 ) -> anyhow::Result<()> {
     let temporary = backup.with_extension(format!(
@@ -153,7 +154,11 @@ fn publish_backup(
     let result = (|| -> anyhow::Result<()> {
         write(&mut file).context("write temporary DNS backup")?;
         file.sync_all().context("sync DNS recovery backup")?;
-        std::fs::hard_link(&temporary, backup).context("publish DNS recovery backup")?;
+        if replace {
+            std::fs::rename(&temporary, backup).context("replace DNS recovery backup")?;
+        } else {
+            std::fs::hard_link(&temporary, backup).context("publish DNS recovery backup")?;
+        }
         Ok(())
     })();
     drop(file);
@@ -168,6 +173,8 @@ pub struct DnsGuard {
     backup: PathBuf,
     original: Option<String>,
     configured: Option<String>,
+    // None while our own write may be incomplete; do not adopt that as system DNS.
+    last_applied: Option<String>,
     resolved: Option<ResolvedDns>,
 }
 
@@ -189,6 +196,7 @@ impl DnsGuard {
                 backup: backup.into(),
                 original: None,
                 configured: None,
+                last_applied: None,
                 resolved: Some(ResolvedDns {
                     link: link.into(),
                     servers: servers.to_vec(),
@@ -229,6 +237,7 @@ impl DnsGuard {
             backup: backup.into(),
             original: None,
             configured: None,
+            last_applied: None,
             resolved: None,
         };
         if servers.is_empty() {
@@ -240,16 +249,17 @@ impl DnsGuard {
             std::fs::create_dir_all(parent)?;
         }
         use std::io::Write;
-        publish_backup(backup, |file| file.write_all(original.as_bytes()))?;
+        publish_backup(backup, false, |file| file.write_all(original.as_bytes()))?;
         // Arm before touching the live file, including partial-write errors.
         guard.original = Some(original);
         let content = resolv_conf(servers);
         guard.configured = Some(content.clone());
         write_live(live, &content).context("apply DNS configuration")?;
+        guard.last_applied = Some(content);
         Ok(guard)
     }
 
-    /// Change the active assignment without replacing the original recovery copy.
+    /// Change the active assignment without replacing the saved system DNS.
     pub fn set_servers(&mut self, servers: &[String]) -> anyhow::Result<()> {
         anyhow::ensure!(!servers.is_empty(), "no DNS servers selected");
         validate_servers(servers)?;
@@ -262,21 +272,47 @@ impl DnsGuard {
         Ok(())
     }
 
-    /// Network managers can rewrite resolv.conf after Wi-Fi reconnects.
-    /// Repair our active configuration without replacing the startup backup.
+    fn remember_external(&mut self, current: &str) -> anyhow::Result<()> {
+        if self
+            .last_applied
+            .as_deref()
+            .is_some_and(|last| last != current)
+            && self.original.as_deref() != Some(current)
+        {
+            use std::io::Write;
+            publish_backup(&self.backup, true, |file| {
+                file.write_all(current.as_bytes())
+            })?;
+            self.original = Some(current.to_owned());
+        }
+        Ok(())
+    }
+
+    /// Preserve observed network-manager updates before reapplying VPN DNS.
     pub fn ensure_applied(&mut self) -> anyhow::Result<bool> {
+        self.ensure_applied_with(|path, content| std::fs::write(path, content))
+    }
+
+    fn ensure_applied_with(
+        &mut self,
+        write_live: impl FnOnce(&Path, &str) -> std::io::Result<()>,
+    ) -> anyhow::Result<bool> {
         if let Some(resolved) = &mut self.resolved {
             return resolved.ensure_with(resolvectl);
         }
-        let Some(configured) = &self.configured else {
+        let Some(configured) = self.configured.clone() else {
             return Ok(false);
         };
-        if std::fs::read_to_string(&self.live).context("read current DNS configuration")?
-            == *configured
-        {
+        let current =
+            std::fs::read_to_string(&self.live).context("read current DNS configuration")?;
+        self.remember_external(&current)?;
+        if current == configured {
+            self.last_applied = Some(current);
             return Ok(false);
         }
-        std::fs::write(&self.live, configured).context("reapply DNS configuration")?;
+        self.last_applied = None;
+        write_live(&self.live, &configured).context("reapply DNS configuration")?;
+        self.last_applied = Some(configured);
         Ok(true)
     }
 
@@ -285,11 +321,32 @@ impl DnsGuard {
             resolved.restore_with(resolvectl)?;
         }
         self.resolved = None;
-        if let Some(original) = &self.original {
-            std::fs::write(&self.live, original).context("restore original DNS configuration")?;
+        if self.original.is_some() {
+            let current = if self.last_applied.is_some() {
+                match std::fs::read_to_string(&self.live) {
+                    Ok(current) => {
+                        self.remember_external(&current)?;
+                        Some(current)
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => {
+                        return Err(error).context("read DNS configuration before restore");
+                    }
+                }
+            } else {
+                None
+            };
+            let original = self.original.as_ref().unwrap();
+            if current.as_deref() != Some(original.as_str()) {
+                self.last_applied = None;
+                std::fs::write(&self.live, original).context("restore system DNS configuration")?;
+            }
+            // If backup removal fails, a retry must still recognize external updates.
+            self.last_applied = Some(original.clone());
             std::fs::remove_file(&self.backup).context("remove DNS recovery backup")?;
             self.original = None;
             self.configured = None;
+            self.last_applied = None;
         }
         Ok(())
     }
@@ -395,7 +452,7 @@ mod tests {
         let orphan = fixture.backup.with_extension("previous-process.tmp");
         std::fs::write(&orphan, "partial").unwrap();
         let original = std::fs::read_to_string(&fixture.live).unwrap();
-        publish_backup(&fixture.backup, |file| {
+        publish_backup(&fixture.backup, false, |file| {
             file.write_all(&original.as_bytes()[..5])?;
             assert!(!fixture.backup.exists());
             DnsGuard::restore_backup(&fixture.live, &fixture.backup).unwrap();
@@ -413,7 +470,7 @@ mod tests {
     #[test]
     fn backup_never_partial_or_overwritten() {
         let fixture = Fixture::new();
-        let result = publish_backup(&fixture.backup, |file| {
+        let result = publish_backup(&fixture.backup, false, |file| {
             file.write_all(b"partial")?;
             Err(std::io::Error::other("injected backup write failure"))
         });
@@ -423,32 +480,139 @@ mod tests {
         assert_eq!(std::fs::read_dir(&fixture.dir).unwrap().count(), 1);
 
         std::fs::write(&fixture.backup, "saved\n").unwrap();
-        assert!(publish_backup(&fixture.backup, |file| file.write_all(b"replacement\n")).is_err());
+        assert!(
+            publish_backup(&fixture.backup, false, |file| file
+                .write_all(b"replacement\n"))
+            .is_err()
+        );
         assert_eq!(std::fs::read_to_string(&fixture.backup).unwrap(), "saved\n");
         fixture.original();
         assert_eq!(std::fs::read_dir(&fixture.dir).unwrap().count(), 2);
     }
 
     #[test]
+    fn backup_refresh() {
+        let fixture = Fixture::new();
+        std::fs::write(&fixture.backup, "saved\n").unwrap();
+        assert!(
+            publish_backup(&fixture.backup, true, |file| {
+                file.write_all(b"partial")?;
+                Err(std::io::Error::other("injected backup write failure"))
+            })
+            .is_err()
+        );
+        assert_eq!(std::fs::read_to_string(&fixture.backup).unwrap(), "saved\n");
+        publish_backup(&fixture.backup, true, |file| {
+            file.write_all(b"new\n")?;
+            assert_eq!(std::fs::read_to_string(&fixture.backup).unwrap(), "saved\n");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&fixture.backup).unwrap(), "new\n");
+        assert_eq!(std::fs::read_dir(&fixture.dir).unwrap().count(), 2);
+    }
+
+    #[test]
     fn reapply_dns() {
         let fixture = Fixture::new();
-        let original = std::fs::read_to_string(&fixture.live).unwrap();
         let mut guard =
             DnsGuard::setup(&fixture.live, &fixture.backup, &["1.1.1.1".into()]).unwrap();
         let configured = std::fs::read_to_string(&fixture.live).unwrap();
         assert!(!guard.ensure_applied().unwrap());
         // Repeat to cover both a reconnect and a late DHCP rewrite after
         // the VPN handshake has already completed.
-        for _ in 0..2 {
-            std::fs::write(&fixture.live, "nameserver 192.168.1.1\n").unwrap();
+        let networks = [
+            "search first.lan\nnameserver 192.168.1.1\noptions timeout:2\n",
+            "search second.lan\nnameserver 192.168.2.1\noptions attempts:1\n",
+        ];
+        for network in networks {
+            std::fs::write(&fixture.live, network).unwrap();
             assert!(guard.ensure_applied().unwrap());
             assert_eq!(std::fs::read_to_string(&fixture.live).unwrap(), configured);
-            assert_eq!(std::fs::read_to_string(&fixture.backup).unwrap(), original);
+            assert_eq!(std::fs::read_to_string(&fixture.backup).unwrap(), network);
             assert!(!guard.ensure_applied().unwrap());
         }
         guard.restore().unwrap();
         assert!(!guard.ensure_applied().unwrap());
+        assert_eq!(std::fs::read_to_string(&fixture.live).unwrap(), networks[1]);
+    }
+
+    #[test]
+    fn late_dns() {
+        let fixture = Fixture::new();
+        let mut guard =
+            DnsGuard::setup(&fixture.live, &fixture.backup, &["1.1.1.1".into()]).unwrap();
+        let network = "search new.lan\nnameserver 192.168.2.1\n";
+        std::fs::write(&fixture.live, network).unwrap();
+        guard.restore().unwrap();
+        assert_eq!(std::fs::read_to_string(&fixture.live).unwrap(), network);
+        assert!(!fixture.backup.exists());
+    }
+
+    #[test]
+    fn backup_failure() {
+        let fixture = Fixture::new();
+        let original = std::fs::read_to_string(&fixture.live).unwrap();
+        let mut guard =
+            DnsGuard::setup(&fixture.live, &fixture.backup, &["1.1.1.1".into()]).unwrap();
+        let network = "nameserver 192.168.2.1\n";
+        std::fs::write(&fixture.live, network).unwrap();
+        guard.backup = fixture.dir.join("missing/backup");
+        assert!(guard.ensure_applied().is_err());
+        assert_eq!(std::fs::read_to_string(&fixture.live).unwrap(), network);
+        assert_eq!(std::fs::read_to_string(&fixture.backup).unwrap(), original);
+        guard.backup = fixture.backup.clone();
+        assert!(guard.ensure_applied().unwrap());
+        assert_eq!(std::fs::read_to_string(&fixture.backup).unwrap(), network);
+        guard.restore().unwrap();
+        assert_eq!(std::fs::read_to_string(&fixture.live).unwrap(), network);
+    }
+
+    #[test]
+    fn write_retry() {
+        for (complete, retry) in [(false, false), (false, true), (true, true)] {
+            let fixture = Fixture::new();
+            let mut guard =
+                DnsGuard::setup(&fixture.live, &fixture.backup, &["1.1.1.1".into()]).unwrap();
+            let mut network = "nameserver 192.168.2.1\n";
+            std::fs::write(&fixture.live, network).unwrap();
+            assert!(
+                guard
+                    .ensure_applied_with(|path, content| {
+                        std::fs::write(path, if complete { content } else { "partial" })?;
+                        Err(std::io::Error::other("injected DNS write failure"))
+                    })
+                    .is_err()
+            );
+            assert_eq!(std::fs::read_to_string(&fixture.backup).unwrap(), network);
+            if retry {
+                assert_eq!(guard.ensure_applied().unwrap(), !complete);
+                network = "nameserver 192.168.3.1\n";
+                std::fs::write(&fixture.live, network).unwrap();
+                assert!(guard.ensure_applied().unwrap());
+                assert_eq!(std::fs::read_to_string(&fixture.backup).unwrap(), network);
+            }
+            guard.restore().unwrap();
+            assert_eq!(std::fs::read_to_string(&fixture.live).unwrap(), network);
+            assert!(!fixture.backup.exists());
+        }
+    }
+
+    #[test]
+    fn restore_retry() {
+        let fixture = Fixture::new();
+        let mut guard =
+            DnsGuard::setup(&fixture.live, &fixture.backup, &["1.1.1.1".into()]).unwrap();
+        // Fail backup removal after the original DNS has been restored.
+        guard.backup = fixture.dir.clone();
+        assert!(guard.restore().is_err());
         fixture.original();
+        let network = "nameserver 192.168.2.1\n";
+        std::fs::write(&fixture.live, network).unwrap();
+        guard.backup = fixture.backup.clone();
+        guard.restore().unwrap();
+        assert_eq!(std::fs::read_to_string(&fixture.live).unwrap(), network);
+        assert!(!fixture.backup.exists());
     }
 
     #[test]

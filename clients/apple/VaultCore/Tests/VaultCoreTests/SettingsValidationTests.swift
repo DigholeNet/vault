@@ -29,6 +29,17 @@ import Testing
     #expect(!SettingsValidation.isValidDNSList("1.1.1.1", ipv6: true))
 }
 
+@Test func dnsDigits() {
+    for value in [
+        String(repeating: "9", count: 10_000), "4294967295", "127.1", "0x7f.0.0.1",
+        "256.1.1.1", "1..1.1", "1.1.1.1.1", "１.１.１.１", "١.١.١.١"
+    ] {
+        #expect(!SettingsValidation.isValidDNSList(value, ipv6: false))
+        #expect(!SettingsValidation.isValidDNSList(value))
+    }
+    #expect(SettingsValidation.isValidDNSList(" 1.1.1.1, 255.255.255.255 ", ipv6: false))
+}
+
 @Test func listLimits() {
     #expect(SettingsValidation.isValidDNSList(Array(repeating: "1.1.1.1", count: 4).joined(separator: ","), ipv6: false))
     #expect(!SettingsValidation.isValidDNSList(Array(repeating: "1.1.1.1", count: 5).joined(separator: ","), ipv6: false))

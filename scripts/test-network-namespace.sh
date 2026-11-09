@@ -21,6 +21,12 @@ if len(executables) != 1:
 print(executables[0])
 ' "$package")"
 if [[ "$package" == supernode ]]; then
+    sudo unshare --net -- bash -c '
+        set -e
+        ip link set lo up
+        sysctl -q -w net.ipv6.bindv6only=1
+        exec "$1" --exact supernode::tests::dual_stack
+    ' _ "$test_binary"
     sudo unshare --net -- env VAULT_NETWORK_TEST_ISOLATED=1 "$test_binary" \
         --exact network::tests::linux_network_namespace --ignored --nocapture
 else

@@ -85,7 +85,7 @@ after the server assigns tunnel addresses and VPN routes are installed:
 The same selection is used by the file and systemd-resolved backends. Address
 family selection follows the assignment; it does not prove that the server has
 working internet egress for that family. Changed assignments recalculate DNS
-without replacing the original recovery backup. Assignment route changes and
+without replacing the saved system DNS. Assignment route changes and
 DNS application are serialized so an old poll cannot overwrite the next
 assignment's DNS selection.
 
@@ -96,8 +96,10 @@ change, and reverts the link settings on exit. The Debian package grants the
 `vault` account only the corresponding Polkit actions; Linux capabilities alone
 do not authorize these D-Bus requests. Manual runs with another `--user` need
 equivalent Polkit authorization. Edge leaves the managed resolver file and
-physical-interface DNS settings intact. Other systems keep the existing
-resolv.conf backup/restore behavior. Active DNS settings are checked every 2s so
+physical-interface DNS settings intact. In the file backend, observed DHCP or
+network-manager updates refresh the recovery backup before VPN DNS is reapplied.
+On exit, Edge restores the latest saved system DNS or preserves an external
+update already present in the file. Active DNS settings are checked every 2s so
 late DHCP or network-manager updates do not undo recovery.
 DNS failures are retried without tearing down the session or rolling back its
 routes. Each `resolvectl` command has a 2s timeout.
