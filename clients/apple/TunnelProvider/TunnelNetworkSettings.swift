@@ -5,14 +5,8 @@ import os.log
 import VaultCore
 
 enum TunnelConstants {
-    /// Bytes of tunnel overhead added to every inner packet:
-    /// 40 outer IPv6 header (worst case, even for IPv4 peers)
-    /// + 8 outer UDP header
-    /// + 8 packet counter (EXTRA_LEN in core/src/lib.rs)
-    /// + 16 AEAD tag (TAG_LEN in core/src/lib.rs)
-    /// + 1 message type header.
-    /// Keep in sync with get_overhead() in core/src/device.rs.
-    static let tunnelOverhead: Int = 73
+    /// Worst-case outer headers and protocol overhead, owned by the Rust core.
+    static let tunnelOverhead = Int(tunnelParameters().overhead)
     /// Upper bound for the tunnel MTU: 1500 (typical Ethernet link MTU)
     /// minus tunnelOverhead. Jumbo-frame links do not inflate the tunnel
     /// MTU beyond this. Also the fallback when the underlying link MTU
@@ -31,10 +25,18 @@ enum TunnelNetworkSettings {
     /// ioctl failure). A UDP connect() transmits nothing; it only makes
     /// the kernel pick the egress interface and source address for the
     /// destination, which exposes the default route's interface.
-    private static func probeUnderlyingLinkMtu() -> Int? {
+    private static func probeUnderlyingLinkMtu(path: Network.NWPath?) -> Int? {
         let fd = socket(AF_INET, SOCK_DGRAM, 0)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
+
+        if let path {
+            guard path.status == .satisfied else { return nil }
+            // Interface MTU does not require an IPv4 address, including on IPv6-only paths.
+            return path.availableInterfaces.filter {
+                path.usesInterfaceType($0.type) && $0.type != .loopback
+            }.compactMap { Self.interfaceMtu(name: $0.name, socket: fd) }.min()
+        }
 
         // RFC 5737 TEST-NET-3, guaranteed unroutable: only the route
         // lookup matters, and it must not depend on a real host.
@@ -96,6 +98,8 @@ enum TunnelNetworkSettings {
     /// 16-byte char array (IFNAMSIZ) copied byte by byte because Swift
     /// imports it as a tuple.
     private static func interfaceMtu(name: String, socket fd: Int32) -> Int? {
+        // Never subtract encapsulation overhead from our own tunnel MTU.
+        guard !name.hasPrefix("utun"), !name.hasPrefix("lo") else { return nil }
         let nameBytes = Array(name.utf8CString)
         guard nameBytes.count <= Int(IFNAMSIZ) else { return nil }
 
@@ -123,17 +127,17 @@ enum TunnelNetworkSettings {
 
     /// Tunnel MTU: the underlying link MTU minus the tunnel overhead,
     /// clamped to [mtuLowerBound, mtuUpperBound] so PPPoE-class links
-    /// shrink the tunnel while jumbo frames never inflate it. Falls back
-    /// to the upper bound when the link MTU cannot be probed.
+    /// shrink the tunnel while jumbo frames never inflate it. A failed probe
+    /// leaves the current MTU intact; only initial setup falls back to the cap.
     /// mtuCap (Configure page, empty = mtuUpperBound) lowers the ceiling:
     /// on links that drop large outer packets, a smaller tunnel MTU keeps
     /// the UDP datagrams under the loss threshold.
-    static func mtu(cap: Int, sessionID: String) -> Int {
-        guard let linkMtu = probeUnderlyingLinkMtu() else {
+    static func mtu(cap: Int, sessionID: String, path: Network.NWPath? = nil) -> Int? {
+        guard let linkMtu = probeUnderlyingLinkMtu(path: path) else {
             Logger.network.warningAndFile(
-                "[session:\(sessionID)] Underlying link MTU probe failed; using fallback \(cap)"
+                "[session:\(sessionID)] Underlying link MTU probe failed"
             )
-            return cap
+            return nil
         }
         let mtu = min(
             max(linkMtu - TunnelConstants.tunnelOverhead, TunnelConstants.mtuLowerBound),

@@ -54,11 +54,14 @@ extension VpnManager {
             stopping=\(self.providerOperation.stopping) terminating=\(self.terminationInProgress) onDemand=\(manager.isOnDemandEnabled)
             """
             let periodic = [ProviderCommand.status, .logs, .diagnosticProbe, .startupStatus].contains(command)
+            // Normal status/log polling only needs the first/context-change
+            // trace. Failures below still log even when routine traces stop.
+            let routinePolling = command == .status || command == .logs
             let signature = "\(ObjectIdentifier(manager.connection))|\(context)"
             let last = self.lastMessageTrace[command]
             let emit = !periodic || self.terminationInProgress
                 || status == .disconnected || status == .invalid || status == .disconnecting
-                || last?.signature != signature || now - (last?.time ?? 0) >= 30
+                || last?.signature != signature || (!routinePolling && now - (last?.time ?? 0) >= 30)
             if emit { self.lastMessageTrace[command] = (signature, now) }
             replyLock.lock()
             tracing = emit

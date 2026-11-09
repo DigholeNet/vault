@@ -28,7 +28,8 @@ struct LogTextView: NSViewRepresentable {
         if followsTail {
             // Wait for SwiftUI to size the scroll view before revealing the tail.
             DispatchQueue.main.async { [weak scroll, weak view] in
-                guard let scroll, let view, view.string == text else { return }
+                guard let scroll, let view, view.string == text,
+                      view.window?.occlusionState.contains(.visible) == true else { return }
                 scroll.layoutSubtreeIfNeeded()
                 if let container = view.textContainer {
                     view.layoutManager?.ensureLayout(for: container)

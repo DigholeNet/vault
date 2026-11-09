@@ -106,7 +106,7 @@ impl Default for Config {
             tunnel_ipv4: None,
             tunnel_ipv4_prefix: None,
             tunnel_ipv6: None,
-            tunnel_mtu: 1427,
+            tunnel_mtu: crate::TUNNEL_MTU_MAX,
         }
     }
 }
@@ -292,7 +292,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(mut config: Config, now_ms: u64) -> Result<Self, EngineError> {
-        if !(1280..=1427).contains(&config.tunnel_mtu)
+        if !(crate::TUNNEL_MTU_MIN..=crate::TUNNEL_MTU_MAX).contains(&config.tunnel_mtu)
             || config.tunnel_ipv4_prefix.is_some_and(|p| p > 32)
         {
             return Err(EngineError::InvalidConfig);

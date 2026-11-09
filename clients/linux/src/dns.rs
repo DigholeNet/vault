@@ -54,21 +54,29 @@ fn bounded_output(command: &mut Command, timeout: Duration) -> anyhow::Result<Ou
 }
 
 fn resolvectl(args: &[String]) -> anyhow::Result<String> {
-    let output = bounded_output(
-        Command::new("resolvectl")
-            .arg("--no-pager")
-            .args(args)
-            .env("LC_ALL", "C"),
-        Duration::from_secs(2),
-    )
-    .context("execute resolvectl")?;
-    anyhow::ensure!(
-        output.status.success(),
-        "resolvectl {} failed: {}",
-        args.join(" "),
-        String::from_utf8_lossy(&output.stderr).trim()
-    );
+    let mut command = Command::new("resolvectl");
+    command.arg("--no-pager").args(args).env("LC_ALL", "C");
+    let output =
+        bounded_output(&mut command, Duration::from_secs(2)).context("execute resolvectl")?;
+    let output = vault_core::util::successful_output(&command, output)?;
     Ok(String::from_utf8(output.stdout)?)
+}
+
+fn validate_servers(servers: &[String]) -> anyhow::Result<()> {
+    for server in servers {
+        server
+            .parse::<IpAddr>()
+            .with_context(|| format!("invalid DNS server address: {server}"))?;
+    }
+    Ok(())
+}
+
+fn resolv_conf(servers: &[String]) -> String {
+    let mut content = String::from("search .\n");
+    for server in servers {
+        content.push_str(&format!("nameserver {server}\n"));
+    }
+    content
 }
 
 struct ResolvedDns {
@@ -172,11 +180,7 @@ impl DnsGuard {
         link: &str,
     ) -> anyhow::Result<Self> {
         if !servers.is_empty() && resolved_file(live) {
-            for server in servers {
-                server
-                    .parse::<IpAddr>()
-                    .with_context(|| format!("invalid DNS server address: {server}"))?;
-            }
+            validate_servers(servers)?;
             tracing::info!("Using systemd-resolved DNS configuration for {link}");
             // Leave the resolver-managed stub file and Wi-Fi DNS untouched.
             // The link is created later; apply its DNS after IP assignment.
@@ -230,11 +234,7 @@ impl DnsGuard {
         if servers.is_empty() {
             return Ok(guard);
         }
-        for server in servers {
-            server
-                .parse::<IpAddr>()
-                .with_context(|| format!("invalid DNS server address: {server}"))?;
-        }
+        validate_servers(servers)?;
         let original = std::fs::read_to_string(live).context("read original DNS configuration")?;
         if let Some(parent) = backup.parent() {
             std::fs::create_dir_all(parent)?;
@@ -243,10 +243,7 @@ impl DnsGuard {
         publish_backup(backup, |file| file.write_all(original.as_bytes()))?;
         // Arm before touching the live file, including partial-write errors.
         guard.original = Some(original);
-        let mut content = String::from("search .\n");
-        for server in servers {
-            content.push_str(&format!("nameserver {server}\n"));
-        }
+        let content = resolv_conf(servers);
         guard.configured = Some(content.clone());
         write_live(live, &content).context("apply DNS configuration")?;
         Ok(guard)
@@ -255,18 +252,12 @@ impl DnsGuard {
     /// Change the active assignment without replacing the original recovery copy.
     pub fn set_servers(&mut self, servers: &[String]) -> anyhow::Result<()> {
         anyhow::ensure!(!servers.is_empty(), "no DNS servers selected");
-        for server in servers {
-            server.parse::<IpAddr>().context("invalid DNS server")?;
-        }
+        validate_servers(servers)?;
         if let Some(resolved) = &mut self.resolved {
             resolved.servers = servers.to_vec();
         } else {
             anyhow::ensure!(self.original.is_some(), "DNS guard is not configured");
-            let mut content = String::from("search .\n");
-            for server in servers {
-                content.push_str(&format!("nameserver {server}\n"));
-            }
-            self.configured = Some(content);
+            self.configured = Some(resolv_conf(servers));
         }
         Ok(())
     }

@@ -98,7 +98,7 @@ object VaultFileLogger {
                         append(stackTrace)
                     }
                 }
-                rotateIfNeeded(file)
+                prevLogFile?.let { rotateIfNeeded(file, it) }
                 // append=true maps to O_APPEND, so appends never overwrite
                 // existing content even after a rotation race.
                 FileOutputStream(file, true).use { it.write(line.toByteArray(Charsets.UTF_8)) }
@@ -117,11 +117,7 @@ object VaultFileLogger {
         val file = eventFile ?: return
         writerThread.execute {
             try {
-                if (file.length() > MAX_LOG_SIZE) {
-                    val previous = File(file.parentFile, "vpn-events.prev.log")
-                    previous.delete()
-                    file.renameTo(previous)
-                }
+                rotateIfNeeded(file, File(file.parentFile, "vpn-events.prev.log"))
                 file.appendText(entry + "\n")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to write diagnostic event", e)
@@ -139,6 +135,13 @@ object VaultFileLogger {
                 if (clear) {
                     logFile?.let { FileOutputStream(it, false).use { stream -> stream.flush() } }
                     prevLogFile?.delete()
+                    eventFile?.let { file ->
+                        FileOutputStream(file, false).use { stream -> stream.flush() }
+                        val backup = File(file.parentFile, "vpn-events.prev.log")
+                        if (backup.exists() && !backup.delete()) {
+                            throw java.io.IOException("Failed to clear event log backup")
+                        }
+                    }
                 }
                 val content = listOfNotNull(prevLogFile, logFile).filter { it.exists() }
                     .joinToString("\n") { it.readText() }
@@ -149,8 +152,7 @@ object VaultFileLogger {
         }
     }
 
-    private fun rotateIfNeeded(file: File) {
-        val prev = prevLogFile ?: return
+    private fun rotateIfNeeded(file: File, prev: File) {
         if (file.exists() && file.length() > MAX_LOG_SIZE) {
             prev.delete()
             if (!file.renameTo(prev)) {

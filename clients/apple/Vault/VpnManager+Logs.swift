@@ -5,7 +5,9 @@ import VaultCore
 
 struct VpnLogState {
     var generation: UInt64 = 0
-    var clearing = false
+    var collection: Task<String, Never>?
+    var clearTask: Task<Bool, Error>?
+    var clearing: Bool { clearTask != nil }
 }
 
 extension VpnManager {
@@ -13,25 +15,39 @@ extension VpnManager {
     /// persisted for the next startup. Local files are still truncated now.
     @MainActor
     func clearLogs() async throws -> Bool {
+        if let clearing = logState.clearTask { return try await clearing.value }
         logState.generation &+= 1
-        logState.clearing = true
-        defer { logState.clearing = false }
-        #if os(macOS)
-        let token = UUID().uuidString
-        logPreferences.set(token, forKey: "clearLogsToken")
-        logPreferences.set(true, forKey: "providerLogClearPending")
-        if let cache = extensionLogCacheURL, FileManager.default.fileExists(atPath: cache.path) {
-            try FileManager.default.removeItem(at: cache)
+        let collection = logState.collection
+        logState.collection = nil
+        let clearing = Task<Bool, Error> { @MainActor in
+            defer { logState.clearTask = nil }
+            #if os(macOS)
+            let token = UUID().uuidString
+            logPreferences.set(token, forKey: "clearLogsToken")
+            logPreferences.set(true, forKey: "providerLogClearPending")
+            let cache = extensionLogCacheURL
+            #else
+            let cache: URL? = nil
+            #endif
+            try await Task.detached(priority: .utility) {
+                // Drain every queued cache write before deleting the cache.
+                // Generation checks stop older provider replies from enqueueing more.
+                _ = await collection?.value
+                if let cache, FileManager.default.fileExists(atPath: cache.path) {
+                    try FileManager.default.removeItem(at: cache)
+                }
+                try FileLogger.shared.clearLogs()
+            }.value
+            #if os(macOS)
+            let cleared = await clearProviderLogs(token: token)
+            if cleared { logPreferences.set(false, forKey: "providerLogClearPending") }
+            return cleared
+            #else
+            return true
+            #endif
         }
-        #endif
-        try FileLogger.shared.clearLogs()
-        #if os(macOS)
-        let cleared = await clearProviderLogs(token: token)
-        if cleared { logPreferences.set(false, forKey: "providerLogClearPending") }
-        return cleared
-        #else
-        return true
-        #endif
+        logState.clearTask = clearing
+        return try await clearing.value
     }
 
     #if os(macOS)
@@ -85,19 +101,31 @@ extension VpnManager {
                 }
             }
         } else { extensionLog = nil }
-        var parts = [await appLog ?? ""]
+        let local = await appLog ?? ""
         guard generation == logState.generation, !logState.clearing else { return "" }
-        if canReadLiveProviderLogs, sessionGeneration == diagnosticState.generation,
-           activeVPN?.connection === connection, let extensionLog, !extensionLog.isEmpty {
-            if let cache = extensionLogCacheURL {
-                try? extensionLog.write(to: cache, atomically: true, encoding: .utf8)
+        let providerLog = canReadLiveProviderLogs && sessionGeneration == diagnosticState.generation
+            && activeVPN?.connection === connection ? extensionLog : nil
+        let cache = extensionLogCacheURL
+        let previous = logState.collection
+        let collection = Task.detached(priority: .utility) {
+            // Keep file operations ordered even if more than one window collects logs.
+            _ = await previous?.value
+            var parts = [local]
+            if let providerLog, !providerLog.isEmpty {
+                if let cache { try? providerLog.write(to: cache, atomically: true, encoding: .utf8) }
+                parts.append(providerLog)
+            } else if let cache, let cached = try? String(contentsOf: cache, encoding: .utf8), !cached.isEmpty {
+                parts.append(cached)
             }
-            parts.append(extensionLog)
-        } else if let cache = extensionLogCacheURL,
-                  let cached = try? String(contentsOf: cache, encoding: .utf8), !cached.isEmpty {
-            parts.append(cached)
+            return FileLogger.mergeChronologically(parts.filter { !$0.isEmpty })
         }
-        return FileLogger.mergeChronologically(parts.filter { !$0.isEmpty })
+        logState.collection = collection
+        let text = await collection.value
+        guard generation == logState.generation, !logState.clearing,
+              sessionGeneration == diagnosticState.generation, activeVPN?.connection === connection,
+              providerLog == nil || canReadLiveProviderLogs
+        else { return "" }
+        return text
     }
     #else
     /// iOS app and extension already share the same log file.

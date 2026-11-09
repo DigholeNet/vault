@@ -21,6 +21,14 @@ struct IosConfigureView: View {
 
     private var validationError: String? { draft.validationError() }
 
+    private func retryPasswordStorage() {
+        let unchanged = draft.password == config.password
+        config.retryPasswordStorage()
+        if unchanged, config.passwordStorageError == nil {
+            draft.password = config.password
+        }
+    }
+
     private func save() {
         guard config.save(draft) == nil else { return }
         draft = config.connectionDraft
@@ -169,7 +177,7 @@ struct IosConfigureView: View {
                             Text(languageManager.tr(error))
                                 .foregroundColor(.red)
                                 .font(.footnote)
-                            Button(languageManager.tr("Retry")) { config.retryPasswordStorage() }
+                            Button(languageManager.tr("Retry")) { retryPasswordStorage() }
                         }
                     }
                 }

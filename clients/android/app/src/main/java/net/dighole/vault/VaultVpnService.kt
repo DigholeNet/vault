@@ -9,7 +9,6 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.VpnService
-import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import kotlinx.coroutines.CancellationException
@@ -23,10 +22,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import net.dighole.vault.data.parseConfigList
 import net.dighole.vault.data.readVaultConfig
 import net.dighole.vaultcore.Edge
 import net.dighole.vaultcore.EdgeConfig
-import net.dighole.vaultcore.LogThrottle
 import net.dighole.vaultcore.PeerId
 import net.dighole.vaultcore.uniffi.VpnException
 import net.dighole.vaultcore.uniffi.setFdBlocking
@@ -40,14 +39,14 @@ class VaultVpnService : VpnService() {
 
     companion object {
         const val TAG = "VaultVpnService"
-        const val VPN_MTU = 1427
+        val VPN_MTU: Int get() = TunnelPolicy.mtuMax
 
         // Fixed per-packet tunnel overhead: outer IPv6 header (40) + UDP (8)
         // + counter (8) + AEAD tag (16) + packet type (1).
-        const val TUNNEL_OVERHEAD = 73
+        val TUNNEL_OVERHEAD: Int get() = TunnelPolicy.overhead
 
         // Lower bound for the tunnel MTU (IPv6 minimum MTU).
-        const val MIN_VPN_MTU = 1280
+        val MIN_VPN_MTU: Int get() = TunnelPolicy.mtuMin
 
         const val ACTION_CONNECT = "net.dighole.vault.ACTION_CONNECT"
         const val ACTION_DISCONNECT = "net.dighole.vault.ACTION_DISCONNECT"
@@ -81,7 +80,6 @@ class VaultVpnService : VpnService() {
 
     @Volatile
     private var edge: Edge? = null
-    private var vpnInterface: ParcelFileDescriptor? = null
     private val serviceRunning = AtomicBoolean(false)
     private val sessionGate = SessionGate()
     private var tunnelConfigurationSequence = 0L // Protected by sessionGate.
@@ -109,7 +107,7 @@ class VaultVpnService : VpnService() {
     private fun trace(event: String) {
         VaultFileLogger.event(TAG, "service=${System.identityHashCode(this)} " +
             "running=${serviceRunning.get()} " +
-            "tunValid=${vpnInterface?.fileDescriptor?.valid()} $event")
+            "tunValid=${vpnIoHandler?.hasValidInterface} $event")
     }
 
     override fun onCreate() {
@@ -134,14 +132,12 @@ class VaultVpnService : VpnService() {
         return START_REDELIVER_INTENT
     }
 
-    override fun onBind(intent: Intent?): IBinder? {
-        return null
-    }
-
     override fun onRevoke() {
-        super.onRevoke()
-        Log.d(TAG, "onRevoke called by system")
-        handleDisconnect()
+        mainExecutor.execute {
+            super.onRevoke()
+            Log.d(TAG, "onRevoke called by system")
+            handleDisconnect()
+        }
     }
 
     // Native/Android setup can throw varied exceptions; cancellation is rethrown.
@@ -175,19 +171,12 @@ class VaultVpnService : VpnService() {
         }
         edge = null
 
-        vpnIoHandler?.stop()
+        closeTunnelIo()
 
         // Probe the underlying link MTU once per connect, while the active
         // network is still the physical one (the VPN interface is not up yet).
         // Both the TUN interface and the I/O read buffer use this value.
         tunnelMtu = probeTunnelMtu()
-        vpnIoHandler = VpnIoHandler(
-            scope = scope,
-            serviceRunning = serviceRunning,
-            mtu = tunnelMtu,
-            logTag = TAG,
-            onUplinkPacket = { packet -> edge?.writeData(packet) }
-        )
 
         // Start foreground BEFORE validating extras to avoid ANR.
         // If EXTRA_ID is missing we stopSelf immediately after.
@@ -205,6 +194,7 @@ class VaultVpnService : VpnService() {
             return
         }
 
+        emitVpnEvent(VpnStatusEvent.Connecting)
         connectJob = scope.launch {
             // Blocking Rust shutdown runs here on the IO dispatcher, not the
             // main thread. Closing before creating the new Edge below also
@@ -241,21 +231,14 @@ class VaultVpnService : VpnService() {
                 val port = config.port
                 val password = config.password
                 if (!sessionGate.update(sessionToken) {
-                    config.mtu.toIntOrNull()?.takeIf { it in MIN_VPN_MTU..VPN_MTU }?.let {
-                        tunnelMtu = it
-                        vpnIoHandler?.stop()
-                        vpnIoHandler = VpnIoHandler(scope = scope, serviceRunning = serviceRunning,
-                            mtu = tunnelMtu, logTag = TAG,
-                            onUplinkPacket = { packet -> edge?.writeData(packet) })
-                    }
+                    SettingsValidation.mtuValue(config.mtu)?.let { tunnelMtu = it }
                 }) return@launch
 
                 if (!sessionGate.update(sessionToken) {
                     serverHost = host
-                    dnsIpv4List = config.dnsIpv4.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                    dnsIpv6List = config.dnsIpv6.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                    (application as VaultApplication).diagnosticDomains = config.probeDomains
-                        .split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                    dnsIpv4List = parseConfigList(config.dnsIpv4)
+                    dnsIpv6List = parseConfigList(config.dnsIpv6)
+                    (application as VaultApplication).diagnosticDomains = parseConfigList(config.probeDomains)
                 }) return@launch
 
                 createAndStartEdge(password, host, port, id, sessionToken)
@@ -308,23 +291,9 @@ class VaultVpnService : VpnService() {
         val newEdge = Edge(
             config = edgeConfig,
             id = PeerId(id),
-            onData = { data ->
+            onPackets = { packets ->
                 sessionGate.update(sessionToken) {
-                    val handler = vpnIoHandler ?: return@update
-                    val result = handler.pendingWritePackets.trySend(data)
-                    if (!result.isSuccess) {
-                        // Throttled: these fire once per packet while the tunnel
-                        // is reconnecting, flooding the logs otherwise.
-                        if (result.isClosed) {
-                            if (LogThrottle.shouldLog("downlink-channel-closed", 5000)) {
-                                Log.d(TAG, "Downlink channel closed, dropping packet")
-                            }
-                        } else {
-                            if (LogThrottle.shouldLog("pending-write-full", 5000)) {
-                                Log.w(TAG, "Pending write channel full, dropping packet")
-                            }
-                        }
-                    }
+                    vpnIoHandler?.enqueueDownlink(packets)
                 }
             },
             onIpAssigned = { ipv4, ipv4Mask, ipv6, ipv6Prefixlen ->
@@ -388,21 +357,10 @@ class VaultVpnService : VpnService() {
                         onCreated = {
                             // establish() supersedes the old Android TUN even
                             // when a newer IP update has already arrived.
-                            vpnIoHandler?.stop()
-                            vpnIoHandler = null
-                            try {
-                                vpnInterface?.close()
-                            } catch (error: Exception) {
-                                Log.w(TAG, "Could not close previous TUN", error)
-                            }
-                            vpnInterface = null
+                            closeTunnelIo()
                         }
                     ) { iface ->
-                        vpnInterface = iface
-                        vpnIoHandler = VpnIoHandler(scope = scope, serviceRunning = serviceRunning,
-                            mtu = tunnelMtu, logTag = TAG,
-                            onUplinkPacket = { packet -> edge?.writeData(packet) })
-                        vpnIoHandler?.setVpnInterface(iface)
+                        vpnIoHandler = createTunnelIo(iface)
                         saveVpnState(true, ipv4, ipv6)
                         serviceRunning.set(true)
                         connectJob = null
@@ -424,6 +382,22 @@ class VaultVpnService : VpnService() {
                 }
             }
         }
+    }
+
+    /** Once committed, the I/O handler is the sole owner of its TUN descriptor. */
+    private fun createTunnelIo(iface: ParcelFileDescriptor): VpnIoHandler = try {
+        VpnIoHandler(scope = scope, serviceRunning = serviceRunning, mtu = tunnelMtu, logTag = TAG,
+            onUplinkPacket = { packet -> edge?.writeData(packet) }).apply { setVpnInterface(iface) }
+    } catch (_error: Exception) {
+        // commit has transferred ownership; failed I/O setup must still release the new TUN.
+        try { iface.close() } catch (_: Exception) { }
+        throw _error
+    }
+
+    private fun closeTunnelIo() {
+        val previous = vpnIoHandler
+        vpnIoHandler = null
+        previous?.stop()
     }
 
     private fun handleDisconnect() {
@@ -467,14 +441,7 @@ class VaultVpnService : VpnService() {
             }
         }
 
-        vpnIoHandler?.stop()
-        vpnIoHandler = null
-
-        try {
-            vpnInterface?.close()
-        } catch (_: Exception) {
-        }
-        vpnInterface = null
+        closeTunnelIo()
 
         // Cancel scope after I/O resources are closed so coroutines exit cleanly
         try {

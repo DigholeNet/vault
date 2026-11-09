@@ -26,6 +26,14 @@ use tokio::task::JoinHandle;
 use tokio::time::{interval, sleep};
 use tracing::{debug, info, warn};
 
+#[cfg(test)]
+#[path = "../tests/client/mod.rs"]
+mod tests;
+
+use crate::metrics::transport::{
+    DownlinkReport, ReceiveMetrics, UplinkQueueMetrics, UplinkReport, maintenance_interval,
+};
+
 use crate::{
     Algorithm, Buffer, CryptoCore, EXTRA_LEN, Handshake, HandshakeResponse, PeerId, Role,
     create_ecdh_keypair, pake, protocol, supported_algorithms,
@@ -47,6 +55,47 @@ pub const MAX_RECONNECT_DELAY_MS: u64 = 60_000;
 pub const DATA_BATCH_CAPACITY: usize = 32;
 /// Bounded uplink queue; packets are dropped when full (UDP semantics).
 pub const UPLINK_QUEUE_CAPACITY: usize = 1024;
+pub const DOWNLINK_QUEUE_CAPACITY: usize = 256;
+const UDP_RECEIVE_BUFFER_BYTES: usize = 2 * 1024 * 1024;
+
+fn configure_udp_receive_buffer(socket: &UdpSocket) {
+    let socket = socket2::SockRef::from(socket);
+    // Linux/Android report twice the requested size; Apple reports it directly.
+    let target_bytes = UDP_RECEIVE_BUFFER_BYTES
+        * if cfg!(any(target_os = "linux", target_os = "android")) {
+            2
+        } else {
+            1
+        };
+    let set_error = if socket
+        .recv_buffer_size()
+        .is_ok_and(|bytes| bytes >= target_bytes)
+    {
+        None
+    } else {
+        socket.set_recv_buffer_size(UDP_RECEIVE_BUFFER_BYTES).err()
+    };
+    // Buffer tuning must not prevent a connection on a constrained device.
+    // Read back even after a failed set so the log shows the retained capacity.
+    match socket.recv_buffer_size() {
+        Ok(recv_bytes) if set_error.is_none() && recv_bytes >= target_bytes => info!(
+            requested_bytes = UDP_RECEIVE_BUFFER_BYTES,
+            recv_bytes, "VPN UDP receive buffer configured"
+        ),
+        Ok(recv_bytes) => warn!(
+            requested_bytes = UDP_RECEIVE_BUFFER_BYTES,
+            recv_bytes,
+            error = ?set_error,
+            "VPN UDP receive buffer limited; continuing with effective capacity"
+        ),
+        Err(error) => warn!(
+            requested_bytes = UDP_RECEIVE_BUFFER_BYTES,
+            set_error = ?set_error,
+            %error,
+            "Cannot read VPN UDP receive buffer; continuing connection"
+        ),
+    }
+}
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -172,6 +221,7 @@ struct ClientState {
     heartbeat_handle: Option<JoinHandle<()>>,
     uplink_handle: Option<JoinHandle<()>>,
     uplink_tx: Option<mpsc::Sender<Vec<u8>>>,
+    uplink_queue_metrics: Option<Arc<UplinkQueueMetrics>>,
     run_handle: Option<JoinHandle<()>>,
     shutdown_tx: Option<mpsc::Sender<()>>,
     reconnect_tx: Option<mpsc::Sender<()>>,
@@ -292,14 +342,29 @@ impl ClientSession {
             counters.not_connected.fetch_add(1, Ordering::Relaxed);
             return Err(ClientError::NotConnected);
         };
-        match tx.try_send(data) {
+        let result = tx.try_send(data);
+        if let Some(metrics) = &state.uplink_queue_metrics {
+            let depth = if matches!(&result, Err(mpsc::error::TrySendError::Full(_))) {
+                tx.max_capacity()
+            } else {
+                tx.max_capacity() - tx.capacity()
+            };
+            metrics.queue.observe(depth);
+        }
+        match result {
             Ok(()) => Ok(()),
             Err(mpsc::error::TrySendError::Full(_)) => {
                 counters.queue_drops.fetch_add(1, Ordering::Relaxed);
+                if let Some(metrics) = &state.uplink_queue_metrics {
+                    metrics.full_drops.fetch_add(1, Ordering::Relaxed);
+                }
                 Ok(())
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 counters.not_connected.fetch_add(1, Ordering::Relaxed);
+                if let Some(metrics) = &state.uplink_queue_metrics {
+                    metrics.closed_drops.fetch_add(1, Ordering::Relaxed);
+                }
                 Err(ClientError::NotConnected)
             }
         }
@@ -367,9 +432,10 @@ impl ClientSession {
     }
 
     pub fn shutdown(&self) -> Result<(), ClientError> {
-        let mut handles = {
+        let (mut handles, report_totals) = {
             let mut state = self.lock_state()?;
 
+            let report_totals = !state.is_closing;
             state.is_closing = true;
             state.reconnect_tx = None;
 
@@ -390,13 +456,14 @@ impl ClientSession {
                 handles.push(handle);
             }
             state.uplink_tx = None;
+            state.uplink_queue_metrics = None;
             if let Some(handle) = state.run_handle.take() {
                 handle.abort();
                 handles.push(handle);
             }
 
             state.is_active = false;
-            handles
+            (handles, report_totals)
         };
 
         // Finish callbacks before platform guards restore DNS/routes. A
@@ -423,6 +490,18 @@ impl ClientSession {
             }
         }
 
+        if report_totals {
+            let failures = self.inner.uplink.failures();
+            info!(
+                target: "metrics",
+                workers_joined = !on_own_runtime,
+                queue_full_drops = failures[0],
+                not_connected = failures[1],
+                build_failures = failures[2],
+                send_failures = failures[3],
+                "VPN session uplink failure totals"
+            );
+        }
         Ok(())
     }
 
@@ -452,6 +531,7 @@ impl ClientState {
             heartbeat_handle: None,
             uplink_handle: None,
             uplink_tx: None,
+            uplink_queue_metrics: None,
             run_handle: None,
             shutdown_tx: None,
             reconnect_tx: None,
@@ -552,16 +632,18 @@ impl ClientInner {
             handle.abort();
         }
         state.uplink_tx = None;
+        state.uplink_queue_metrics = None;
         state.is_active = false;
     }
 
     async fn try_connect(self: &Arc<Self>) -> Result<(), ClientError> {
-        {
+        let generation = {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             // A generation identifies an attempt even when it fails or keeps
             // the same IP. Consumers must not infer transport identity from IP.
             state.connection_generation = state.connection_generation.saturating_add(1);
-        }
+            state.connection_generation
+        };
         let candidates = self.resolve_candidates().await?;
         info!(
             "Racing {} supernode candidate(s): {candidates:?}",
@@ -585,6 +667,7 @@ impl ClientInner {
         // Start the uplink sender BEFORE notifying the platform, so that
         // write_packet works as soon as on_ip_assigned fires.
         let (uplink_tx, uplink_rx) = mpsc::channel::<Vec<u8>>(UPLINK_QUEUE_CAPACITY);
+        let queue_metrics = Arc::new(UplinkQueueMetrics::new(&uplink_tx));
         {
             let mut state = self
                 .state
@@ -599,9 +682,12 @@ impl ClientInner {
                 remote_addr,
                 uplink_rx,
                 self.uplink.clone(),
+                queue_metrics.clone(),
+                generation,
             ));
             state.last_pong = Instant::now();
             state.uplink_tx = Some(uplink_tx);
+            state.uplink_queue_metrics = Some(queue_metrics);
             state.uplink_handle = Some(uplink_handle);
         }
 
@@ -629,9 +715,18 @@ impl ClientInner {
             state.is_active = true;
         }
 
-        info!("Handshake complete (peer={remote_addr}), starting data/heartbeat loops");
+        info!(
+            "Transport ready: generation={generation} peer={remote_addr} outer_ip={} uplink_capacity={UPLINK_QUEUE_CAPACITY} downlink_capacity={DOWNLINK_QUEUE_CAPACITY} session_not_connected_total={}",
+            if remote_addr.ip().to_canonical().is_ipv4() {
+                "IPv4"
+            } else {
+                "IPv6"
+            },
+            self.uplink.not_connected.load(Ordering::Relaxed)
+        );
 
-        self.run_data_loop(socket, crypto, remote_addr).await;
+        self.run_data_loop(socket, crypto, remote_addr, generation)
+            .await;
 
         Ok(())
     }
@@ -772,6 +867,7 @@ impl ClientInner {
         let socket = UdpSocket::bind(bind_addr)
             .await
             .map_err(|e| ClientError::BindFailed(e.to_string()))?;
+        configure_udp_receive_buffer(&socket);
 
         #[cfg(unix)]
         {
@@ -886,14 +982,17 @@ impl ClientInner {
         remote_addr: SocketAddr,
         mut rx: mpsc::Receiver<Vec<u8>>,
         counters: Arc<UplinkCounters>,
+        queue_metrics: Arc<UplinkQueueMetrics>,
+        generation: u64,
     ) {
         let mut buf = Buffer::new(EXTRA_LEN + 1);
-        let mut ticker = interval(Duration::from_secs(5));
-        let mut previous = counters.failures();
+        let mut report = UplinkReport::new(queue_metrics.clone(), remote_addr, generation);
+        let mut ticker = maintenance_interval();
         loop {
             tokio::select! {
                 packet = rx.recv() => {
                     let Some(data) = packet else { break; };
+                    queue_metrics.queue.observe(rx.len().saturating_add(1));
                     buf.clear();
                     // Bound both the fixed backing buffer and IPv4 UDP's
                     // maximum payload before copying/encrypting FFI input.
@@ -901,23 +1000,23 @@ impl ClientInner {
                         || buf.write_all(&data).is_err()
                         || protocol::build_data_interface(&mut buf, &crypto).is_err() {
                         counters.build_failures.fetch_add(1, Ordering::Relaxed);
+                        report.build_failure();
                         continue;
                     }
                     match socket.send_to(buf.as_ref(), remote_addr).await {
                         Ok(_) => {
                             counters.bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
                             counters.packets_sent.fetch_add(1, Ordering::Relaxed);
+                            report.sent(data.len());
                         }
-                        Err(_) => { counters.send_failures.fetch_add(1, Ordering::Relaxed); }
+                        Err(error) => {
+                            counters.send_failures.fetch_add(1, Ordering::Relaxed);
+                            report.send_error(&error);
+                        }
                     }
                 }
                 _ = ticker.tick() => {
-                    let current = counters.failures();
-                    let delta: Vec<_> = current.iter().zip(previous).map(|(now, before)| now - before).collect();
-                    if delta.iter().any(|count| *count > 0) {
-                        warn!("Uplink failures since last report: queue_full={} not_connected={} build={} send={}", delta[0], delta[1], delta[2], delta[3]);
-                    }
-                    previous = current;
+                    report.report_if_due();
                 }
             }
         }
@@ -928,9 +1027,11 @@ impl ClientInner {
         socket: Arc<UdpSocket>,
         crypto: Arc<CryptoCore>,
         remote_addr: SocketAddr,
+        generation: u64,
     ) {
         info!("Data loop started for {remote_addr}");
-        let (packet_tx, mut packet_rx) = mpsc::channel::<Vec<u8>>(256);
+        let (packet_tx, mut packet_rx) = mpsc::channel::<Vec<u8>>(DOWNLINK_QUEUE_CAPACITY);
+        let receive_metrics = Arc::new(ReceiveMetrics::new(&packet_tx));
 
         {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -938,6 +1039,7 @@ impl ClientInner {
                 return;
             }
             let receive_socket = socket.clone();
+            let metrics = receive_metrics.clone();
             let receive_handle = tokio::spawn(async move {
                 let mut buf = vec![0u8; 65535];
                 loop {
@@ -950,11 +1052,12 @@ impl ClientInner {
                                 continue;
                             }
                             let packet = buf[..len].to_vec();
-                            if packet_tx.send(packet).await.is_err() {
+                            if !enqueue_downlink(&packet_tx, &metrics, packet).await {
                                 break;
                             }
                         }
                         Err(e) => {
+                            metrics.record_receive_error(&e);
                             warn!("Receive error: {e}");
                             break;
                         }
@@ -982,7 +1085,7 @@ impl ClientInner {
                     }
                     match heartbeat_socket.send_to(buf.as_ref(), remote_addr).await {
                         Ok(bytes) => {
-                            info!("Heartbeat ping sent ({bytes} bytes to {remote_addr})")
+                            debug!("Heartbeat ping sent ({bytes} bytes to {remote_addr})")
                         }
                         Err(e) => warn!("Failed to send heartbeat: {e}"),
                     }
@@ -996,17 +1099,17 @@ impl ClientInner {
         let mut last_pong = Instant::now();
         let timeout = Duration::from_millis(HEARTBEAT_TIMEOUT_MS);
 
-        // Reused across packets: avoids allocating and zeroing a fresh 64KB
-        // Buffer for every incoming packet on the hot path.
-        let mut pkt_buf = Buffer::new(0);
-        // Reused raw/decrypted packet collections for batching.
+        // Reused for heartbeat parsing. Data packets decrypt in their own Vec.
+        let mut heartbeat_buf = Buffer::new(0);
+        // Raw-packet staging is reused. Delivery transfers ownership of batch,
+        // so reserve its next allocation once, when the first data packet arrives.
         let mut pending: Vec<Vec<u8>> = Vec::with_capacity(DATA_BATCH_CAPACITY);
-        let mut batch: Vec<Vec<u8>> = Vec::with_capacity(DATA_BATCH_CAPACITY);
+        let mut batch: Vec<Vec<u8>> = Vec::new();
 
-        // Per-second local counters for downlink statistics (do not touch speed-calculation state)
-        let mut dl_packets_1s: u64 = 0;
-        let mut dl_bytes_1s: u64 = 0;
-        let mut dl_decrypt_fail_1s: u64 = 0;
+        // Keep the timer outside select: recreating sleep(1s) per packet
+        // postpones maintenance indefinitely while traffic keeps arriving.
+        let mut report = DownlinkReport::new(receive_metrics.clone(), remote_addr, generation);
+        let mut ticker = maintenance_interval();
         // Counts packets that are neither HEARTBEAT nor DATA_INTERFACE
         // (e.g. REJECTED after a NAT mapping change, or random internet
         // noise hitting this ephemeral port). Throttled to avoid log spam.
@@ -1017,9 +1120,14 @@ impl ClientInner {
         // authenticated packet arrives within a few seconds.
         let mut rejected_since: Option<Instant> = None;
 
-        'outer: loop {
+        loop {
             tokio::select! {
-                Some(first) = packet_rx.recv() => {
+                packet = packet_rx.recv() => {
+                    let Some(first) = packet else {
+                        warn!("Receiver ended for {remote_addr}, exiting data loop");
+                        break;
+                    };
+                    receive_metrics.queue.observe(packet_rx.len().saturating_add(1));
                     // Opportunistically drain queued packets (non-blocking) so a
                     // burst is processed and delivered with a single callback.
                     pending.clear();
@@ -1032,20 +1140,20 @@ impl ClientInner {
                     }
 
                     batch.clear();
-                    for packet in pending.drain(..) {
+                    let pending_packets = pending.len();
+                    for mut packet in pending.drain(..) {
                         if packet.is_empty() {
                             continue;
                         }
                         let packet_type = packet[0];
-                        let payload = &packet[1..];
 
                         match packet_type {
                             protocol::HEARTBEAT => {
-                                pkt_buf.clear();
-                                if pkt_buf.write_all(payload).is_ok() {
-                                    match protocol::parse_pong(&mut pkt_buf, &crypto) {
+                                heartbeat_buf.clear();
+                                if heartbeat_buf.write_all(&packet[1..]).is_ok() {
+                                    match protocol::parse_pong(&mut heartbeat_buf, &crypto) {
                                         Ok(_pong) => {
-                                            info!("Pong received from {remote_addr}");
+                                            debug!("Pong received from {remote_addr}");
                                             last_pong = Instant::now();
                                             rejected_since = None;
                                             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -1058,32 +1166,32 @@ impl ClientInner {
                                 }
                             }
                             protocol::DATA_INTERFACE => {
-                                pkt_buf.clear();
-                                if pkt_buf.write_all(payload).is_ok() {
-                                    if crypto.decrypt(&mut pkt_buf, protocol::DATA_INTERFACE).is_ok() {
-                                        let data = pkt_buf.as_ref().to_vec();
-                                        dl_packets_1s += 1;
-                                        dl_bytes_1s += data.len() as u64;
-                                        // Any successfully authenticated
-                                        // packet proves the session is alive;
-                                        // refresh the liveness timestamp so
-                                        // lost pongs during active traffic do
-                                        // not cause a spurious reconnect.
-                                        last_pong = Instant::now();
-                                        rejected_since = None;
+                                if decrypt_packet(&crypto, &mut packet).is_ok() {
+                                    report.packet(packet.len());
+                                    // Any successfully authenticated
+                                    // packet proves the session is alive;
+                                    // refresh the liveness timestamp so
+                                    // lost pongs during active traffic do
+                                    // not cause a spurious reconnect.
+                                    last_pong = Instant::now();
+                                    rejected_since = None;
+                                    {
                                         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                                         state.last_pong = last_pong;
-                                        state.bytes_received.fetch_add(data.len() as u64, Ordering::Relaxed);
+                                        state.bytes_received.fetch_add(packet.len() as u64, Ordering::Relaxed);
                                         state.packets_received.fetch_add(1, Ordering::Relaxed);
-                                        batch.push(data);
-                                    } else {
-                                        dl_decrypt_fail_1s += 1;
-                                        {
-                                            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                                            state.decrypt_failures.fetch_add(1, Ordering::Relaxed);
-                                        }
-                                        debug!("Downlink packet decrypt failed");
                                     }
+                                    if batch.is_empty() {
+                                        batch.reserve_exact(pending_packets);
+                                    }
+                                    batch.push(packet);
+                                } else {
+                                    report.decrypt_failure();
+                                    {
+                                        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                                        state.decrypt_failures.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                    debug!("Downlink packet decrypt failed");
                                 }
                             }
                             protocol::REJECTED => {
@@ -1128,52 +1236,74 @@ impl ClientInner {
                     }
 
                     if !batch.is_empty() {
+                        let packet_count = batch.len();
+                        let callback_started = Instant::now();
                         self.callbacks.on_packets(std::mem::take(&mut batch));
-                    }
-
-                    if let Some(since) = rejected_since
-                        && since.elapsed() > Duration::from_secs(3)
-                    {
-                        warn!("Session still rejected by {remote_addr} after liveness probe, reconnecting");
-                        self.callbacks.on_error("session rejected by server".to_string());
-                        break 'outer;
-                    }
-
-                    if last_pong.elapsed() > timeout {
-                        warn!("Heartbeat timeout for {remote_addr}, exiting data loop");
-                        self.callbacks.on_error("heartbeat timeout".to_string());
-                        break 'outer;
+                        report.batch(packet_count, callback_started.elapsed());
                     }
                 }
-                _ = sleep(Duration::from_secs(1)) => {
-                    if dl_packets_1s > 0 || dl_decrypt_fail_1s > 0 {
-                        info!(
-                            "Downlink last 1s: {} pkts / {} bytes, decrypt_failures={}",
-                            dl_packets_1s, dl_bytes_1s, dl_decrypt_fail_1s
-                        );
-                    }
-                    dl_packets_1s = 0;
-                    dl_bytes_1s = 0;
-                    dl_decrypt_fail_1s = 0;
-                    if let Some(since) = rejected_since
-                        && since.elapsed() > Duration::from_secs(3)
-                    {
-                        warn!("Session still rejected by {remote_addr} after liveness probe, reconnecting");
-                        self.callbacks.on_error("session rejected by server".to_string());
-                        break;
-                    }
-                    if last_pong.elapsed() > timeout {
-                        warn!("Heartbeat timeout for {remote_addr}, exiting data loop");
-                        self.callbacks.on_error("heartbeat timeout".to_string());
-                        break;
-                    }
+                _ = ticker.tick() => {
+                    report.report_if_due();
                 }
+            }
+            // Check after either event so sustained incoming traffic cannot
+            // postpone liveness decisions until the maintenance tick.
+            if let Some(since) = rejected_since
+                && since.elapsed() > Duration::from_secs(3)
+            {
+                warn!("Session still rejected by {remote_addr} after liveness probe, reconnecting");
+                self.callbacks
+                    .on_error("session rejected by server".to_string());
+                break;
+            }
+            if last_pong.elapsed() > timeout {
+                warn!("Heartbeat timeout for {remote_addr}, exiting data loop");
+                self.callbacks.on_error("heartbeat timeout".to_string());
+                break;
             }
         }
 
         info!("Data loop ended for {remote_addr}");
 
         self.clear_connection();
+    }
+}
+
+/// Keep the received allocation through delivery. Compact only after AEAD
+/// authentication and replay checks succeed; the header/tag stay out of FFI.
+fn decrypt_packet(crypto: &CryptoCore, packet: &mut Vec<u8>) -> anyhow::Result<()> {
+    let (packet_type, payload) = packet
+        .split_first_mut()
+        .ok_or_else(|| anyhow::anyhow!("empty packet"))?;
+    let plaintext_len = crypto.decrypt_slice(payload, *packet_type)?.len();
+    let plaintext_start = 1 + EXTRA_LEN;
+    packet.copy_within(plaintext_start..plaintext_start + plaintext_len, 0);
+    packet.truncate(plaintext_len);
+    Ok(())
+}
+
+async fn enqueue_downlink(
+    sender: &mpsc::Sender<Vec<u8>>,
+    metrics: &ReceiveMetrics,
+    packet: Vec<u8>,
+) -> bool {
+    match sender.try_send(packet) {
+        Ok(()) => {
+            metrics
+                .queue
+                .observe(sender.max_capacity() - sender.capacity());
+            true
+        }
+        Err(mpsc::error::TrySendError::Full(packet)) => {
+            metrics.queue.observe(sender.max_capacity());
+            let started = Instant::now();
+            let result = sender.send(packet).await;
+            // The packet is retained while waiting for space. This measures
+            // completed backpressure, not packet loss or kernel UDP overflow.
+            metrics.record_wait(started.elapsed());
+            result.is_ok()
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => false,
     }
 }
 
@@ -1189,288 +1319,4 @@ fn current_ts_secs() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct NoCallbacks;
-    impl ClientCallbacks for NoCallbacks {
-        fn on_packets(&self, _: Vec<Vec<u8>>) {}
-        fn on_ip_assigned(&self, _: String, _: String, _: String, _: i32) -> Result<(), String> {
-            Ok(())
-        }
-        fn on_error(&self, _: String) {}
-    }
-
-    fn idle_session() -> ClientSession {
-        ClientSession {
-            inner: Arc::new(ClientInner {
-                uplink: Arc::new(UplinkCounters::default()),
-                config: ClientConfig {
-                    password: "test".into(),
-                    hosts: vec!["127.0.0.1".into()],
-                    port: 1,
-                    id: PeerId([1; 16]),
-                    device_name: String::new(),
-                    platform: String::new(),
-                    socket_protect: None,
-                },
-                callbacks: Arc::new(NoCallbacks),
-                runtime: Arc::new(SessionRuntime::new().unwrap()),
-                algorithms: Vec::new(),
-                state: Arc::new(Mutex::new(ClientState::new())),
-            }),
-        }
-    }
-
-    #[tokio::test]
-    async fn network_change_shutdown() {
-        let (stop_tx, mut stop_rx) = mpsc::channel(1);
-        let (change_tx, mut change_rx) = mpsc::channel(1);
-        let settling = ClientInner::settle_network_changes(&mut stop_rx, &mut change_rx);
-        tokio::pin!(settling);
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), &mut settling)
-                .await
-                .is_err()
-        );
-        change_tx.send(()).await.unwrap();
-        // This would have settled after another 200ms without the new event.
-        assert!(
-            tokio::time::timeout(Duration::from_millis(250), &mut settling)
-                .await
-                .is_err()
-        );
-        stop_tx.send(()).await.unwrap();
-        assert!(
-            !tokio::time::timeout(Duration::from_millis(100), &mut settling)
-                .await
-                .unwrap()
-        );
-    }
-
-    #[test]
-    fn ipv6_multicast_filter() {
-        let session = idle_session();
-        let (tx, mut rx) = mpsc::channel(4);
-        session.lock_state().unwrap().uplink_tx = Some(tx);
-        let mut packet = vec![0; 40];
-        packet[0] = 0x60;
-        packet[24] = 0xff;
-        session.write_packet(packet.clone()).unwrap();
-        assert!(rx.try_recv().is_err());
-        packet[24] = 0xfd;
-        session.write_packet(packet.clone()).unwrap();
-        assert_eq!(rx.try_recv().unwrap(), packet);
-        packet[0] = 0x45;
-        packet[24] = 0xff;
-        session.write_packet(packet.clone()).unwrap();
-        assert_eq!(rx.try_recv().unwrap(), packet);
-    }
-
-    #[test]
-    fn ipv6_resolution_order() {
-        let mut session = idle_session();
-        Arc::get_mut(&mut session.inner).unwrap().config.hosts =
-            vec!["127.0.0.1".into(), "::1".into(), "[::1]".into()];
-        let candidates = session
-            .inner
-            .runtime
-            .block_on(session.inner.resolve_candidates())
-            .unwrap();
-        assert_eq!(
-            candidates,
-            vec![
-                "[::1]:1".parse::<SocketAddr>().unwrap(),
-                "127.0.0.1:1".parse().unwrap()
-            ]
-        );
-    }
-
-    #[test]
-    fn reconnect_handshake() {
-        let server = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        server
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
-        let session = ClientSession::start(
-            ClientConfig {
-                password: "password".into(),
-                hosts: vec!["127.0.0.1".into()],
-                port: server.local_addr().unwrap().port(),
-                id: PeerId([1; 16]),
-                device_name: String::new(),
-                platform: String::new(),
-                socket_protect: None,
-            },
-            Arc::new(NoCallbacks),
-        )
-        .unwrap();
-        let mut packet = [0u8; 4096];
-        let (len, _) = server.recv_from(&mut packet).unwrap();
-        let first = packet[..len].to_vec();
-        session.reconnect().unwrap();
-        let (len, _) = server.recv_from(&mut packet).unwrap();
-        assert_eq!(packet[0], protocol::INIT);
-        assert_ne!(first, packet[..len]); // Fresh PAKE/key material, no timeout wait.
-        session.reconnect().unwrap();
-        session.shutdown().unwrap();
-        assert!(matches!(
-            session.reconnect(),
-            Err(ClientError::NotConnected)
-        ));
-        assert!(!session.is_active());
-    }
-
-    #[test]
-    fn reconnect_backoff() {
-        let (attempt_tx, attempt_rx) = std::sync::mpsc::channel();
-        let session = ClientSession::start(
-            ClientConfig {
-                password: "password".into(),
-                hosts: vec!["127.0.0.1".into()],
-                port: 1,
-                id: PeerId([1; 16]),
-                device_name: String::new(),
-                platform: String::new(),
-                socket_protect: Some(Arc::new(move |_| {
-                    let _ = attempt_tx.send(());
-                    false
-                })),
-            },
-            Arc::new(NoCallbacks),
-        )
-        .unwrap();
-        attempt_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        attempt_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        // The next ordinary attempt would wait two seconds.
-        session.reconnect().unwrap();
-        attempt_rx
-            .recv_timeout(Duration::from_millis(750))
-            .expect("network recovery bypasses backoff");
-        session.shutdown().unwrap();
-    }
-
-    #[test]
-    fn cross_runtime_shutdown_waits() {
-        use std::sync::atomic::AtomicBool;
-        let session = idle_session();
-        let completed = Arc::new(AtomicBool::new(false));
-        let done = completed.clone();
-        let (started_tx, started_rx) = std::sync::mpsc::channel();
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let handle = session.inner.runtime.spawn(async move {
-            started_tx.send(()).unwrap();
-            // Model a synchronous platform callback already executing.
-            release_rx.recv().unwrap();
-            done.store(true, Ordering::SeqCst);
-        });
-        session.lock_state().unwrap().run_handle = Some(handle);
-        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        let state = session.inner.state.clone();
-        let release = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while !state.lock().unwrap().is_closing && Instant::now() < deadline {
-                std::thread::yield_now();
-            }
-            release_tx.send(()).unwrap();
-        });
-        let outer = Runtime::new().unwrap();
-        outer.block_on(async {
-            session.shutdown().unwrap();
-        });
-        assert!(completed.load(Ordering::SeqCst));
-        assert!(!session.is_active());
-        release.join().unwrap();
-    }
-
-    #[test]
-    fn unsent_packets_not_counted() {
-        let session = idle_session();
-        assert!(matches!(
-            session.write_packet(vec![1; 10]),
-            Err(ClientError::NotConnected)
-        ));
-        let (tx, rx) = mpsc::channel(1);
-        session.lock_state().unwrap().uplink_tx = Some(tx);
-        session.write_packet(vec![1; 10]).unwrap();
-        session.write_packet(vec![1; 10]).unwrap();
-        drop(rx);
-        assert!(matches!(
-            session.write_packet(vec![1; 10]),
-            Err(ClientError::NotConnected)
-        ));
-        let stats = session.traffic_stats();
-        assert_eq!((stats.bytes_sent, stats.packets_sent), (0, 0));
-        assert_eq!(session.inner.uplink.queue_drops.load(Ordering::Relaxed), 1);
-        assert_eq!(
-            session.inner.uplink.not_connected.load(Ordering::Relaxed),
-            2
-        );
-    }
-
-    fn crypto() -> Arc<CryptoCore> {
-        let (private, _) = create_ecdh_keypair().unwrap();
-        let (_, public) = create_ecdh_keypair().unwrap();
-        Arc::new(
-            CryptoCore::new(
-                private,
-                &crate::AlgorithmType::Aes128Gcm,
-                public.bytes(),
-                Role::Initiator,
-                b"test",
-            )
-            .unwrap(),
-        )
-    }
-
-    #[tokio::test]
-    async fn uplink_counting_and_oversize_reject() {
-        let destination = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        let counters = Arc::new(UplinkCounters::default());
-        let (tx, rx) = mpsc::channel(2);
-        tx.send(vec![1; 10]).await.unwrap();
-        tx.send(vec![1; 65_535]).await.unwrap();
-        drop(tx);
-        ClientInner::run_uplink_loop(
-            socket,
-            crypto(),
-            destination.local_addr().unwrap(),
-            rx,
-            counters.clone(),
-        )
-        .await;
-        let mut buf = [0; 128];
-        tokio::time::timeout(Duration::from_secs(1), destination.recv_from(&mut buf))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(counters.bytes_sent.load(Ordering::Relaxed), 10);
-        assert_eq!(counters.packets_sent.load(Ordering::Relaxed), 1);
-        assert_eq!(counters.build_failures.load(Ordering::Relaxed), 1);
-    }
-
-    #[tokio::test]
-    async fn udp_send_failure_not_counted() {
-        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        let counters = Arc::new(UplinkCounters::default());
-        let (tx, rx) = mpsc::channel(1);
-        tx.send(vec![1; 10]).await.unwrap();
-        drop(tx);
-        // IPv6 destination on an IPv4 socket fails without external traffic.
-        ClientInner::run_uplink_loop(
-            socket,
-            crypto(),
-            "[::1]:1".parse().unwrap(),
-            rx,
-            counters.clone(),
-        )
-        .await;
-        assert_eq!(counters.bytes_sent.load(Ordering::Relaxed), 0);
-        assert_eq!(counters.packets_sent.load(Ordering::Relaxed), 0);
-        assert_eq!(counters.send_failures.load(Ordering::Relaxed), 1);
-    }
 }

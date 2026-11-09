@@ -150,21 +150,31 @@ pub fn build_rejected(buffer: &mut Buffer) {
     buffer.prepend_byte(REJECTED);
 }
 
+fn build_control_message(
+    buffer: &mut Buffer,
+    core: &CryptoCore,
+    packet_type: u8,
+    message: impl Message,
+) -> anyhow::Result<()> {
+    buffer.clear();
+    buffer.write_all(&message.encode_to_vec())?;
+    // The authenticated type and the outer wire byte must always agree.
+    core.encrypt(buffer, packet_type)?;
+    buffer.prepend_byte(packet_type);
+    Ok(())
+}
+
 pub fn build_heartbeat_ping(
     buffer: &mut Buffer,
     core: &CryptoCore,
     id: &PeerId,
     ts: Time,
 ) -> anyhow::Result<()> {
-    buffer.clear();
     let ping = pb::Ping {
         ts,
         id: id.0.to_vec(),
     };
-    buffer.write_all(&ping.encode_to_vec())?;
-    core.encrypt(buffer, HEARTBEAT)?;
-    buffer.prepend_byte(HEARTBEAT);
-    Ok(())
+    build_control_message(buffer, core, HEARTBEAT, ping)
 }
 
 pub fn build_heartbeat_pong(
@@ -173,15 +183,11 @@ pub fn build_heartbeat_pong(
     id: &PeerId,
     ts: Time,
 ) -> anyhow::Result<()> {
-    buffer.clear();
     let pong = pb::Pong {
         ts,
         id: id.0.to_vec(),
     };
-    buffer.write_all(&pong.encode_to_vec())?;
-    core.encrypt(buffer, HEARTBEAT)?;
-    buffer.prepend_byte(HEARTBEAT);
-    Ok(())
+    build_control_message(buffer, core, HEARTBEAT, pong)
 }
 
 pub fn build_data_interface(buffer: &mut Buffer, core: &CryptoCore) -> anyhow::Result<()> {
@@ -192,11 +198,7 @@ pub fn build_data_interface(buffer: &mut Buffer, core: &CryptoCore) -> anyhow::R
 
 pub fn build_close(buffer: &mut Buffer, core: &CryptoCore, id: &PeerId) -> anyhow::Result<()> {
     let close = pb::Close { id: id.0.to_vec() };
-    buffer.clear();
-    buffer.write_all(&close.encode_to_vec())?;
-    core.encrypt(buffer, CLOSE)?;
-    buffer.prepend_byte(CLOSE);
-    Ok(())
+    build_control_message(buffer, core, CLOSE, close)
 }
 
 /// Handshake messages are not authenticated at parse time: the PAKE
@@ -236,29 +238,10 @@ pub fn parse_close(buffer: &mut Buffer, core: &CryptoCore) -> anyhow::Result<Pee
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AlgorithmType, Role, create_ecdh_keypair, pake, supported_algorithms};
+    use crate::{AlgorithmType, create_ecdh_keypair, pake, supported_algorithms};
 
     fn crypto_pair() -> (CryptoCore, CryptoCore) {
-        let (privk1, pubk1) = create_ecdh_keypair().unwrap();
-        let (privk2, pubk2) = create_ecdh_keypair().unwrap();
-        (
-            CryptoCore::new(
-                privk1,
-                &AlgorithmType::Aes128Gcm,
-                pubk2.bytes(),
-                Role::Initiator,
-                b"test-pake-key",
-            )
-            .unwrap(),
-            CryptoCore::new(
-                privk2,
-                &AlgorithmType::Aes128Gcm,
-                pubk1.bytes(),
-                Role::Responder,
-                b"test-pake-key",
-            )
-            .unwrap(),
-        )
+        crate::crypto::test_crypto_pair(&AlgorithmType::Aes128Gcm, b"test-pake-key")
     }
 
     #[test]

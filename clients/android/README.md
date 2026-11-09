@@ -133,6 +133,11 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 Direct Gradle builds default to version `0.1.0` / code `1`. For versioned
 release artifacts, run `scripts/package-android.sh` from the repository root;
 it injects the workspace version and derived Android version code.
+The script writes `dist/vault-android.apk`, retaining all three supported ABIs
+with native debug information stripped. App packaging and Rust compilation
+share the same NDK selection so the strip tool is available to both modules.
+The original unstripped libraries remain in `vaultcore/src/main/jniLibs/`;
+retain those from the matching build if diagnosing a release-native crash.
 
 Debug builds need no signing keys and install alongside a release-build app
 (`applicationId` gets a `.debug` suffix). To publish your own build, change

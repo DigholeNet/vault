@@ -5,21 +5,11 @@ import VaultCore
 
 struct MacosStatusView: View {
     let vpnManager: VpnManager
-    @EnvironmentObject var appData: AppData
     @EnvironmentObject var languageManager: LanguageManager
     @State private var tab = 0
     @StateObject private var model = DiagnosticsViewModel()
-    private var result: DiagnosticsResult? { model.result }
-    private var running: Bool { model.running }
-    private var cancelRequested: Bool { model.cancelRequested }
-    private var startedAt: TimeInterval? { model.startedAt }
-    private var progressReceived: TimeInterval { model.progressReceived }
-    private var completedAt: Date? { model.completedAt }
-    private var logText: String { model.logText }
-    private var loadingLogs: Bool { model.loadingLogs }
-    @State private var logFilter = "all"
-    @State private var search = ""
     @State private var followsTail = true
+    @State private var windowVisible = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,20 +19,10 @@ struct MacosStatusView: View {
                     Text(languageManager.tr("Runtime Logs")).tag(1)
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 260)
                 Spacer()
-                if tab == 0 {
-                    if running {
-                        Button(languageManager.tr(cancelRequested ? "Cancelling…" : "Cancel")) {
-                            model.cancel(using: vpnManager)
-                        }.disabled(cancelRequested)
-                    } else {
-                        Button(action: diagnose) {
-                            Label(languageManager.tr(result == nil ? "Run Diagnostics" : "Run Again"), systemImage: "arrow.clockwise")
-                        }.disabled(appData.vpnStatus != .connected)
-                    }
-                }
+                if tab == 0 { MacosDiagnosticsAction(vpnManager: vpnManager, model: model) }
             }.padding(20)
             Divider()
-            if tab == 0 { diagnostics }
+            if tab == 0 { MacosConnectionDiagnostics(vpnManager: vpnManager, model: model) }
             else { logs }
             Divider()
             HStack {
@@ -60,19 +40,85 @@ struct MacosStatusView: View {
                         Label(languageManager.tr(model.clearingLogs ? "Clearing…" : "Clear"), systemImage: "trash")
                     }.disabled(model.clearingLogs)
                 }
-                Button { copy(tab == 0 ? diagnosticText : filteredLogs) } label: {
+                Button { copy(tab == 0 ? model.diagnosticText : model.filteredLogText) } label: {
                     Label(languageManager.tr("Copy"), systemImage: "doc.on.doc")
                 }
-                .disabled(tab == 0 ? result == nil : filteredLogs.isEmpty)
+                .disabled(tab == 0 ? model.result == nil : model.filteredLogText.isEmpty)
             }.padding(16)
         }
-        .task(id: tab) {
-            guard tab == 1 else { return }
+        .onAppear {
+            windowVisible = NSApp.windows.first { $0.identifier?.rawValue == "status" }?
+                .occlusionState.contains(.visible) ?? false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)) { notification in
+            guard let window = notification.object as? NSWindow, window.identifier?.rawValue == "status" else { return }
+            windowVisible = window.occlusionState.contains(.visible)
+        }
+        .task(id: tab == 1 && windowVisible) {
+            guard tab == 1, windowVisible else { return }
             await model.refreshLogs(using: vpnManager)
         }
     }
 
-    private var diagnostics: some View {
+    private var logs: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("", selection: $model.logFilter) {
+                    Text(languageManager.tr("All")).tag("all")
+                    Text(languageManager.tr("Application")).tag("app")
+                    Text(languageManager.tr("Tunnel")).tag("ne")
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 230)
+                TextField(languageManager.tr("Search logs"), text: $model.logSearch)
+                    .textFieldStyle(.roundedBorder)
+            }.padding(16)
+            if model.loadingLogs { ProgressView(languageManager.tr("Loading logs...")).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else if model.filteredLogText.isEmpty {
+                Text(languageManager.tr("No matching logs.")).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else { LogTextView(text: model.filteredLogText, followsTail: followsTail) }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+// Observe traffic state only while the diagnostics tab is visible. Runtime Logs
+// must not redraw when the provider publishes its per-second byte counters.
+private struct MacosDiagnosticsAction: View {
+    let vpnManager: VpnManager
+    @ObservedObject var model: DiagnosticsViewModel
+    @EnvironmentObject var appData: AppData
+    @EnvironmentObject var languageManager: LanguageManager
+
+    var body: some View {
+        if model.running {
+            Button(languageManager.tr(model.cancelRequested ? "Cancelling…" : "Cancel")) {
+                model.cancel(using: vpnManager)
+            }.disabled(model.cancelRequested)
+        } else {
+            Button {
+                model.run(using: vpnManager, connected: appData.vpnStatus == .connected)
+            } label: {
+                Label(languageManager.tr(model.result == nil ? "Run Diagnostics" : "Run Again"), systemImage: "arrow.clockwise")
+            }.disabled(appData.vpnStatus != .connected)
+        }
+    }
+}
+
+private struct MacosConnectionDiagnostics: View {
+    let vpnManager: VpnManager
+    @ObservedObject var model: DiagnosticsViewModel
+    @EnvironmentObject var appData: AppData
+    @EnvironmentObject var languageManager: LanguageManager
+    private var result: DiagnosticsResult? { model.result }
+    private var running: Bool { model.running }
+    private var startedAt: TimeInterval? { model.startedAt }
+    private var progressReceived: TimeInterval { model.progressReceived }
+    private var completedAt: Date? { model.completedAt }
+
+    var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 if running || result != nil {
@@ -162,9 +208,7 @@ struct MacosStatusView: View {
                     .font(.system(size: 28)).foregroundStyle(passed ? Color.green : (incomplete ? .orange : .red))
             }
             VStack(alignment: .leading, spacing: 6) {
-                Text(languageManager
-                    .tr(running ? "Checking connection…" :
-                        (passed ? "Connectivity checks passed" : (incomplete ? "Diagnostics incomplete" : "Connectivity issues found"))))
+                Text(languageManager.tr(DiagnosticsPresentation.resultTitle(result, running: running)))
                     .font(.system(size: 14, weight: .semibold))
                 if running, let startedAt {
                     TimelineView(.periodic(from: .now, by: 0.1)) { context in
@@ -215,27 +259,25 @@ struct MacosStatusView: View {
                 Text(languageManager.tr("Average duration")).frame(width: 100, alignment: .trailing)
             }.font(.body).foregroundStyle(.secondary).padding(12).background(.quaternary.opacity(0.4))
             ForEach(DiagnosticsPresentation.visibleChecks(result), id: \.self) { id in
-                let check = result?.checks?.first { $0.id == id }
-                let active = running && (result?.activeCheck ?? "dns") == id && check == nil
+                let row = DiagnosticsPresentation.checkRow(id, result: result, running: running)
                 HStack(spacing: 8) {
-                    if active { ProgressView().controlSize(.mini).frame(width: 14) }
+                    if row.active { ProgressView().controlSize(.mini).frame(width: 14) }
                     else {
-                        Image(systemName: check?
-                            .state == .passed ? "checkmark.circle.fill" : (check?.state == .failed ? "xmark.circle.fill" : "minus.circle"))
-                            .foregroundStyle(check?.state == .passed ? Color.green : (check?.state == .failed ? Color.red : .secondary))
+                        Image(systemName: row.state == .passed ? "checkmark.circle.fill"
+                            : (row.state == .failed ? "xmark.circle.fill" : "minus.circle"))
+                            .foregroundStyle(row.state == .passed ? Color.green : (row.state == .failed ? Color.red : .secondary))
                             .frame(width: 14)
                     }
                     Text(languageManager.tr(checkLabel(id))).font(.body)
                     Spacer()
-                    Text(check.map { $0.attempted == 0 ? languageManager.tr("Not measured") : "\($0.passed)/\($0.attempted)" }
-                        ?? languageManager.tr(active ? "Checking" : (running ? "Waiting" : "Not measured")))
+                    Text(languageManager.tr(row.resultText))
                         .font(.body).monospacedDigit().foregroundStyle(.secondary).frame(width: 80)
-                    if let check {
-                        Text(check.sampleCount == 0 || check.attempted == 0 ? "—" : "\(check.durationMs) ms")
+                    if row.state != nil {
+                        Text(row.durationMs.map { "\($0) ms" } ?? "—")
                             .font(.system(.body, design: .monospaced)).frame(width: 100, alignment: .trailing)
                             .help(languageManager.tr(DiagnosticsPresentation.pingCheckIDs.contains(id)
                                     ? "Mean round-trip time of received replies." : "Mean request time, including failures and retries."))
-                    } else if active {
+                    } else if row.active {
                         TimelineView(.periodic(from: .now, by: 0.1)) { context in
                             Text("\(max(0, Int((ProcessInfo.processInfo.systemUptime - progressReceived) * 1000))) ms")
                                 .font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)
@@ -248,37 +290,9 @@ struct MacosStatusView: View {
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
     }
 
-    private var logs: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Picker("", selection: $logFilter) {
-                    Text(languageManager.tr("All")).tag("all")
-                    Text(languageManager.tr("Application")).tag("app")
-                    Text(languageManager.tr("Tunnel")).tag("ne")
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 230)
-                TextField(languageManager.tr("Search logs"), text: $search)
-                    .textFieldStyle(.roundedBorder)
-            }.padding(16)
-            if loadingLogs { ProgressView(languageManager.tr("Loading logs...")).frame(maxWidth: .infinity, maxHeight: .infinity) }
-            else if filteredLogs.isEmpty {
-                Text(languageManager.tr("No matching logs.")).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else { LogTextView(text: filteredLogs, followsTail: followsTail) }
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var filteredLogs: String {
-        DiagnosticsPresentation.filteredLogs(logText, source: logFilter, search: search)
-    }
-
     private var passed: Bool { model.passed }
     private var incomplete: Bool { model.incomplete }
-    private var diagnosticText: String { model.diagnosticText }
     private func checkLabel(_ id: String) -> String { DiagnosticsPresentation.label(for: id) }
     private func diagnose() { model.run(using: vpnManager, connected: appData.vpnStatus == .connected) }
-
-    private func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
 }
 #endif

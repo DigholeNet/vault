@@ -20,6 +20,11 @@ public struct TunnelSettingsState {
     public var isApplying: Bool { applying != nil || pending != nil }
     /// The OS call still in progress, including one invalidated by cleanup.
     public var outstanding: Update? { applying }
+    public var latestMTU: Int? {
+        if let pending { return pending.mtu }
+        if let applying, applying.revision > invalidatedThrough { return applying.configuration.mtu }
+        return applied?.mtu
+    }
 
     public init() {}
 
@@ -35,6 +40,16 @@ public struct TunnelSettingsState {
         let update = Update(revision: sequence, configuration: configuration)
         applying = update
         return update
+    }
+
+    /// Refresh a live tunnel without replacing newer addresses or DNS queued for application.
+    public mutating func updateMTU(_ mtu: Int) -> Update? {
+        guard let applied else { return nil }
+        let current = pending ?? applying?.configuration ?? applied
+        return enqueue(TunnelConfiguration(
+            ipv4: current.ipv4, mask: current.mask, ipv6: current.ipv6,
+            prefix: current.prefix, mtu: mtu, dns: current.dns
+        ))
     }
 
     /// Always release the OS request slot, even for a discarded session.

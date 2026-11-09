@@ -6,6 +6,9 @@ plugins {
     alias(libs.plugins.detekt)
 }
 
+@Suppress("UNCHECKED_CAST")
+val androidTargets = rootProject.extra["androidTargets"] as Map<String, String>
+
 val licenseAssets = tasks.register<Sync>("copyLicenseNotices") {
     from(rootProject.file("../..")) { include("LICENSE", "NOTICE") }
     into(layout.buildDirectory.dir("generated/licenseAssets"))
@@ -35,6 +38,10 @@ android {
         applicationId = "net.dighole.vault"
         minSdk = libs.versions.min.sdk.get().toInt()
         targetSdk = libs.versions.target.sdk.get().toInt()
+        ndk {
+            // Match vaultcore's Rust targets; omit auxiliary libraries for unsupported ABIs.
+            abiFilters += androidTargets.keys
+        }
         versionCode = providers.gradleProperty("versionCode").map(String::toInt).orElse(1).get()
         versionName = providers.gradleProperty("versionName").orElse("0.1.0").get()
         buildConfigField("String", "GIT_BUILD_ID", "\"$gitBuildId\"")
@@ -61,14 +68,21 @@ android {
 
             // The keystore travels as base64 text (same variable as CI), so
             // no real keystore file ever needs to live in the repository
-            // tree; it is decoded into the build directory when configured.
+            // tree; it is decoded into the build directory before signing.
             // Debug APKs use the Android debug signing key.
             val keystoreFile =
                 layout.buildDirectory.file("signing/vault-release.keystore").get().asFile
-            if (!keystoreBase64.isNullOrEmpty()) {
-                keystoreFile.parentFile?.mkdirs()
-                // Mime decoder: tolerates line-wrapped base64 output.
-                keystoreFile.writeBytes(Base64.getMimeDecoder().decode(keystoreBase64))
+            tasks.matching { it.name == "validateSigningRelease" }.configureEach {
+                // The key may change without the alias changing; always refresh it.
+                outputs.upToDateWhen { false }
+                doFirst {
+                    if (keystoreBase64.isNullOrEmpty()) {
+                        throw GradleException("Release signing keystore not configured")
+                    }
+                    keystoreFile.parentFile?.mkdirs()
+                    // Mime decoder: tolerates line-wrapped base64 output.
+                    keystoreFile.writeBytes(Base64.getMimeDecoder().decode(keystoreBase64))
+                }
             }
             storeFile = keystoreFile
             storePassword = storePasswordValue.orEmpty()
@@ -77,33 +91,7 @@ android {
             // password different from the store password; use it for both.
             keyPassword = storePasswordValue.orEmpty()
 
-            // Defer validation so debug builds do not fail when release signing
-            // is not configured. Only enforce when a release task is actually executed.
-            project.afterEvaluate {
-                val isReleaseBuild = gradle.startParameter.taskNames.any {
-                    it.contains("Release", ignoreCase = true)
-                }
-                if (isReleaseBuild) {
-                    if (keystoreBase64.isNullOrEmpty()) {
-                        throw GradleException(
-                            "Release signing keystore not configured. " +
-                                "Set signing.keyStoreBase64 in local.properties or ANDROID_SIGNING_KEY_STORE_BASE64 env var."
-                        )
-                    }
-                    if (storePasswordValue.isNullOrEmpty()) {
-                        throw GradleException(
-                            "Release signing store password not configured. " +
-                                "Set signing.keyStorePassword in local.properties or ANDROID_SIGNING_KEY_STORE_PASSWORD env var."
-                        )
-                    }
-                    if (keyAliasValue.isNullOrEmpty()) {
-                        throw GradleException(
-                            "Release signing key alias not configured. " +
-                                "Set signing.keyAlias in local.properties or ANDROID_SIGNING_KEY_ALIAS env var."
-                        )
-                    }
-                }
-            }
+            // AGP validates signing when packaging, without blocking lint or unit tests.
 
             enableV1Signing = true
             enableV2Signing = true
@@ -133,6 +121,11 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+
+    testOptions.unitTests.all {
+        // Validation and defaults use the same host bridge built for UniFFI generation.
+        it.systemProperty("jna.library.path", rootProject.file("../bridge/target/debug").absolutePath)
     }
 
     compileOptions {
@@ -172,6 +165,8 @@ dependencies {
     implementation(libs.datastore.preferences)
 
     testImplementation(libs.junit)
+    // The Android JNA AAR omits desktop native libraries needed by JVM tests.
+    testRuntimeOnly(libs.jna)
     androidTestImplementation(libs.androidx.test.junit)
 }
 

@@ -202,13 +202,30 @@ impl CryptoCore {
     }
 
     pub fn decrypt(&self, buf: &mut Buffer, packet_type: u8) -> anyhow::Result<()> {
+        let plaintext_len = self.decrypt_slice(buf.message_mut(), packet_type)?.len();
+        buf.set_start(buf.get_start() + EXTRA_LEN);
+        buf.set_length(plaintext_len);
+        Ok(())
+    }
+
+    /// Authenticate and decrypt within the caller's allocation. The returned
+    /// slice excludes the counter and tag; failed input must be discarded.
+    pub(crate) fn decrypt_slice<'a>(
+        &self,
+        payload: &'a mut [u8],
+        packet_type: u8,
+    ) -> anyhow::Result<&'a mut [u8]> {
         // Return an error instead of panicking: this buffer can contain
         // arbitrary network input, and a panic here kills the client's run
         // loop (and the whole supernode process on the server side).
-        if buf.len() < EXTRA_LEN + TAG_LEN {
-            anyhow::bail!("packet too short: {} < {}", buf.len(), EXTRA_LEN + TAG_LEN);
+        if payload.len() < EXTRA_LEN + TAG_LEN {
+            anyhow::bail!(
+                "packet too short: {} < {}",
+                payload.len(),
+                EXTRA_LEN + TAG_LEN
+            );
         }
-        let (extra, data_and_tag) = buf.message_mut().split_at_mut(EXTRA_LEN);
+        let (extra, data_and_tag) = payload.split_at_mut(EXTRA_LEN);
         // Provably infallible: split_at_mut(EXTRA_LEN) yields an `extra` of
         // exactly EXTRA_LEN (8) bytes.
         let counter = u64::from_le_bytes(extra.try_into().expect("EXTRA_LEN is 8"));
@@ -234,7 +251,8 @@ impl CryptoCore {
         nonce[4..].copy_from_slice(&counter.to_le_bytes());
 
         let crypto_nonce = aead::Nonce::assume_unique_for_key(nonce);
-        self.key
+        let plaintext = self
+            .key
             .open_in_place(crypto_nonce, aead::Aad::from([packet_type]), data_and_tag)
             .map_err(|e| anyhow::anyhow!(e))?;
 
@@ -247,9 +265,7 @@ impl CryptoCore {
             }
         }
 
-        buf.set_start(buf.get_start() + EXTRA_LEN);
-        buf.set_length(buf.len() - TAG_LEN);
-        Ok(())
+        Ok(plaintext)
     }
 
     fn derive_master_key(
@@ -423,6 +439,35 @@ fn test_speed(algorithm_type: AlgorithmType, max_time: &Duration) -> f64 {
     data as f64 / duration / 1_000_000.0
 }
 
+/// A normal client/server pair for unit tests. Tests exercising mismatched
+/// roles or key material construct those deliberately invalid pairs explicitly.
+#[cfg(test)]
+pub(crate) fn test_crypto_pair(
+    algorithm: &AlgorithmType,
+    pake_key: &[u8],
+) -> (CryptoCore, CryptoCore) {
+    let (client_private, client_public) = create_ecdh_keypair().unwrap();
+    let (server_private, server_public) = create_ecdh_keypair().unwrap();
+    (
+        CryptoCore::new(
+            client_private,
+            algorithm,
+            server_public.bytes(),
+            Role::Initiator,
+            pake_key,
+        )
+        .unwrap(),
+        CryptoCore::new(
+            server_private,
+            algorithm,
+            client_public.bytes(),
+            Role::Responder,
+            pake_key,
+        )
+        .unwrap(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -431,27 +476,8 @@ mod tests {
 
     use super::*;
 
-    fn crypto_pair() -> (CryptoCore, CryptoCore) {
-        let (privk1, pubk1) = create_ecdh_keypair().unwrap();
-        let (privk2, pubk2) = create_ecdh_keypair().unwrap();
-        (
-            CryptoCore::new(
-                privk1,
-                &AlgorithmType::Aes128Gcm,
-                pubk2.bytes(),
-                Role::Initiator,
-                b"test-pake-key",
-            )
-            .unwrap(),
-            CryptoCore::new(
-                privk2,
-                &AlgorithmType::Aes128Gcm,
-                pubk1.bytes(),
-                Role::Responder,
-                b"test-pake-key",
-            )
-            .unwrap(),
-        )
+    fn crypto_pair(algorithm: &AlgorithmType) -> (CryptoCore, CryptoCore) {
+        test_crypto_pair(algorithm, b"test-pake-key")
     }
 
     fn encrypt_to_vec(sender: &CryptoCore, data: &[u8]) -> Vec<u8> {
@@ -472,12 +498,89 @@ mod tests {
 
     #[test]
     fn encrypt_decrypt_roundtrip() {
-        let (sender, receiver) = crypto_pair();
+        let (sender, receiver) = crypto_pair(&AlgorithmType::Aes128Gcm);
 
         let origin_data = "abc".as_bytes();
         let packet = encrypt_to_vec(&sender, origin_data);
         let plain = decrypt_bytes(&receiver, &packet).unwrap();
         assert!(plain.eq(origin_data))
+    }
+
+    #[test]
+    fn slice_storage() {
+        for algorithm in [
+            AlgorithmType::Aes128Gcm,
+            AlgorithmType::Aes256Gcm,
+            AlgorithmType::Chacha20Poly1305,
+        ] {
+            let (sender, receiver) = crypto_pair(&algorithm);
+            for len in [0, 1, 1280, 65535 - EXTRA_LEN - TAG_LEN] {
+                let expected = vec![0xA5; len];
+                let encrypted = encrypt_to_vec(&sender, &expected);
+                // Exercise a slice at a nonzero offset in its allocation.
+                let mut packet = vec![0x7E; 3];
+                packet.extend_from_slice(&encrypted);
+                let expected_pointer = packet.as_ptr().wrapping_add(3 + EXTRA_LEN);
+                let capacity = packet.capacity();
+                let plaintext = receiver
+                    .decrypt_slice(&mut packet[3..], crate::protocol::DATA_INTERFACE)
+                    .unwrap();
+                assert_eq!(&*plaintext, expected.as_slice());
+                assert_eq!(plaintext.as_ptr(), expected_pointer);
+                assert_eq!(packet.capacity(), capacity);
+            }
+        }
+    }
+
+    #[test]
+    fn slice_rejections() {
+        let (sender, receiver) = crypto_pair(&AlgorithmType::Aes128Gcm);
+        let packet_type = crate::protocol::DATA_INTERFACE;
+        for len in 0..EXTRA_LEN + TAG_LEN {
+            assert!(
+                receiver
+                    .decrypt_slice(&mut vec![0; len], packet_type)
+                    .is_err()
+            );
+        }
+        let encrypted = encrypt_to_vec(&sender, b"authenticated");
+        let mut forged = encrypted.clone();
+        *forged.last_mut().unwrap() ^= 1;
+        assert!(receiver.decrypt_slice(&mut forged, packet_type).is_err());
+        // A failed tag must not consume the genuine packet's counter.
+        let mut genuine = encrypted.clone();
+        assert_eq!(
+            receiver.decrypt_slice(&mut genuine, packet_type).unwrap(),
+            b"authenticated"
+        );
+        let mut replay = encrypted;
+        let error = receiver
+            .decrypt_slice(&mut replay, packet_type)
+            .unwrap_err();
+        assert!(error.to_string().contains("replay"), "{error}");
+    }
+
+    #[test]
+    fn buffer_cursor() {
+        let (sender, receiver) = crypto_pair(&AlgorithmType::Aes128Gcm);
+        let encrypted = encrypt_to_vec(&sender, b"payload");
+        let mut buffer = Buffer::new(17);
+        buffer.write_all(&encrypted).unwrap();
+        *buffer.message_mut().last_mut().unwrap() ^= 1;
+        let bounds = (buffer.get_start(), buffer.len());
+        assert!(
+            receiver
+                .decrypt(&mut buffer, crate::protocol::DATA_INTERFACE)
+                .is_err()
+        );
+        assert_eq!((buffer.get_start(), buffer.len()), bounds);
+        buffer.clear();
+        buffer.write_all(&encrypted).unwrap();
+        receiver
+            .decrypt(&mut buffer, crate::protocol::DATA_INTERFACE)
+            .unwrap();
+        assert_eq!(buffer.get_start(), 17 + EXTRA_LEN);
+        assert_eq!(buffer.as_ref(), b"payload");
     }
 
     #[test]
@@ -488,12 +591,7 @@ mod tests {
             AlgorithmType::Aes256Gcm,
             AlgorithmType::Chacha20Poly1305,
         ] {
-            let (a, ap) = create_ecdh_keypair().unwrap();
-            let (b, bp) = create_ecdh_keypair().unwrap();
-            let sender =
-                CryptoCore::new(a, &algorithm, bp.bytes(), Role::Initiator, b"test").unwrap();
-            let receiver =
-                CryptoCore::new(b, &algorithm, ap.bytes(), Role::Responder, b"test").unwrap();
+            let (sender, receiver) = crypto_pair(&algorithm);
             for original_type in [HEARTBEAT, DATA_INTERFACE, CLOSE] {
                 let mut packet = Buffer::new(EXTRA_LEN);
                 packet.write_all(b"payload").unwrap();
@@ -517,7 +615,7 @@ mod tests {
 
     #[test]
     fn replayed_packet_rejected() {
-        let (sender, receiver) = crypto_pair();
+        let (sender, receiver) = crypto_pair(&AlgorithmType::Aes128Gcm);
         let packet = encrypt_to_vec(&sender, b"hello");
         decrypt_bytes(&receiver, &packet).unwrap();
         let err = decrypt_bytes(&receiver, &packet).unwrap_err();
@@ -553,7 +651,7 @@ mod tests {
 
     #[test]
     fn in_window_reorder_accepted() {
-        let (sender, receiver) = crypto_pair();
+        let (sender, receiver) = crypto_pair(&AlgorithmType::Aes128Gcm);
         let p0 = encrypt_to_vec(&sender, b"p0");
         let p1 = encrypt_to_vec(&sender, b"p1");
         let p2 = encrypt_to_vec(&sender, b"p2");

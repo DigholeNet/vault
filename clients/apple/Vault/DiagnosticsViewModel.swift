@@ -19,11 +19,19 @@ final class DiagnosticsViewModel: ObservableObject {
     @Published private(set) var progressReceived = ProcessInfo.processInfo.systemUptime
     @Published private(set) var completedAt: Date?
     @Published private(set) var logText = ""
+    @Published private(set) var filteredLogText = ""
+    @Published var logFilter = "all" {
+        didSet { if logFilter != oldValue { filterLogs() } }
+    }
+    @Published var logSearch = "" {
+        didSet { if logSearch != oldValue { filterLogs() } }
+    }
     @Published private(set) var loadingLogs = false
 
     @Published private(set) var clearingLogs = false
     @Published private(set) var logMessage: String?
     private var logGeneration: UInt64 = 0
+    private var refreshGeneration: UInt64 = 0
     private var generation: UInt64 = 0
 
     var passed: Bool { DiagnosticsPresentation.passed(result) }
@@ -65,8 +73,8 @@ final class DiagnosticsViewModel: ObservableObject {
         guard !clearingLogs else { return }
         clearingLogs = true
         logGeneration &+= 1
-        logText = ""
-        loadingLogs = false
+        updateLogs("")
+        setLoadingLogs(false)
         logMessage = nil
         defer { clearingLogs = false }
         do {
@@ -78,27 +86,45 @@ final class DiagnosticsViewModel: ObservableObject {
     }
 
     func refreshLogs(using manager: any RuntimeLogStore) async {
+        refreshGeneration &+= 1
+        let refreshToken = refreshGeneration
         let refreshID = String(UUID().uuidString.prefix(8))
         var polls = 0
         FileLogger.shared.log("[logRefresh:\(refreshID)] started appPID=\(ProcessInfo.processInfo.processIdentifier)", level: "NOTICE")
-        loadingLogs = logText.isEmpty
+        setLoadingLogs(logText.isEmpty)
         defer {
-            loadingLogs = false
+            if refreshToken == refreshGeneration { setLoadingLogs(false) }
             FileLogger.shared.log("[logRefresh:\(refreshID)] ended cancelled=\(Task.isCancelled) polls=\(polls)", level: "NOTICE")
         }
-        while !Task.isCancelled {
+        while !Task.isCancelled, refreshToken == refreshGeneration {
             let token = logGeneration
             if !clearingLogs {
                 polls += 1
                 let text = await manager.collectLogs()
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, refreshToken == refreshGeneration else { return }
                 if token == logGeneration, !clearingLogs {
-                    logText = text
-                    loadingLogs = false
+                    updateLogs(text)
+                    setLoadingLogs(false)
                 }
             }
             do { try await Task.sleep(for: .seconds(2)) }
             catch { return }
         }
+    }
+
+    /// Retain the filtered snapshot across view updates and unchanged polls.
+    func updateLogs(_ text: String) {
+        guard text != logText else { return }
+        logText = text
+        filterLogs()
+    }
+
+    private func filterLogs() {
+        let filtered = DiagnosticsPresentation.filteredLogs(logText, source: logFilter, search: logSearch)
+        if filtered != filteredLogText { filteredLogText = filtered }
+    }
+
+    private func setLoadingLogs(_ loading: Bool) {
+        if loadingLogs != loading { loadingLogs = loading }
     }
 }

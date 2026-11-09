@@ -15,11 +15,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import net.dighole.vault.VaultVpnService.Companion.PREFS_NAME
+import net.dighole.vault.data.deviceId
 import net.dighole.vault.data.readVaultConfig
 
 class StatusFragment : Fragment() {
@@ -38,26 +40,32 @@ class StatusFragment : Fragment() {
     private lateinit var sentSpeed: TextView
     private lateinit var receivedSpeed: TextView
 
-    private var isConnected = false
-    private var isConnecting = false
-    private var currentIp: String = ""
-    private var currentIpv6: String = ""
+    private var vpnState = VpnUiState()
+    private var connectJob: Job? = null
+    private var awaitingPermission = false
 
     private val vpnLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        awaitingPermission = false
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             startVpnService()
         } else {
             Log.d("StatusFragment", "VPN permission denied or dialog cancelled")
-            isConnecting = false
+            vpnState = vpnState.copy(isConnecting = false)
             updateUI()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        awaitingPermission = savedInstanceState?.getBoolean("awaitingPermission") ?: false
         Log.d("StatusFragment", "onCreate")
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean("awaitingPermission", awaitingPermission)
     }
 
     override fun onCreateView(
@@ -85,7 +93,7 @@ class StatusFragment : Fragment() {
         receivedSpeed = view.findViewById(R.id.tvReceivedSpeed)
 
         btnToggleVpn.setOnClickListener {
-            if (isConnected) {
+            if (vpnState.isConnected || vpnState.isConnecting) {
                 disconnectVpn()
             } else {
                 connectVpn()
@@ -115,28 +123,21 @@ class StatusFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
         val app = requireContext().applicationContext as VaultApplication
-        when (val event = app.currentVpnStatus) {
-            is VpnStatusEvent.Connected -> {
-                isConnected = true
-                isConnecting = false
-                currentIp = event.ipv4
-                currentIpv6 = event.ipv6
-            }
-            is VpnStatusEvent.Reconnecting -> { isConnected = true; isConnecting = true }
-            is VpnStatusEvent.Error, is VpnStatusEvent.Disconnected -> {
-                isConnected = false; isConnecting = false; currentIp = ""; currentIpv6 = ""
-            }
-            else -> {
-                isConnected = isVpnServiceRunning() && prefs.getBoolean("vpn_connected", false)
-                isConnecting = false
-                currentIp = if (isConnected) prefs.getString("vpn_assigned_ipv4", "").orEmpty() else ""
-                currentIpv6 = if (isConnected) prefs.getString("vpn_assigned_ipv6", "").orEmpty() else ""
-            }
+        val event = app.currentVpnStatus
+        vpnState = if (event != null) {
+            vpnState.applying(event)
+        } else {
+            val connected = isVpnServiceRunning() && prefs.getBoolean("vpn_connected", false)
+            VpnUiState(
+                isConnected = connected,
+                ipv4 = if (connected) prefs.getString("vpn_assigned_ipv4", "").orEmpty() else "",
+                ipv6 = if (connected) prefs.getString("vpn_assigned_ipv6", "").orEmpty() else ""
+            )
         }
 
         Log.d(
             "StatusFragment",
-            "Restored state: connected=$isConnected, connecting=$isConnecting, ip=$currentIp"
+            "Restored state: $vpnState"
         )
         updateUI()
     }
@@ -158,7 +159,8 @@ class StatusFragment : Fragment() {
     }
 
     private fun connectVpn() {
-        lifecycleScope.launch {
+        if (connectJob?.isActive == true || awaitingPermission) return
+        connectJob = viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val config = requireContext().readVaultConfig()
                 Log.d("StatusFragment", "Config loaded for connect")
@@ -172,24 +174,27 @@ class StatusFragment : Fragment() {
                     return@launch
                 }
 
-                isConnecting = true
-                updateUI()
-
                 val intent = VpnService.prepare(requireContext())
                 if (intent != null) {
+                    awaitingPermission = true
                     vpnLauncher.launch(intent)
                 } else {
                     startVpnService()
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_e: Exception) {
                 Log.e("StatusFragment", "Failed to connect VPN", _e)
-                isConnecting = false
-                isConnected = false
+                awaitingPermission = false
+                vpnState = VpnUiState()
+                (requireContext().applicationContext as VaultApplication)
+                    .emitVpnStatusEvent(VpnStatusEvent.Error(_e.message))
+            } finally {
+                connectJob = null
                 updateUI()
-                tvStatusDetail.text = getString(R.string.status_error_prefix, _e.message)
-                tvStatusDetail.visibility = View.VISIBLE
             }
         }
+        updateUI()
     }
 
     private fun disconnectVpn() {
@@ -204,52 +209,42 @@ class StatusFragment : Fragment() {
     }
 
     private fun startVpnService() {
-        lifecycleScope.launch {
-            try {
-                val prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                val deviceId = prefs.getString("device_id", null) ?: generateDeviceId()
-
-                val idBytes = try {
-                    hexToBytes(deviceId)
-                } catch (_e: Exception) {
-                    Log.e("StatusFragment", "Invalid device ID, generating new one", _e)
-                    val newId = generateDeviceId()
-                    hexToBytes(newId)
-                }
-                check(idBytes.isNotEmpty()) { "Invalid device ID" }
-
-                val serviceIntent = Intent(requireContext(), VaultVpnService::class.java).apply {
-                    action = VaultVpnService.ACTION_CONNECT
-                    putExtra(VaultVpnService.EXTRA_ID, idBytes)
-                }
-
-                ContextCompat.startForegroundService(requireContext(), serviceIntent)
-            } catch (_e: Exception) {
-                Log.e("StatusFragment", "Failed to start VPN service", _e)
-                isConnecting = false
-                isConnected = false
-                updateUI()
-                tvStatusDetail.text = getString(R.string.status_error_starting, _e.message)
-                tvStatusDetail.visibility = View.VISIBLE
+        try {
+            val idBytes = requireContext().deviceId().bytes
+            val serviceIntent = Intent(requireContext(), VaultVpnService::class.java).apply {
+                action = VaultVpnService.ACTION_CONNECT
+                putExtra(VaultVpnService.EXTRA_ID, idBytes)
             }
+
+            ContextCompat.startForegroundService(requireContext(), serviceIntent)
+            (requireContext().applicationContext as VaultApplication).emitVpnStatusEvent(VpnStatusEvent.Connecting)
+            vpnState = vpnState.applying(VpnStatusEvent.Connecting)
+        } catch (_e: Exception) {
+            Log.e("StatusFragment", "Failed to start VPN service", _e)
+            vpnState = VpnUiState()
+            (requireContext().applicationContext as VaultApplication)
+                .emitVpnStatusEvent(VpnStatusEvent.Error(_e.message))
         }
+        updateUI()
     }
 
     private fun updateUI() {
         val root = view ?: return
         val app = requireContext().applicationContext as VaultApplication
-        val connected = isConnected && !isConnecting
+        val preparing = awaitingPermission || connectJob?.isActive == true
+        val active = vpnState.isConnected || vpnState.isConnecting
+        val connected = vpnState.isConnected && !vpnState.isConnecting
         tvStatus.setText(when {
-            isConnecting && isConnected -> R.string.status_reconnecting
-            isConnecting -> R.string.status_connecting
-            isConnected -> R.string.status_on
+            vpnState.isConnecting && vpnState.isConnected -> R.string.status_reconnecting
+            vpnState.isConnecting || preparing -> R.string.status_connecting
+            vpnState.isConnected -> R.string.status_on
             else -> R.string.status_off
         })
-        btnToggleVpn.setImageResource(if (isConnected) R.drawable.ic_connected else R.drawable.ic_disconnected)
-        btnToggleVpn.isEnabled = !isConnecting || isConnected
+        btnToggleVpn.setImageResource(if (active) R.drawable.ic_connected else R.drawable.ic_disconnected)
+        btnToggleVpn.isEnabled = !preparing
         btnToggleVpn.alpha = if (btnToggleVpn.isEnabled) 1f else 0.5f
         btnToggleVpn.contentDescription = getString(
-            if (isConnected) R.string.status_tap_to_disconnect else R.string.status_tap_to_connect)
+            if (active) R.string.status_tap_to_disconnect else R.string.status_tap_to_connect)
         val error = app.currentVpnStatus as? VpnStatusEvent.Error
         tvStatusDetail.text = error?.let { getString(R.string.status_error_prefix, it.message.orEmpty()) }.orEmpty()
         tvStatusDetail.visibility = if (error == null) View.GONE else View.VISIBLE
@@ -259,16 +254,17 @@ class StatusFragment : Fragment() {
             if (!isHidden && isResumed) startDurationUpdates(app.ensureConnectionStarted())
         } else stopDurationUpdates()
         root.findViewById<View>(R.id.connectionInfo).visibility = if (connected) View.VISIBLE else View.GONE
-        root.findViewById<View>(R.id.rowIpv4).visibility = if (currentIp.isNotEmpty()) View.VISIBLE else View.GONE
-        root.findViewById<View>(R.id.rowIpv6).visibility = if (currentIpv6.isNotEmpty()) View.VISIBLE else View.GONE
+        root.findViewById<View>(R.id.rowIpv4).visibility = if (vpnState.ipv4.isNotEmpty()) View.VISIBLE else View.GONE
+        root.findViewById<View>(R.id.rowIpv6).visibility = if (vpnState.ipv6.isNotEmpty()) View.VISIBLE else View.GONE
         root.findViewById<View>(R.id.ipDivider).visibility =
-            if (currentIp.isNotEmpty() || currentIpv6.isNotEmpty()) View.VISIBLE else View.GONE
-        tvIpv4Address.text = currentIp
-        tvIpv6Address.text = currentIpv6
+            if (vpnState.ipv4.isNotEmpty() || vpnState.ipv6.isNotEmpty()) View.VISIBLE else View.GONE
+        tvIpv4Address.text = vpnState.ipv4
+        tvIpv6Address.text = vpnState.ipv6
         renderTrafficStats(app.latestTrafficStats)
     }
 
     private fun renderTrafficStats(stats: VpnStatusEvent.TrafficStats?) {
+        if (isHidden || !isResumed) return
         sentPackets.setIfChanged((stats?.packetsSent ?: 0).coerceAtLeast(0).toString())
         receivedPackets.setIfChanged((stats?.packetsReceived ?: 0).coerceAtLeast(0).toString())
         sentBytes.setIfChanged(StatusPresentation.bytes(stats?.bytesSent ?: 0))
@@ -303,76 +299,14 @@ class StatusFragment : Fragment() {
         durationUpdates = null
     }
 
-    private fun generateDeviceId(): String {
-        val id = java.util.UUID.randomUUID().toString().replace("-", "")
-        requireContext().getSharedPreferences("vault_prefs", Context.MODE_PRIVATE)
-            .edit()
-            .putString("device_id", id)
-            .commit()
-
-        return id
-    }
-
-    private fun hexToBytes(hex: String): ByteArray {
-        require(hex.isNotEmpty()) { "device_id cannot be empty" }
-        require(hex.length % 2 == 0) { "device_id hex string must have even length" }
-
-        val len = hex.length
-        val data = ByteArray(len / 2)
-        for (i in 0 until len step 2) {
-            data[i / 2] =
-                ((hex[i].digitToInt(16) shl 4) + hex[i + 1].digitToInt(16)).toByte()
+    private fun applyVpnEvent(event: VpnStatusEvent) {
+        if (event is VpnStatusEvent.TrafficStats) {
+            renderTrafficStats(event)
+            return
         }
-        return data
-    }
-
-    /**
-     * Apply a [VpnStatusEvent] to local state.
-     */
-    private fun applyVpnEvent(
-        event: VpnStatusEvent,
-        update: Boolean = true
-    ) {
-        if (event !is VpnStatusEvent.TrafficStats) {
-            VaultFileLogger.event("StatusFragment", "APPLY_EVENT event=$event beforeConnected=$isConnected beforeConnecting=$isConnecting")
-        }
-        when (event) {
-            is VpnStatusEvent.Connected -> {
-                isConnected = true
-                isConnecting = false
-                currentIp = event.ipv4
-                currentIpv6 = event.ipv6
-                if (update) updateUI()
-            }
-
-            is VpnStatusEvent.Reconnecting -> {
-                // isConnected also means a service is available to disconnect.
-                isConnected = true
-                isConnecting = true
-                if (update) updateUI()
-            }
-
-            is VpnStatusEvent.Disconnected -> {
-                isConnected = false
-                isConnecting = false
-                currentIp = ""
-                currentIpv6 = ""
-                if (update) updateUI()
-            }
-
-            is VpnStatusEvent.Error -> {
-                isConnected = false
-                isConnecting = false
-                currentIp = ""
-                currentIpv6 = ""
-                if (update) {
-                    updateUI()
-                    tvStatusDetail.text = getString(R.string.status_error_prefix, event.message.orEmpty())
-                }
-            }
-
-            is VpnStatusEvent.TrafficStats -> renderTrafficStats(event)
-        }
+        VaultFileLogger.event("StatusFragment", "APPLY_EVENT event=$event before=$vpnState")
+        vpnState = vpnState.applying(event)
+        updateUI()
     }
 
     companion object {

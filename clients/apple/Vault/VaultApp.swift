@@ -75,7 +75,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct MacosAppCommands: Commands {
     let vpnManager: VpnManager
     @ObservedObject var appData: AppData
-    let config: VaultConfig
     @ObservedObject private var languageManager = LanguageManager.shared
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
@@ -88,13 +87,9 @@ struct MacosAppCommands: Commands {
                 .keyboardShortcut("w")
         }
         CommandGroup(after: .appSettings) {
-            Button(languageManager.tr(appData.vpnStatus != .disconnected ? "Disconnect" : "Connect")) {
-                if appData.vpnStatus == .connected || appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
-                    vpnManager.disconnect()
-                } else if config.host.isEmpty || config.password.isEmpty {
+            Button(languageManager.tr(appData.connectionActionTitle)) {
+                vpnManager.toggleConnection {
                     WindowManager.shared.showWindow(withIdentifier: "configure")
-                } else {
-                    vpnManager.connect()
                 }
             }
             .keyboardShortcut(.return, modifiers: .command)
@@ -154,7 +149,7 @@ struct VaultApp: App {
         }
         .menuBarExtraStyle(.window)
         .commands {
-            MacosAppCommands(vpnManager: vpnManager, appData: appData, config: config)
+            MacosAppCommands(vpnManager: vpnManager, appData: appData)
             TextEditingCommands()
         }
         #else

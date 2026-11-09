@@ -3,7 +3,6 @@
 #[cfg(not(target_os = "ios"))]
 mod app;
 mod buf;
-#[cfg(feature = "client")]
 pub mod client;
 mod crypto;
 pub mod diagnostics;
@@ -16,6 +15,7 @@ mod epoll;
 // Logging backends: `logger::shared` (mobile, all platforms) and
 // `logger::rolling` (server/edge daemons, not on iOS).
 pub mod logger;
+pub mod metrics;
 pub mod pake;
 mod peer;
 pub mod protocol;
@@ -53,6 +53,15 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 pub const TAG_LEN: usize = 16;
 pub const EXTRA_LEN: usize = 8;
+
+/// Outer IPv6 + UDP headers, authenticated encryption overhead and packet type.
+pub const TUNNEL_OVERHEAD: usize = 40 + 8 + EXTRA_LEN + TAG_LEN + 1;
+// MTU bounds for Android/Apple configuration and shared diagnostics.
+// Linux devices derive their MTU separately.
+pub const TUNNEL_MTU_MIN: u16 = 1280;
+pub const TUNNEL_MTU_MAX: u16 = 1500 - TUNNEL_OVERHEAD as u16;
+pub const DEFAULT_DNS_IPV4: [&str; 2] = ["1.1.1.1", "8.8.8.8"];
+pub const DEFAULT_DNS_IPV6: [&str; 2] = ["2001:4860:4860::8888", "2001:4860:4860::8844"];
 
 mod pb {
     include!(concat!(env!("OUT_DIR"), "/protocol.rs"));

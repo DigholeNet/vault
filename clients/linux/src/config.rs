@@ -34,12 +34,12 @@ impl EdgeConfig {
 
     pub fn dns_for(&self, ipv4: bool, ipv6: bool) -> Vec<String> {
         let v4: Vec<String> = if self.dns_ipv4.is_empty() {
-            vec!["1.1.1.1".into(), "8.8.8.8".into()]
+            vault_core::DEFAULT_DNS_IPV4.map(str::to_owned).into()
         } else {
             self.dns_ipv4.iter().map(ToString::to_string).collect()
         };
         let v6: Vec<String> = if self.dns_ipv6.is_empty() {
-            vec!["2001:4860:4860::8888".into(), "2001:4860:4860::8844".into()]
+            vault_core::DEFAULT_DNS_IPV6.map(str::to_owned).into()
         } else {
             self.dns_ipv6.iter().map(ToString::to_string).collect()
         };

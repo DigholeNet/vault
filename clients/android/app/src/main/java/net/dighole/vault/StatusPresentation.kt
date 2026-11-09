@@ -26,3 +26,20 @@ internal class ConnectionClock {
     @Synchronized fun connected(now: Long): Long = startedAt ?: now.also { startedAt = it }
     @Synchronized fun disconnected() { startedAt = null }
 }
+
+/** Shared by event delivery and restoring a screen from the cached VPN status. */
+internal data class VpnUiState(
+    val isConnected: Boolean = false,
+    val isConnecting: Boolean = false,
+    val ipv4: String = "",
+    val ipv6: String = ""
+) {
+    fun applying(event: VpnStatusEvent): VpnUiState = when (event) {
+        is VpnStatusEvent.Connecting -> VpnUiState(isConnecting = true)
+        is VpnStatusEvent.Connected -> VpnUiState(isConnected = true, ipv4 = event.ipv4, ipv6 = event.ipv6)
+        // A reconnecting service remains available to disconnect, and keeps its assigned addresses.
+        is VpnStatusEvent.Reconnecting -> copy(isConnected = true, isConnecting = true)
+        is VpnStatusEvent.Disconnected, is VpnStatusEvent.Error -> VpnUiState()
+        is VpnStatusEvent.TrafficStats -> this
+    }
+}

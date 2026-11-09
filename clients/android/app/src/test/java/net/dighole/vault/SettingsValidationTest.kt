@@ -30,6 +30,15 @@ class SettingsValidationTest {
         assertFalse(SettingsValidation.dns("1.1.1.1,2001:4860:4860::8888", ipv6 = false))
         assertFalse(SettingsValidation.dns("example.com", ipv6 = true))
     }
+    @Test fun dnsDigits() {
+        listOf("١.٢.٣.٤", "１.２.３.４", "1.２.3.4", "2001:db8::１", "::ffff:١.٢.٣.٤").forEach {
+            assertFalse(it, SettingsValidation.dns(it, ipv6 = false))
+            assertFalse(it, SettingsValidation.dns(it, ipv6 = true))
+            assertFalse(it, SettingsValidation.dns(it))
+            assertFalse(it, SettingsValidation.address(it))
+            assertFalse(it, SettingsValidation.server(it))
+        }
+    }
     @Test fun listLimits() {
         assertTrue(SettingsValidation.dns(List(4) { "1.1.1.1" }.joinToString(","), ipv6 = false))
         assertFalse(SettingsValidation.dns(List(5) { "1.1.1.1" }.joinToString(","), ipv6 = false))
@@ -42,5 +51,24 @@ class SettingsValidationTest {
         listOf("https://example.com", "a..com", "example.com,", "bad_domain.com").forEach {
             assertFalse(it, SettingsValidation.domains(it))
         }
+    }
+
+    @Test fun domainBounds() {
+        assertTrue(SettingsValidation.domain("EXAMPLE.com."))
+        assertTrue(SettingsValidation.domain("a".repeat(63) + ".example"))
+        assertFalse(SettingsValidation.domain("a".repeat(64) + ".example"))
+        assertFalse(SettingsValidation.domain("example.com.."))
+        assertFalse(SettingsValidation.domain("例子.example"))
+        val longest = listOf("a".repeat(63), "b".repeat(63), "c".repeat(63), "d".repeat(61)).joinToString(".")
+        assertTrue(SettingsValidation.domain(longest))
+        assertFalse(SettingsValidation.domain("$longest."))
+    }
+
+    @Test fun mtuBounds() {
+        assertTrue(SettingsValidation.mtu(""))
+        assertTrue(SettingsValidation.mtu(" 1280 "))
+        assertTrue(SettingsValidation.mtu("1427"))
+        assertFalse(SettingsValidation.mtu("1279"))
+        assertFalse(SettingsValidation.mtu("1428"))
     }
 }

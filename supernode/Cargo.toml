@@ -15,6 +15,7 @@ dashmap = {version = "6"}
 hex.workspace = true
 pnet = {version = "0.35"}
 serde.workspace = true
+socket2 = {version = "0.6"}
 sqlite = {version = "0.37", features = ["bundled"]}
 thiserror = {version = "2"}
 tracing = {workspace = true}

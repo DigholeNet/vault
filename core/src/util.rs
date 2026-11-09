@@ -1,8 +1,30 @@
 // SPDX-License-Identifier: MIT
-use std::net::{IpAddr, SocketAddr};
 use std::process;
 
+use anyhow::Context;
 use tracing::{debug, error};
+
+/// Execute without a shell, preserving stdout and reporting command/status/stderr on failure.
+pub fn checked_output(command: &mut process::Command) -> anyhow::Result<process::Output> {
+    let output = command
+        .output()
+        .with_context(|| format!("execute {command:?}"))?;
+    successful_output(command, output)
+}
+
+/// Apply the same exit-status check to output collected with a caller-owned timeout.
+pub fn successful_output(
+    command: &process::Command,
+    output: process::Output,
+) -> anyhow::Result<process::Output> {
+    anyhow::ensure!(
+        output.status.success(),
+        "{command:?} failed ({}): {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(output)
+}
 
 /// Name of the interface owning the default route. Returns an error
 /// instead of panicking because hosts without a physical NIC (containers)
@@ -32,39 +54,21 @@ fn run_command_inner(program: &str, args: &[&str], log_failure: bool) -> bool {
     cmd.args(args);
     debug!("Running command: {:?}", cmd);
     match cmd.output() {
-        Ok(output) if output.status.success() => true,
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if log_failure {
-                error!(
-                    "Command {:?} failed with {:?}: {}",
-                    cmd,
-                    output.status.code(),
-                    stderr.trim()
-                );
-            } else {
-                debug!(
-                    "Command {:?} exited with {:?}: {}",
-                    cmd,
-                    output.status.code(),
-                    stderr.trim()
-                );
+        Ok(output) => match successful_output(&cmd, output) {
+            Ok(_) => true,
+            Err(error) => {
+                if log_failure {
+                    error!("{error}");
+                } else {
+                    debug!("{error}");
+                }
+                false
             }
-            false
-        }
+        },
         Err(e) => {
             error!("Failed to execute {:?}: {}", cmd, e);
             false
         }
-    }
-}
-
-pub fn mapped_addr(addr: SocketAddr) -> SocketAddr {
-    match addr {
-        SocketAddr::V4(addr4) => {
-            SocketAddr::new(IpAddr::V6(addr4.ip().to_ipv6_mapped()), addr4.port())
-        }
-        _ => addr,
     }
 }
 
@@ -99,4 +103,40 @@ fn get_default_physical_iface() -> Option<String> {
     }
 
     None
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    #[test]
+    fn command_output() {
+        let command = process::Command::new("vault-command-test");
+        let output = successful_output(
+            &command,
+            process::Output {
+                status: process::ExitStatus::from_raw(0),
+                stdout: b"value\n".to_vec(),
+                stderr: b"warning\n".to_vec(),
+            },
+        )
+        .unwrap();
+        assert_eq!(output.stdout, b"value\n");
+        assert_eq!(output.stderr, b"warning\n");
+
+        let error = successful_output(
+            &command,
+            process::Output {
+                status: process::ExitStatus::from_raw(7 << 8),
+                stdout: vec![],
+                stderr: b"permission denied\n".to_vec(),
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("vault-command-test"));
+        assert!(error.contains('7'));
+        assert!(error.contains("permission denied"));
+    }
 }
