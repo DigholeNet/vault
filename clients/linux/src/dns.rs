@@ -146,7 +146,8 @@ impl DnsGuard {
         mut run: impl FnMut(&[String]) -> anyhow::Result<String>,
     ) -> Self {
         if resolved_file(live) {
-            match run(&["status".into()]) {
+            // Keep the availability probe independent of interface count.
+            match run(&["statistics".into()]) {
                 Ok(_) => {
                     tracing::info!("Using systemd-resolved DNS configuration for {link}");
                     return Self {
@@ -268,7 +269,7 @@ mod tests {
             std::fs::write(&fixture.live, content).unwrap();
             let mut guard = DnsGuard::setup_with(&fixture.live, "vpn", |args| {
                 assert!(expected);
-                assert_eq!(args, ["status"]);
+                assert_eq!(args, ["statistics"]);
                 Ok(String::new())
             });
             assert_eq!(guard.resolved.is_some(), expected);

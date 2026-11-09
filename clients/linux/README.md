@@ -89,7 +89,7 @@ server has working internet egress for that family. Changed assignments update
 the TUN's DNS settings.
 
 Automatic DNS requires systemd-resolved's local stub: `/etc/resolv.conf`
-nameservers must all be `127.0.0.53` or `127.0.0.54`, and `resolvectl status`
+nameservers must all be `127.0.0.53` or `127.0.0.54`, and `resolvectl statistics`
 must succeed. Edge configures DNS and the `~.` routing domain on its own TUN,
 flushes resolver caches when settings change, and reverts the link settings on
 exit. The Debian package grants the `vault` account the required Polkit actions;

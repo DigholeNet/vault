@@ -62,7 +62,7 @@ SIGINT and SIGTERM use the same graceful shutdown and network cleanup path as *-
 
 == DNS
 Automatic DNS requires systemd-resolved's local stub: */etc/resolv.conf*
-nameservers must all be *127.0.0.53* or *127.0.0.54*, and *resolvectl status*
+nameservers must all be *127.0.0.53* or *127.0.0.54*, and *resolvectl statistics*
 must succeed. With Polkit authorization, Edge configures DNS on its own TUN
 and reverts the link settings on exit. Other setups, including
 */run/systemd/resolve/resolv.conf* uplink mode, require manual DNS configuration.
