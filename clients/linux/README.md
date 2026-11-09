@@ -5,19 +5,6 @@ Built on the platform-independent client session provided by
 [`vault-core`](../../core) — the same session
 implementation used by the Vault Android/iOS clients.
 
-## Features
-
-- SPAKE2 password-authenticated handshake, X25519 ECDH key exchange, HKDF-SHA256 session keys
-- AES-128-GCM, AES-256-GCM, and ChaCha20-Poly1305 encryption (negotiated by speed)
-- Automatic IP assignment from server (IPv4 + IPv6)
-- Periodic heartbeat (10s interval, 30s timeout)
-- Automatic reconnect with exponential backoff (1s up to 60s)
-- Physical exit checks every 2s; route migration and immediate reconnect on changes
-- Traffic statistics (bytes/packets and per-second rates, logged every 10s)
-- Route and DNS configuration with rollback on exit
-- Per-link VPN DNS via `resolvectl` on systemd-resolved systems; repair DNS settings after network changes
-- TUN device support
-
 ## Runtime dependencies
 
 The Debian package installs `iproute2` (`ip`), `procps` (`sysctl`) and
@@ -27,12 +14,36 @@ and `polkitd` for systems where resolved manages `/etc/resolv.conf`; both
 file-based DNS backend. For source installations, install these tools separately
 before starting Edge.
 
-## Build
+## Project structure
+
+```text
+clients/linux/
+├── Cargo.toml                  # Package and Debian metadata
+├── edge.adoc                   # Manpage source
+├── src/
+│   ├── main.rs                 # Application entry point
+│   ├── runner.rs               # Startup, network monitoring and cleanup
+│   ├── edge.rs                 # Client session and TUN adapter
+│   ├── config.rs               # TOML configuration
+│   ├── dns.rs                  # DNS setup, recovery and resolved integration
+│   ├── routes.rs               # Route ownership and rollback
+│   ├── interface.rs            # Physical-interface discovery
+│   └── storage.rs              # Persistent device ID
+└── assets/
+    ├── edge.toml.example       # Example configuration
+    ├── edge.service            # systemd service unit
+    ├── edge.target             # systemd target unit
+    ├── edge-resolved.rules     # Polkit authorization for resolved
+    └── deb-scripts/            # Debian lifecycle scripts
+```
+
+## Build and test
 
 Run these commands from the repository root:
 
 ```bash
 cargo build -p edge --release
+cargo test -p edge
 ```
 
 The binary will be at `target/release/edge`.
@@ -91,9 +102,9 @@ late DHCP or network-manager updates do not undo recovery.
 DNS failures are retried without tearing down the session or rolling back its
 routes. Each `resolvectl` command has a 2s timeout.
 
-## Run
+## Usage and deployment
 
-### Run directly (requires root):
+### Run directly (requires root)
 
 ```bash
 sudo install -d -m 700 /etc/vault
@@ -101,14 +112,10 @@ sudo install -d -m 700 /etc/vault
 sudo ./target/release/edge --config /etc/vault/edge.toml
 ```
 
-To change identity, add `--user USER --group GROUP`. This must still start as
-root. The switch happens before any logging, Tokio or TUN reader threads start.
-The selected log directory and storage parent must support file creation,
-append, rename and deletion by the target user. Edge retains `CAP_NET_ADMIN`,
-`CAP_NET_RAW` and `CAP_DAC_OVERRIDE` for route/DNS changes and cleanup, so this
-is not a complete privilege sandbox.
+To change identity, add `--user USER --group GROUP`; see the security notes
+below.
 
-### Run as systemd service:
+### Run as systemd service
 
 Edge and supernode are intended for separate hosts; co-located deployment is
 not supported. The Debian package creates a shared `vault` system user/group
@@ -132,85 +139,28 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now edge
 ```
 
-## Commands
-
 See `edge --help` for the full option list (config file, daemon mode,
-pid file, logging, etc.).
-
-Stop a running instance:
+pid file, logging, etc.). Stop a running instance with:
 
 ```bash
 sudo edge -s quit
 ```
 
-## Architecture
+## Security considerations
 
-The session layer (handshake, heartbeat, reconnect, crypto, traffic stats)
-lives in `vault-core::client`; this crate is a thin Linux platform adapter:
+Changing identity with `--user` must still start as root. The switch happens
+before any logging, Tokio or TUN reader threads start. The selected log
+directory and storage parent must support file creation, append, rename and
+deletion by the target user. Edge retains `CAP_NET_ADMIN`, `CAP_NET_RAW` and
+`CAP_DAC_OVERRIDE` for route/DNS changes and cleanup, so this is not a complete
+privilege sandbox.
 
-1. **Initialization**:
-   - Generates or loads device ID from storage
-   - Creates TUN device
-   - Resolves all server address candidates before DNS takeover and passes them
-     as IP literals to the shared session for IPv4/IPv6 handshake racing
-   - Installs server host routes via the physical exits
-   - Applies DNS after address assignment and route configuration succeed
+## Documentation
 
-2. **Connection** (handled by `ClientSession`):
-   - Sends X25519 ECDH handshake request to server
-   - Receives assigned IP and negotiated encryption algorithm
-   - `on_ip_assigned` sets the TUN addresses, installs the VPN default route
-     and server host routes via the physical interfaces. The callback runs on
-     initial assignment and when addresses, mask or prefix change; same-address
-     reconnects retain the TUN. The runner separately maintains server routes
-     when physical exits change
-
-3. **Data Transfer**:
-   - A reader thread pumps packets from the TUN device into
-     `ClientSession::write_packet` (bounded queue, drops on overflow)
-   - The session encrypts/sends and decrypts/receives; decrypted downlink
-     batches are written back to the TUN device via `on_packets`
-   - The session sends a heartbeat ping every 10s; after 30s without an authenticated downstream packet (data or pong)
-     it reconnects with exponential backoff
-
-4. **Network changes**:
-   - Every 2s, reads physical default routes for each server candidate address family,
-     excluding the VPN interface and down links; prefers the lowest metric
-   - Interface, address or gateway changes update the server host route before
-     requesting a reconnect, without replacing TUN or resetting traffic counters
-   - A restored network interrupts retry backoff even when it uses the same exit
-   - Configuration failures during recovery are retried; initial setup failures
-     still terminate the client
-   - The candidate set is fixed by startup DNS resolution. Reconnects can race
-     those candidates again, including across address families; DNS is not
-     refreshed during recovery. Restart Edge to resolve changed server records
-
-5. **Shutdown**:
-   - On `SIGINT`, `SIGTERM` or `-s quit`, the session is shut down, the host route is
-     removed, and the original default routes and DNS configuration are
-     restored
-
-## Logging and configuration errors
-
-Logs are written only to files, including when running in the foreground.
-`--log-dir` selects the directory; the default is `/var/log/vault/`.
-Current files have fixed names (`default.log`, `error.log`, and
-`metrics.log`). On the first write after a UTC date change, the previous file
-is archived as `<name>.log.YYYY-MM-DD`, using its last-write date. Same-day
-restarts append to the current file. Files from the previous dated naming
-scheme are retained; today's dated file is adopted if no current file exists.
-Each stream (`default`, `error`, and `metrics` logs)
-keeps at most 30 files, including the current file. Older files are removed when
-that stream first writes a log or rotates; existing history is cleaned up then too.
-This limits file count, not total size or age; a busy day can still produce a large file.
-`RUST_LOG` controls filtering unless `--verbose` or `--quiet` overrides it.
-Unknown TOML fields are rejected, so configuration typos fail startup.
-
-`VPN uplink metrics` and `VPN downlink metrics` use the `metrics` target and
-write to `metrics.log`, including warnings; they are not duplicated in
-`default.log` or `error.log`. See [runtime measurements](../../docs/performance.md#runtime-measurements)
-for field definitions.
-
+- [Protocol](../../docs/protocol.md) — wire format, handshake and encryption
+- [Diagnostics](../../docs/diagnostics-engine.md) — shared diagnostic engine
+- [Performance](../../docs/performance.md) — runtime measurements
+- [Releasing](../../docs/releasing.md) — packaging and signing
 
 ## License
 

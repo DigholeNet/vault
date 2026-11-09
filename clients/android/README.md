@@ -17,74 +17,33 @@ Features:
 - IPv4 and IPv6 support
 - Excludes server addresses from VPN routing to avoid routing loops
 
-## Interface
-
-The four tabs follow the iOS client: Status, Configure, Diagnostics, and About.
-Android uses Material 3 controls and light/dark surfaces. Configuration groups
-follow iOS, including separate IPv4 and IPv6 DNS fields; language selection
-lives in Configure. Saving keeps the page open, and connection changes apply on the next connection. Drafts
-survive tab switches, rotation, and language changes.
-
-Diagnostics uses the shared [Rust engine and transport](../../docs/diagnostics-engine.md).
-Kotlin supplies live VPN metadata and its Network handle, publishes typed results,
-and cancels work when the session/network changes. Expand a check to see target
-results and request durations. TLS verification and trust anchors are owned by
-Rust; Android trust stores do not affect diagnostic HTTPS.
-
-Logs update every second while visible, wrap to the screen width, and can be
-copied or cleared while offline. Updates pause when the log page is hidden or
-the app enters the background. Scrolling back keeps your reading position.
-
-The shared log keeps a current file and one backup. Platform writes check a
-1 MiB rotation threshold; Rust-only appends do not trigger that check, so the
-file can grow beyond the threshold until the next platform write. Rust appends
-use synchronous filesystem I/O; they do not wait for the path mutex but can
-block on file operations.
-
-## Network recovery
-
-Once connected, the VPN keeps its TUN interface and native session through long
-offline periods. The Rust core retries with exponential backoff until recovery
-or explicit teardown. A debounced network change also wakes
-an already recovering session, bypassing the current retry delay. Repeated
-watchdog checks remain deduplicated so they do not interrupt handshakes.
-
-The UI stays in the reconnecting state until a fresh handshake configures the
-tunnel and TUN I/O is ready. Traffic counters are preserved. User disconnect,
-VPN permission revocation, and service destruction still cancel recovery and
-close the session. Initial connection failures retain their existing behavior.
-
-## Architecture
+## Project structure
 
 ```
-┌────────────────────────────────────────────┐
-│                 Android App                 │
-│  MainActivity ─ StatusFragment (status UI)  │
-│               ├ ConfigureFragment (config)  │
-│               ├ DiagnosticsFragment         │
-│               └ AboutFragment               │
-│                      │ bind/controls        │
-│               VaultVpnService (VpnService)  │
-└──────────────────────┼─────────────────────┘
-                       ▼
-              vaultcore module
-              Edge.kt (Kotlin wrapper)
-                       │ UniFFI / JNA
-                       ▼
-        vault-bridge → vault-core (Rust)
-        handshake · heartbeat · reconnect
-        crypto · data pump · diagnostics
-                       │ encrypted UDP
-                       ▼
-                  supernode (server)
+clients/android/
+├── app/                          # Android application
+│   ├── src/main/
+│   │   ├── java/net/dighole/vault/
+│   │   │   ├── MainActivity.kt    # Main entry point
+│   │   │   ├── VaultVpnService.kt # VPN service implementation
+│   │   │   ├── StatusFragment.kt  # Connection status UI
+│   │   │   ├── ConfigureFragment.kt # Settings UI
+│   │   │   ├── DiagnosticsViewModel.kt # Rust diagnostics adapter
+│   │   │   └── DiagnosticsFragment.kt # Checks and logs UI
+│   │   └── res/                  # Layouts, drawables, values
+│   └── build.gradle.kts
+├── vaultcore/                    # Kotlin wrapper over the Rust core (UniFFI)
+│   └── src/main/java/net/dighole/vaultcore/
+│       ├── Edge.kt               # Main networking component (bridges to vault-core)
+│       ├── PeerId.kt             # Peer identifier type
+│       └── LogThrottle.kt        # Rate limiter for high-frequency log statements
+└── build.gradle.kts
 ```
 
-Data flow: the app starts `VaultVpnService`, which creates an `Edge` session
-over a protected socket; after the handshake completes the service
-establishes the VPN interface and transfers plaintext packets between the TUN
-fd and the Rust session.
+Code style: Kotlin coding conventions, 4-space indentation, max line length
+120, KDoc for public APIs.
 
-## Build
+## Build and test
 
 Requirements:
 
@@ -130,6 +89,14 @@ rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-and
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
+```bash
+# Run unit tests
+./gradlew test
+
+# Run instrumentation tests
+./gradlew connectedAndroidTest
+```
+
 Direct Gradle builds default to version `0.1.0` / code `1`. For versioned
 release artifacts, run `scripts/package-android.sh` from the repository root;
 it injects the workspace version and derived Android version code.
@@ -152,19 +119,19 @@ For example, set `CARGO=/opt/rust/bin/cargo` for a custom installation.
 
 ## Configuration
 
-Server settings in the app:
+### Configuration options
 
-| Setting | Description | Default |
-|---|---|---|
-| Device ID | Read-only peer identifier | Generated on device |
-| Host | Vault server hostname or IP | Required |
-| Port | Server UDP port | 9527 |
-| Password | Authentication password | Required |
-| MTU | 1280–1427; empty uses link-based automatic sizing | Automatic |
-| IPv4 DNS | Comma-separated IPv4 resolver addresses; empty uses defaults | 1.1.1.1,8.8.8.8 |
-| IPv6 DNS | Comma-separated IPv6 resolver addresses; empty uses Google IPv6 defaults | 2001:4860:4860::8888,2001:4860:4860::8844 |
-| Probe domains | Comma-separated diagnostic domains; empty uses defaults | www.google.com,github.com,t.co |
-| Language | App language; takes effect immediately | System |
+- `Device ID`: Read-only peer identifier generated on the device
+- `Host`: Vault server hostname or IP address; required
+- `Port`: Server UDP port; defaults to 9527
+- `Password`: Authentication password; required
+- `MTU`: 1280–1427; empty uses link-based automatic sizing
+- `IPv4 DNS`: Comma-separated IPv4 resolvers; empty uses `1.1.1.1,8.8.8.8`
+- `IPv6 DNS`: Comma-separated IPv6 resolvers; empty uses
+  `2001:4860:4860::8888,2001:4860:4860::8844`
+- `Probe domains`: Comma-separated diagnostic domains; empty uses
+  `www.google.com,github.com,t.co`
+- `Language`: App language; defaults to the system language and applies immediately
 
 The server assigns the client's virtual IP address (IPv4, IPv6-only or dual-stack)
 in the handshake response. Each DNS field accepts up to four addresses of its own family; probe domains
@@ -188,6 +155,27 @@ plaintext fallback. Legacy SharedPreferences credentials are removed only
 after the new record commits. Reads, migrations, and writes are serialized by
 DataStore; failed or cancelled commits leave the previous configuration intact.
 
+## Usage and deployment
+
+The four tabs follow the iOS client: Status, Configure, Diagnostics, and About.
+Android uses Material 3 controls and light/dark surfaces. Configuration groups
+follow iOS, including separate IPv4 and IPv6 DNS fields; language selection
+lives in Configure. Saving keeps the page open, and connection changes apply on the next connection. Drafts
+survive tab switches, rotation, and language changes.
+
+## Network recovery
+
+Once connected, the VPN keeps its TUN interface and native session through long
+offline periods. The Rust core retries with exponential backoff until recovery
+or explicit teardown. A debounced network change also wakes
+an already recovering session, bypassing the current retry delay. Repeated
+watchdog checks remain deduplicated so they do not interrupt handshakes.
+
+The UI stays in the reconnecting state until a fresh handshake configures the
+tunnel and TUN I/O is ready. Traffic counters are preserved. User disconnect,
+VPN permission revocation, and service destruction still cancel recovery and
+close the session. Initial connection failures retain their existing behavior.
+
 ## Troubleshooting
 
 Connection issues:
@@ -200,42 +188,6 @@ Connection issues:
 
 Latency and repeated reconnection should be investigated with Diagnostics and
 Runtime Logs. The app does not expose a cipher-selection setting.
-
-## Development
-
-Project structure:
-
-```
-clients/android/
-├── app/                          # Android application
-│   ├── src/main/
-│   │   ├── java/net/dighole/vault/
-│   │   │   ├── MainActivity.kt    # Main entry point
-│   │   │   ├── VaultVpnService.kt # VPN service implementation
-│   │   │   ├── StatusFragment.kt  # Connection status UI
-│   │   │   ├── ConfigureFragment.kt # Settings UI
-│   │   │   ├── DiagnosticsViewModel.kt # Rust diagnostics adapter
-│   │   │   └── DiagnosticsFragment.kt # Checks and logs UI
-│   │   └── res/                  # Layouts, drawables, values
-│   └── build.gradle.kts
-├── vaultcore/                    # Kotlin wrapper over the Rust core (UniFFI)
-│   └── src/main/java/net/dighole/vaultcore/
-│       ├── Edge.kt               # Main networking component (bridges to vault-core)
-│       ├── PeerId.kt             # Peer identifier type
-│       └── LogThrottle.kt        # Rate limiter for high-frequency log statements
-└── build.gradle.kts
-```
-
-Code style: Kotlin coding conventions, 4-space indentation, max line length
-120, KDoc for public APIs.
-
-```bash
-# Run unit tests
-./gradlew test
-
-# Run instrumentation tests
-./gradlew connectedAndroidTest
-```
 
 ## Documentation
 

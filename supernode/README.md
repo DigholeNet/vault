@@ -18,10 +18,10 @@ System requirements:
 
 ## Project structure
 
-```
+```text
 supernode/
 ├── Cargo.toml              # Package manifest with debian metadata
-├── supernode.adoc    # Manpage source (AsciiDoc format)
+├── supernode.adoc          # Manpage source (AsciiDoc format)
 ├── src/
 │   ├── main.rs             # Application entry point
 │   ├── config.rs           # Configuration structure (TOML parsing)
@@ -39,106 +39,12 @@ supernode/
     ├── supernode.service         # systemd service unit
     ├── supernode.target          # systemd target unit
     └── deb-scripts/
-        └── postinst              # Debian post-install script
+        ├── postinst              # Debian post-install script
+        ├── prerm                 # Stop and disable before removal
+        └── postrm                # Reload systemd after removal
 ```
 
-## Architecture
-
-1. **SuperNode** (`src/supernode.rs`)
-   - Main server struct that manages the VPN service
-   - Event-driven architecture using epoll for I/O multiplexing
-   - Handles two main I/O sources:
-     - **UDP socket**: communication with edge clients
-     - **TUN device**: virtual network interface for VPN traffic
-
-2. **Configuration** (`src/config.rs`)
-   - TOML-based configuration (see below)
-
-3. **IP management** (`src/ip/`)
-   - `IpManager`: assigns and tracks IP addresses for connected peers,
-     automatically cleans up expired leases
-   - IP pools (`Ipv4Pool`/`Ipv6Pool`) exclude network/broadcast addresses
-     and, at startup, reserve all local physical interface addresses that
-     fall inside the pool CIDR, so the server's real (socket) addresses are
-     never assigned to clients
-
-Unconfirmed handshakes expire and release their temporary addresses without
-penalizing the source IP: packet loss and cancelled connection candidates are
-normal behind shared NAT. The per-IP INIT rate limit and bans for repeated invalid
-encrypted confirmations remain; blocked requests log the reason and retry window.
-
-The wire protocol (message types, handshake, encryption format) is documented
-in [docs/protocol.md](../docs/protocol.md) and implemented in `vault-core`.
-
-### Network configuration
-
-The supernode automatically enables host-wide forwarding for each configured
-address family when needed (below). It never disables forwarding on shutdown.
-On startup it sets redirect switches to zero on its own new TUN interface.
-If global IPv4 redirect sending remains enabled, it warns and continues startup. For both IPv4 and IPv6 it installs:
-
-- MASQUERADE rules restricted to the VPN source CIDR and routed exit interface
-- FORWARD rules restricted to the TUN interface and VPN CIDR, including outbound
-  traffic, established/related return traffic, and client-to-client relay
-- TCP MSS clamping restricted to traffic entering or leaving the TUN with VPN
-  source/destination addresses
-
-Rules are appended, so earlier administrator DROP rules still take precedence.
-The default FORWARD policy can be DROP; the scoped allow rules cover VPN traffic.
-Exits are taken from usable routes exposed by Linux for the configured address
-families, including default, connected and static routes over physical or virtual
-interfaces. Loopback, the server's TUN, rejected routes and IPv6 local/multicast
-routes are excluded. LAN-only deployments do not require a default route.
-Routes must be present when the server starts; restart after changing exit interfaces. A missing egress interface or a failed sysctl/firewall
-command aborts startup.
-Partial startup failures and normal shutdown remove only rules added by this
-instance and restore its TUN-local tunables if they still have the applied values.
-Enabled forwarding and adjusted upstream RA settings remain in place on
-success, failure, and shutdown. After SIGKILL/OOM, inspect firewall rules manually.
-
-### Automatic host forwarding
-
-At startup, the server enables `net.ipv4.ip_forward=1` for an IPv4 pool and
-`net.ipv6.conf.all.forwarding=1` for an IPv6 pool if needed. No manual sysctl
-configuration is required, including after reboot. Startup fails if a required
-sysctl cannot be read or written.
-
-Before enabling IPv6 forwarding, the server changes `accept_ra=1` to
-`accept_ra=2` on detected exit interfaces to preserve Router Advertisement
-reception in router mode. Explicitly disabled RA (`0`) stays disabled.
-Forwarding and uplink RA changes are not rolled back, even if startup later
-fails, because other services may depend on them.
-
-Changing IPv4 `ip_forward` resets other IPv4 settings to host/router defaults.
-Hosts with custom IPv4 tunables can still provision forwarding before applying
-those tunables using `/etc/sysctl.d/90-vault-forwarding.conf`:
-
-```ini
-net.ipv4.ip_forward = 1
-# For an RA-dependent IPv6 uplink, replace eth0 with the actual interface:
-net.ipv6.conf.eth0.accept_ra = 2
-net.ipv6.conf.all.forwarding = 1
-```
-
-Apply optional persistent configuration with
-`sudo sysctl -p /etc/sysctl.d/90-vault-forwarding.conf`.
-If a network manager owns these settings, configure it consistently so it does
-not disable forwarding while the server is running.
-
-### Verification
-
-`cargo test -p supernode` covers scoped rules, shared host state, and injected
-startup failures. On Linux, `scripts/test-network-namespace.sh` additionally
-checks the real sysctl/iptables backend in a disposable network namespace and
-is run by Linux CI. It requires sudo, iproute2, iptables, procps and util-linux.
-No test in that script changes the host namespace.
-
-The control socket is protected by `/run/supernode.socket.lock` for the process
-lifetime, including daemonization. A duplicate start fails without replacing the
-active socket. A stale socket from a crashed process is reclaimed after locking;
-the lock file itself intentionally remains in place between starts.
-
-## Build
+## Build and test
 
 Prerequisites: the stable Rust toolchain (Rust 1.98 or newer) and
 `asciidoctor` for Debian packaging (not needed for plain binary builds). The server runs only on
@@ -165,19 +71,25 @@ Build artifacts:
 - **Binary**: `target/release/supernode`
 - **Manpage**: `supernode/target/supernode.1.gz` (generated by `scripts/package-linux.sh --manpages-only`)
 
+`cargo test -p supernode` covers scoped rules, shared host state, and injected
+startup failures. On Linux, `scripts/test-network-namespace.sh` additionally
+checks the real sysctl/iptables backend in a disposable network namespace and
+is run by Linux CI. It requires sudo, iproute2, iptables, procps and util-linux.
+No test in that script changes the host namespace.
+
 ## Configuration
 
-Example (`assets/supernode.toml.example`):
+Create a configuration file at `/etc/vault/supernode.toml`:
 
 ```toml
 password = "change-me-to-a-strong-password"
 port = 9527
 iface = "vpn"
 ipv4 = "192.168.10.0/24"
-# ipv6 = "fd00::/96"  # optional IPv6 pool
+# ipv6 = "fd00::/96"  # Optional IPv6 pool; the server takes the first address for its TUN device.
 ```
 
-Fields:
+### Configuration Options
 
 - `password`: shared secret that edge clients must provide — use a strong,
   unique password (SPAKE2 security depends on its entropy)
@@ -199,6 +111,8 @@ ipv6 = "fd00::/96"
 
 The server needs working IPv6 egress for clients to reach IPv6 internet targets.
 
+## Usage and deployment
+
 Command line usage:
 
 ```bash
@@ -212,16 +126,10 @@ supernode --config /etc/vault/supernode.toml --verbose
 supernode --config /etc/vault/supernode.toml --daemon --log-dir /var/log/vault
 ```
 
-For a manual identity change, append `--user USER --group GROUP` to a root
-invocation. The switch happens before any background threads start. The log
-directory must support file creation, append, rename and deletion by the target
-user.
-
-## Deployment
-
 ### systemd service
 
-The project includes systemd unit files:
+Edge and supernode are intended for separate hosts; co-located deployment is
+not supported. The project includes systemd unit files:
 
 - **supernode.service**: main service unit
   - Type: forking; Restart: on-failure (5s delay)
@@ -258,6 +166,61 @@ File locations (Debian):
 - systemd units: `/lib/systemd/system/`
 - Manpage: `/usr/share/man/man1/supernode.1.gz`
 
+## Network configuration
+
+The supernode automatically enables host-wide forwarding for each configured
+address family when needed (below). It never disables forwarding on shutdown.
+On startup it sets redirect switches to zero on its own new TUN interface.
+If global IPv4 redirect sending remains enabled, it warns and continues startup. For both IPv4 and IPv6 it installs:
+
+- MASQUERADE rules restricted to the VPN source CIDR and routed exit interface
+- FORWARD rules restricted to the TUN interface and VPN CIDR, including outbound
+  traffic, established/related return traffic, and client-to-client relay
+- TCP MSS clamping restricted to traffic entering or leaving the TUN with VPN
+  source/destination addresses
+
+Rules are appended, so earlier administrator DROP rules still take precedence.
+The default FORWARD policy can be DROP; the scoped allow rules cover VPN traffic.
+Exits are taken from usable routes exposed by Linux for the configured address
+families, including default, connected and static routes over physical or virtual
+interfaces. Loopback, the server's TUN, rejected routes and IPv6 local/multicast
+routes are excluded. LAN-only deployments do not require a default route.
+Routes must be present when the server starts; restart after changing exit interfaces. A missing egress interface or a failed sysctl/firewall
+command aborts startup.
+Partial startup failures and normal shutdown remove only rules added by this
+instance and restore its TUN-local tunables if they still have the applied values.
+Enabled forwarding and adjusted upstream RA settings remain in place on
+success, failure, and shutdown. After SIGKILL/OOM, inspect firewall rules manually.
+
+## Automatic host forwarding
+
+At startup, the server enables `net.ipv4.ip_forward=1` for an IPv4 pool and
+`net.ipv6.conf.all.forwarding=1` for an IPv6 pool if needed. No manual sysctl
+configuration is required, including after reboot. Startup fails if a required
+sysctl cannot be read or written.
+
+Before enabling IPv6 forwarding, the server changes `accept_ra=1` to
+`accept_ra=2` on detected exit interfaces to preserve Router Advertisement
+reception in router mode. Explicitly disabled RA (`0`) stays disabled.
+Forwarding and uplink RA changes are not rolled back, even if startup later
+fails, because other services may depend on them.
+
+Changing IPv4 `ip_forward` resets other IPv4 settings to host/router defaults.
+Hosts with custom IPv4 tunables can still provision forwarding before applying
+those tunables using `/etc/sysctl.d/90-vault-forwarding.conf`:
+
+```ini
+net.ipv4.ip_forward = 1
+# For an RA-dependent IPv6 uplink, replace eth0 with the actual interface:
+net.ipv6.conf.eth0.accept_ra = 2
+net.ipv6.conf.all.forwarding = 1
+```
+
+Apply optional persistent configuration with
+`sudo sysctl -p /etc/sysctl.d/90-vault-forwarding.conf`.
+If a network manager owns these settings, configure it consistently so it does
+not disable forwarding while the server is running.
+
 ## Security considerations
 
 1. **Service capabilities**: the `vault` service retains `CAP_NET_ADMIN`,
@@ -269,6 +232,11 @@ File locations (Debian):
    as needed in your firewall
 4. **iptables cleanup**: the Drop implementation attempts to clean up
    iptables rules, but verify after unexpected termination
+
+For a manual identity change, append `--user USER --group GROUP` to a root
+invocation. The switch happens before any background threads start. The log
+directory must support file creation, append, rename and deletion by the target
+user.
 
 ## Troubleshooting
 
@@ -283,29 +251,11 @@ Common issues:
 Run with `--verbose` to enable debug-level logging for troubleshooting
 connection issues.
 
-## Logging and configuration errors
+## Documentation
 
-Logs are written only to files, including when running in the foreground.
-`--log-dir` selects the directory; the default is `/var/log/vault/`.
-Current files have fixed names (`default.log`, `error.log`, `client.log`, and
-`metrics.log`). On the first write after a UTC date change, the previous file
-is archived as `<name>.log.YYYY-MM-DD`, using its last-write date. Same-day
-restarts append to the current file. Files from the previous dated naming
-scheme are retained; today's dated file is adopted if no current file exists.
-Each stream (`default`, `error`, `client`, and `metrics` logs)
-keeps at most 30 files, including the current file. Older files are removed when
-that stream first writes a log or rotates; existing history is cleaned up then too.
-This limits file count, not total size or age; a busy day can still produce a large file.
-`RUST_LOG` controls filtering unless `--verbose` or `--quiet` overrides it.
-Unknown TOML fields are rejected, so configuration typos fail startup.
-
-For throughput stalls, `Supernode peer metrics` and `Supernode I/O metrics` in
-`metrics.log` summarize the UDP↔TUN forwarding stages, local errors and kernel
-socket drops. The `metrics` target routes both normal and warning metrics here,
-without duplicating them in `default.log` or `error.log`.
-See [forwarding diagnostics](../docs/performance.md#supernode-forwarding-diagnostics)
-for field definitions and five-second reporting without per-packet debug logs.
-
+- [Protocol](../docs/protocol.md) — wire format, handshake and encryption
+- [Performance](../docs/performance.md) — runtime measurements
+- [Releasing](../docs/releasing.md) — packaging and signing
 
 ## License
 
