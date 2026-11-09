@@ -51,7 +51,7 @@ Downloads follows Architecture and precedes Get started. Five navigation destina
 - Android: the button and QR resolve to the same APK when a stable release contains one; otherwise both point to the release page, with an explicit fallback label.
 - iOS: source builds only; no public Ad Hoc IPA is linked.
 - macOS: the app ZIP from the latest stable release.
-- Linux: separate amd64 Debian packages for `edge` and `supernode`.
+- Linux: separate amd64 and arm64 Debian packages for `edge` and `supernode`, with architecture-labelled download links.
 - Get started: prepare a trusted server or self-host, configure a client, then connect and verify. Self-hosting prerequisites and the example configuration are in an optional native HTML disclosure.
 
 `scripts/update-site-release.py` reads GitHub’s latest stable release, matches the actual asset naming in `.github/workflows/release.yml`, writes `website/release-data.js`, and generates `website/assets/android-release-qr.svg`. It requires `qrcode==8.2` (SVG only; no Pillow). No GitHub API or external QR service is called by visitors’ browsers. No release is a supported empty state; API/network errors fail the update rather than silently claiming no release. Missing assets fall back individually to the release page.

@@ -23,13 +23,20 @@
   function renderDownloads() {
     const release = window.vaultRelease || { assets: {}, url: 'https://github.com/DigholeNet/vault/releases' };
     const labels = language === 'zh'
-      ? { android: '下载 APK', macos: '下载 macOS ZIP', edge: '下载客户端', supernode: '下载服务端' }
-      : { android: 'Download APK', macos: 'Download macOS ZIP', edge: 'Download client', supernode: 'Download server' };
+      ? { android: '下载 APK', macos: '下载 macOS ZIP', 'edge-amd64': '下载 edge · amd64', 'edge-arm64': '下载 edge · arm64', 'supernode-amd64': '下载 supernode · amd64', 'supernode-arm64': '下载 supernode · arm64' }
+      : { android: 'Download APK', macos: 'Download macOS ZIP', 'edge-amd64': 'Download edge · amd64', 'edge-arm64': 'Download edge · arm64', 'supernode-amd64': 'Download supernode · amd64', 'supernode-arm64': 'Download supernode · arm64' };
+    const fallbackLabels = {
+      'edge-amd64': 'edge · amd64',
+      'edge-arm64': 'edge · arm64',
+      'supernode-amd64': 'supernode · amd64',
+      'supernode-arm64': 'supernode · arm64',
+    };
     document.querySelectorAll('[data-release-asset]').forEach(link => {
-      const asset = release.assets[link.dataset.releaseAsset];
+      const key = link.dataset.releaseAsset;
+      const asset = release.assets[key];
       link.href = asset || release.url;
       const label = link.querySelector('.download-label');
-      if (label) label.textContent = asset ? labels[link.dataset.releaseAsset] : (language === 'zh' ? '查看发布页' : 'View releases');
+      if (label) label.textContent = asset ? labels[key] : (fallbackLabels[key] || (language === 'zh' ? '查看发布页' : 'View releases'));
     });
     document.getElementById('release-notes').href = release.url;
     if (release.version) {

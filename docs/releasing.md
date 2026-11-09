@@ -26,10 +26,10 @@ Linux packaging regenerates manpages explicitly before `cargo deb`; it does
 not rely on Cargo build-script side effects or cached generated files. For
 direct `cargo deb` use, first run `scripts/package-linux.sh --manpages-only`.
 
-Local `scripts/package-linux.sh` cross-builds x86_64 musl binaries with Zig;
-the release workflow builds native GNU/Linux binaries on Ubuntu after all
-platform checks pass. Both produce
-Debian packages, but libc/linking requirements can differ. Local musl packages
+Local `scripts/package-linux.sh` cross-builds amd64 and arm64 musl binaries
+with Zig; the release workflow builds native GNU/Linux binaries for both
+architectures on x86_64 and ARM64 Ubuntu runners after all platform checks pass.
+Both produce Debian packages, but libc/linking requirements can differ. Local musl packages
 select the `musl` cargo-deb variant and declare only
 runtime command dependencies (iproute2/procps for edge, iptables/procps for
 supernode). Native CI packages use cargo-deb's `$auto` detection for shared-library

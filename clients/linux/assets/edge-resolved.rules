@@ -1,0 +1,10 @@
+// Allow the packaged edge service to manage its DNS settings through resolvectl.
+polkit.addRule(function(action, subject) {
+    if (subject.user == "vault" &&
+        (action.id == "org.freedesktop.resolve1.set-dns-servers" ||
+         action.id == "org.freedesktop.resolve1.set-domains" ||
+         action.id == "org.freedesktop.resolve1.flush-caches" ||
+         action.id == "org.freedesktop.resolve1.revert")) {
+        return polkit.Result.YES;
+    }
+});

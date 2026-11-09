@@ -9,7 +9,6 @@ Group=vault
 UMask=0027
 ExecStart=/usr/bin/edge --config /etc/vault/edge.toml --daemon --log-dir /var/log/vault/ --pid-file /run/edge.pid
 PIDFile=/run/edge.pid
-WorkingDirectory=/etc/vault
 RestartSec=5s
 Restart=on-failure
 TasksMax=256

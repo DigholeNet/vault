@@ -238,7 +238,7 @@ logs created as root by earlier versions. The account is not deleted on package
 removal.
 
 ```bash
-# Install a locally built package (adjust the filename to your build)
+# Install a locally built package (choose amd64 or arm64 to match the host)
 sudo dpkg -i target/debian/supernode_0.1.0-1_amd64.deb
 
 # Create the configuration on a fresh installation. Set a strong password

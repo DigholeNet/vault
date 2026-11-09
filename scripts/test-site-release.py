@@ -30,9 +30,9 @@ class ReleaseSnapshotTests(unittest.TestCase):
             self.assertEqual(state["url"], f"{BASE}/releases")
 
     def test_actual_release_asset_names_match_publishing_workflow(self):
-        data = release(["vault-android-v0.1.0.apk", "Vault-macOS-v0.1.0.zip", "edge-v0.1.0-amd64.deb", "supernode-v0.1.0-amd64.deb", "Vault-iOS.ipa"])
+        data = release(["vault-android-v0.1.0.apk", "Vault-macOS-v0.1.0.zip", "edge-v0.1.0-amd64.deb", "edge-v0.1.0-arm64.deb", "supernode-v0.1.0-amd64.deb", "supernode-v0.1.0-arm64.deb", "Vault-iOS.ipa"])
         state = site_release.release_snapshot(data)
-        self.assertEqual(set(state["assets"]), {"android", "macos", "edge", "supernode"})
+        self.assertEqual(set(state["assets"]), {"android", "macos", "edge-amd64", "edge-arm64", "supernode-amd64", "supernode-arm64"})
         self.assertEqual(state["version"], "v0.1.0")
         self.assertEqual(state["published"], "2026-11-01")
 

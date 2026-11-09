@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
 # Packages the Linux client (edge) and server (supernode) as
-# .deb packages for x86_64.
+# amd64 and arm64 .deb packages.
 #
 # Cross-building uses Zig for Linux C dependencies (ring and bundled SQLite)
 # as well as linking. rust-lld alone cannot compile those dependencies.
 #
 # Prerequisites:
-#   - rustup target add x86_64-unknown-linux-musl
+#   - rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 #   - cargo install cargo-deb
 #   - cargo install cargo-zigbuild
 #   - zig (on macOS: brew install zig)
@@ -20,7 +20,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT/dist"
-TARGET="x86_64-unknown-linux-musl"
+TARGETS=(x86_64-unknown-linux-musl aarch64-unknown-linux-musl)
 
 # Packaging owns these files explicitly; Cargo cache hits must not skip them.
 generate_manpages() {
@@ -49,10 +49,12 @@ if ! command -v cargo-deb >/dev/null 2>&1; then
     echo "error: cargo-deb not found; install with: cargo install cargo-deb" >&2
     exit 1
 fi
-if ! rustup target list --installed | grep -qx "$TARGET"; then
-    echo "error: missing Rust target; install with: rustup target add $TARGET" >&2
-    exit 1
-fi
+for target in "${TARGETS[@]}"; do
+    if ! rustup target list --installed | grep -qx "$target"; then
+        echo "error: missing Rust target; install with: rustup target add $target" >&2
+        exit 1
+    fi
+done
 for tool in cargo-zigbuild zig asciidoctor; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         case "$tool" in
@@ -71,10 +73,12 @@ done
 cd "$ROOT"
 mkdir -p "$DIST_DIR"
 generate_manpages
-for pkg in edge supernode; do
-    echo "==> Building deb: $pkg ($TARGET)"
-    cargo zigbuild -p "$pkg" --release --target "$TARGET" --locked
-    cargo deb -p "$pkg" --variant musl --target "$TARGET" --no-build --no-strip --output "$DIST_DIR/"
+for target in "${TARGETS[@]}"; do
+    for pkg in edge supernode; do
+        echo "==> Building deb: $pkg ($target)"
+        cargo zigbuild -p "$pkg" --release --target "$target" --locked
+        cargo deb -p "$pkg" --variant musl --target "$target" --no-build --no-strip --output "$DIST_DIR/"
+    done
 done
 
 echo ""

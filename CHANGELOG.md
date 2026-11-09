@@ -18,7 +18,7 @@ release. A dated version section will be added when that release is published.
 - IPv4/IPv6 address assignment, lease management and traffic relay through the supernode
 - Shared client heartbeat, IPv4/IPv6 connection racing, automatic recovery with exponential backoff and traffic statistics
 - Linux route and DNS configuration with rollback, systemd-resolved support and physical-network recovery
-- Dedicated `vault` accounts for packaged Linux services and privilege changes before background threads start
+- Dedicated `vault` accounts for packaged Linux services, privilege changes before background threads start and scoped Polkit authorization for systemd-resolved DNS management
 - Separate Linux IPv4/IPv6 DNS fields, with two IPv6 resolvers and one IPv4 resolver selected for dual-stack tunnels
 - Scoped supernode firewall/NAT rules, automatic host forwarding and IPv6 Router Advertisement preservation
 - Android and Apple connection settings, diagnostics and runtime log interfaces
@@ -28,7 +28,7 @@ release. A dated version section will be added when that release is published.
 - Android Keystore-backed credential encryption with an app-private plaintext fallback; Apple Keychain storage with a password copy in the OS VPN profile
 - English and Simplified Chinese mobile interfaces; Traditional Chinese, Japanese and Spanish additionally on Android
 - Apple apps for iOS 18.5+ and macOS 15.5+; the shared Swift package supports iOS 18+ and macOS 15+
-- Debian, Android APK and Apple packaging scripts, plus release automation that excludes Ad Hoc iOS IPAs from public artifacts
+- Debian amd64/arm64, Android APK and Apple packaging scripts, plus release automation that excludes Ad Hoc iOS IPAs from public artifacts
 - Rust, Android and Apple CI checks required before release packaging, parser fuzz targets and isolated Linux network tests
 - Single-stack-aware shared diagnostics with bypass detection for either unassigned address family
 - Shared Android release-version encoding with ordered alpha, beta, rc and final version codes

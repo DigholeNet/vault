@@ -80,8 +80,11 @@ assignment's DNS selection.
 When `/etc/resolv.conf` is managed by systemd-resolved, `resolvectl` must be
 available. Edge configures DNS and the `~.` routing domain on its own TUN
 interface after the tunnel becomes active, flushes stale resolver caches when settings
-change, and reverts the link settings on exit. It leaves the managed resolver
-file and physical-interface DNS settings intact. Other systems keep the existing
+change, and reverts the link settings on exit. The Debian package grants the
+`vault` account only the corresponding Polkit actions; Linux capabilities alone
+do not authorize these D-Bus requests. Manual runs with another `--user` need
+equivalent Polkit authorization. Edge leaves the managed resolver file and
+physical-interface DNS settings intact. Other systems keep the existing
 resolv.conf backup/restore behavior. Active DNS settings are checked every 2s so
 late DHCP or network-manager updates do not undo recovery.
 DNS failures are retried without tearing down the session or rolling back its
@@ -118,6 +121,7 @@ sudo adduser --system --ingroup vault --no-create-home --home /var/lib/vault --d
 sudo install -m 755 target/release/edge /usr/bin/edge
 sudo install -m 644 clients/linux/assets/edge.service /lib/systemd/system/edge.service
 sudo install -m 644 clients/linux/assets/edge.target /lib/systemd/system/edge.target
+sudo install -m 644 clients/linux/assets/edge-resolved.rules /usr/share/polkit-1/rules.d/50-edge.rules
 sudo install -d -m 700 /etc/vault
 # Edit /etc/vault/edge.toml with your settings before starting the service.
 sudo systemctl daemon-reload
