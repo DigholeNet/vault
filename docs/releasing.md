@@ -30,10 +30,10 @@ Local `scripts/package-linux.sh` cross-builds amd64 and arm64 musl binaries
 with Zig; the release workflow builds native GNU/Linux binaries for both
 architectures on x86_64 and ARM64 Ubuntu runners after all platform checks pass.
 Both produce Debian packages, but libc/linking requirements can differ. Local musl packages
-select the `musl` cargo-deb variant and declare only
-runtime command dependencies (iproute2/procps for edge, iptables/procps for
-supernode). Native CI packages use cargo-deb's `$auto` detection for shared-library
-dependencies, in addition to those runtime commands.
+select the `musl` cargo-deb variant and declare runtime dependencies without
+`$auto`: iproute2/procps/adduser for edge and iptables/procps/adduser for
+supernode. Native CI packages use cargo-deb's `$auto` detection for
+shared-library dependencies, in addition to those runtime packages.
 Validate each package on the intended Debian/Ubuntu host; do not assume the
 local script reproduces CI binaries byte for byte.
 

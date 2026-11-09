@@ -1,4 +1,4 @@
-// Allow the packaged edge service to manage its DNS settings through resolvectl.
+// Grant the shared vault service account the resolvectl actions used by edge.
 polkit.addRule(function(action, subject) {
     if (subject.user == "vault" &&
         (action.id == "org.freedesktop.resolve1.set-dns-servers" ||

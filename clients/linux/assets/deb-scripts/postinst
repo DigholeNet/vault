@@ -16,5 +16,10 @@ for path in /var/log/vault/* /var/log/vault/.[!.]* /var/log/vault/..?* \
     fi
 done
 
-systemctl daemon-reload
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    if [ "$1" = configure ] && [ -n "${2:-}" ]; then
+        systemctl try-restart edge.service
+    fi
+fi
 chmod 700 /etc/vault

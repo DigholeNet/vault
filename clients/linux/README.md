@@ -21,10 +21,11 @@ implementation used by the Vault Android/iOS clients.
 ## Runtime dependencies
 
 The Debian package installs `iproute2` (`ip`), `procps` (`sysctl`) and
-`adduser` (for the dedicated service account).
-It recommends `systemd-resolved` for systems where it manages `/etc/resolv.conf`;
-`resolvectl` is required in that case. Other systems use the file-based DNS backend.
-For source installations, install these tools separately before starting Edge.
+`adduser` (for the dedicated service account). It recommends `systemd-resolved`
+and `polkitd` for systems where resolved manages `/etc/resolv.conf`; both
+`resolvectl` and Polkit are required by that backend. Other systems use the
+file-based DNS backend. For source installations, install these tools separately
+before starting Edge.
 
 ## Build
 
@@ -109,9 +110,12 @@ is not a complete privilege sandbox.
 
 ### Run as systemd service:
 
-The Debian package creates a shared `vault` system user/group and starts the
-service directly with that identity and the required capabilities. It also
-migrates ownership of logs and state created as root by earlier versions.
+Edge and supernode are intended for separate hosts; co-located deployment is
+not supported. The Debian package creates a shared `vault` system user/group
+and starts the service directly with that identity and the required
+capabilities. It also migrates ownership of logs and state created as root by
+earlier versions. Upgrades restart only an already-running service; removal
+stops and disables it.
 For a source build, create the account and install the units from the
 repository root before enabling the service:
 
@@ -182,7 +186,7 @@ lives in `vault-core::client`; this crate is a thin Linux platform adapter:
      refreshed during recovery. Restart Edge to resolve changed server records
 
 5. **Shutdown**:
-   - On `SIGTERM` or `-s quit`, the session is shut down, the host route is
+   - On `SIGINT`, `SIGTERM` or `-s quit`, the session is shut down, the host route is
      removed, and the original default routes and DNS configuration are
      restored
 

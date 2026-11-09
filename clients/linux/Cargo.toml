@@ -31,8 +31,8 @@ assets = [
   ["target/edge.1.gz", "/usr/share/man/man1/edge.1.gz", "644"],
 ]
 depends = "$auto, iproute2, procps, adduser"
-# resolvectl is optional: use it for systemd-resolved-managed resolv.conf.
-recommends = "systemd-resolved"
+# The resolved backend uses resolvectl and authorizes the vault user via Polkit.
+recommends = "systemd-resolved, polkitd"
 extended-description = """\
  Vault VPN linux client."""
 license-file = ["../../LICENSE", "1"]

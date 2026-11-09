@@ -41,7 +41,7 @@ reconnect with exponential backoff.
 *--group* <GROUP>::
     Run as other group. Requires starting as root when changing identity.
 
-The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network setup, DNS changes and cleanup. This option changes identity but is not a complete privilege sandbox. Debian systemd services instead start directly as the dedicated *vault* user and group with these capabilities supplied by systemd.
+The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network setup, DNS changes and cleanup. This option changes identity but is not a complete privilege sandbox. Debian systemd services instead start directly as the dedicated *vault* user and group with these capabilities supplied by systemd. The systemd-resolved backend also requires Polkit authorization; the Debian package installs the corresponding account-scoped rule.
 
 *-s* <S>::
     Send a control signal to a running instance. Only *quit* is supported.
@@ -58,6 +58,8 @@ The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network 
 *-h, --help*::
     Print help information.
 
+SIGINT and SIGTERM use the same graceful shutdown and network cleanup path as *-s quit*.
+
 == Files
 */etc/vault/edge.toml*::
     Configuration file. See *edge.toml.example* for the available options
@@ -66,3 +68,8 @@ The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network 
 */run/edge.socket*::
     Unix datagram socket used to deliver the quit signal to a running
     instance.
+
+*/run/edge.socket.lock*::
+    Persistent file used for the process-lifetime instance lock. Duplicate
+    starts cannot replace an active control socket. Do not delete the lock
+    file while the service is running.

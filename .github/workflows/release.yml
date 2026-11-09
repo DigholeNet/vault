@@ -24,7 +24,7 @@ jobs:
   version-gate:
     # Fail fast when the release tag disagrees with the workspace version
     # (root Cargo.toml [workspace.package]), the single version source.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       version_code: ${{ steps.version.outputs.version_code }}
@@ -67,9 +67,9 @@ jobs:
         arch: [amd64, arm64]
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-26.04
           - arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
@@ -114,7 +114,7 @@ jobs:
 
   android-apk:
     needs: [version-gate, rust-checks, android-checks, apple-checks]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: clients/android
@@ -345,7 +345,7 @@ jobs:
 
   publish:
     needs: [version-gate, linux-packages, android-apk, apple-packages]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
 

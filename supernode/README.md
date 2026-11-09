@@ -234,8 +234,9 @@ The project includes systemd unit files:
 ### Debian package installation
 
 The package creates the shared `vault` system account and migrates ownership of
-logs created as root by earlier versions. The account is not deleted on package
-removal.
+logs created as root by earlier versions. Upgrades restart only an
+already-running service; removal stops and disables it. The account is not
+deleted on package removal.
 
 ```bash
 # Install a locally built package (choose amd64 or arm64 to match the host)
