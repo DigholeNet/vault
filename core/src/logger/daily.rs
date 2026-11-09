@@ -28,7 +28,7 @@ impl DailyFileWriter {
         })
     }
 
-    fn write_locked(&mut self, bytes: &[u8], today: Date) -> io::Result<usize> {
+    fn write_current(&mut self, bytes: &[u8], today: Date) -> io::Result<usize> {
         let current = self.directory.join(&self.name);
         // Adopt today's dated log from the previous implementation on upgrade.
         let dated = self.directory.join(format!("{}.{today}", self.name));
@@ -95,16 +95,7 @@ impl DailyFileWriter {
 
 impl Write for DailyFileWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        // Edge and supernode may share a directory. Reopen the current file
-        // under a process-shared lock so neither keeps writing an archive.
-        let lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(self.directory.join(format!(".{}.lock", self.name)))?;
-        lock.lock()?;
-        // Closing the lock file releases the lock, including on error.
-        self.write_locked(bytes, OffsetDateTime::now_utc().date())
+        self.write_current(bytes, OffsetDateTime::now_utc().date())
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -139,6 +130,7 @@ mod tests {
         );
         let today = OffsetDateTime::now_utc().date();
         assert!(!dir.join(format!("default.log.{today}")).exists());
+        assert!(!dir.join(".default.log.lock").exists());
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -173,41 +165,6 @@ mod tests {
             .unwrap();
         assert!(!legacy.exists());
         assert_eq!(fs::read(dir.join("error.log")).unwrap(), b"legacy\nnew\n");
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn concurrent_writers_keep_records_during_rotation() {
-        let dir = directory();
-        let yesterday = OffsetDateTime::now_utc() - time::Duration::days(1);
-        fs::write(dir.join("default.log"), "old\n").unwrap();
-        File::open(dir.join("default.log"))
-            .unwrap()
-            .set_modified(yesterday.into())
-            .unwrap();
-        let threads: Vec<_> = (0..4)
-            .map(|_| {
-                let dir = dir.clone();
-                std::thread::spawn(move || {
-                    let mut writer =
-                        DailyFileWriter::new(dir.to_str().unwrap(), "default").unwrap();
-                    for _ in 0..20 {
-                        writer.write_all(b"new\n").unwrap();
-                    }
-                })
-            })
-            .collect();
-        for thread in threads {
-            thread.join().unwrap();
-        }
-        assert_eq!(
-            fs::read(dir.join("default.log")).unwrap(),
-            b"new\n".repeat(80)
-        );
-        assert_eq!(
-            fs::read(dir.join(format!("default.log.{}", yesterday.date()))).unwrap(),
-            b"old\n"
-        );
         fs::remove_dir_all(dir).unwrap();
     }
 }

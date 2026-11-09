@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
+    systemctl stop supernode.service
+    systemctl disable supernode.service
+fi

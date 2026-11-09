@@ -35,7 +35,7 @@ tracing-subscriber.workspace = true
 uuid = {version = "1", features = ["v4"]}
 zeroize.workspace = true
 
-# Linux capabilities for the deferred privilege drop (app.rs).
+# Linux capabilities for privilege changes before worker threads start (app.rs).
 [target.'cfg(target_os = "linux")'.dependencies]
 caps = {version = "0.5"}
 

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::HashMap;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
@@ -89,21 +90,26 @@ fn is_would_block(err: &anyhow::Error) -> bool {
         .is_some_and(|e| e.kind() == std::io::ErrorKind::WouldBlock)
 }
 
+fn bind_socket(port: u16) -> std::io::Result<UdpSocket> {
+    let ipv6 = (|| -> std::io::Result<UdpSocket> {
+        let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+        // Override bindv6only for this listener, without changing host settings.
+        socket.set_only_v6(false)?;
+        socket.bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port).into())?;
+        Ok(socket.into())
+    })();
+    match ipv6 {
+        Ok(socket) => Ok(socket),
+        Err(error) => {
+            warn!("IPv6 socket setup failed ({error}), falling back to IPv4");
+            UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port))
+        }
+    }
+}
+
 impl<TS: TimeSource> SuperNode<TS> {
     pub fn new(config: SuperNodeConfig, signal: Arc<SysSignal>) -> anyhow::Result<Self> {
-        let socket = match UdpSocket::bind(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            config.get_port(),
-        )) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!("IPv6 bind failed ({}), falling back to IPv4", e);
-                UdpSocket::bind(SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    config.get_port(),
-                ))?
-            }
-        };
+        let socket = bind_socket(config.get_port())?;
         configure_udp_buffers(&socket)?;
         // Non-blocking: a full send buffer must not stall every client.
         socket
@@ -782,6 +788,30 @@ impl<TS: TimeSource> SuperNode<TS> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dual_stack() {
+        let socket = bind_socket(0).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        let timeout = Some(std::time::Duration::from_secs(2));
+        socket.set_read_timeout(timeout).unwrap();
+        assert!(!socket2::SockRef::from(&socket).only_v6().unwrap());
+
+        for host in [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ] {
+            let client = UdpSocket::bind((host, 0)).unwrap();
+            client.set_read_timeout(timeout).unwrap();
+            client.send_to(b"ping", (host, port)).unwrap();
+            let mut buffer = [0; 4];
+            let (received, peer) = socket.recv_from(&mut buffer).unwrap();
+            assert_eq!(&buffer[..received], b"ping");
+            socket.send_to(b"pong", peer).unwrap();
+            let received = client.recv(&mut buffer).unwrap();
+            assert_eq!(&buffer[..received], b"pong");
+        }
+    }
 
     #[test]
     fn labels_cannot_inject_records_or_terminal_controls() {

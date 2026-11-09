@@ -131,16 +131,18 @@ diagnostic probes use the app process's default routing; see
 
 ### For users — prebuilt artifacts
 
-No formal version has been released yet; `0.1.0` is the current development
-version. Build from source using the instructions below. Once releases begin,
-tagged releases (`v*.*.*`) will publish the Linux server/client debs, the signed
-Android APK, and the notarized macOS app zip to
-[Releases](https://github.com/DigholeNet/vault/releases). The iOS IPA is
-built in CI for validation but never uploaded (its Ad Hoc profile contains
-team and device information) — build it locally with your own team,
-see below.
+Download packages from [GitHub Releases](https://github.com/DigholeNet/vault/releases).
+The `0.1.0` release includes:
 
-The setup below applies to locally packaged builds and future release artifacts.
+- Linux client (`edge`) and server (`supernode`): Debian packages for amd64 and arm64.
+- Android: signed APK for API 36 or newer.
+- macOS: notarized app ZIP for Intel and Apple Silicon, requiring macOS 15.5 or newer.
+
+See [CHANGELOG.md](CHANGELOG.md) for the release notes. The iOS app requires
+iOS 18.5 or newer and a local build signed with your own Apple Developer team.
+Its Ad Hoc IPA is built in CI for validation but is not publicly distributed.
+
+The setup below applies to release packages and locally packaged builds.
 Minimal setup: one Linux server as the supernode, one client.
 
 **1. Server (Linux)** — install the supernode deb and write
@@ -187,6 +189,10 @@ sudo systemctl enable --now edge
 
 The client is assigned an address from the pool (e.g. `192.168.10.2`);
 `ping 192.168.10.1` verifies the tunnel.
+
+Automatic DNS requires systemd-resolved's local stub and Polkit authorization;
+other resolver setups require manual DNS configuration. See the
+[Linux client setup](clients/linux/README.md#configuration-options).
 
 **3. Android** — install the APK, enter the same host, port and password,
 and toggle connect.

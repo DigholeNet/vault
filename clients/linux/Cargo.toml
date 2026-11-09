@@ -27,11 +27,12 @@ assets = [
   ["assets/edge.toml.example", "/etc/vault/edge.toml.example", "600"],
   ["assets/edge.service", "/lib/systemd/system/edge.service", "644"],
   ["assets/edge.target", "/lib/systemd/system/edge.target", "644"],
+  ["assets/edge-resolved.rules", "/usr/share/polkit-1/rules.d/50-edge.rules", "644"],
   ["target/edge.1.gz", "/usr/share/man/man1/edge.1.gz", "644"],
 ]
-depends = "$auto, iproute2, procps"
-# resolvectl is optional: use it for systemd-resolved-managed resolv.conf.
-recommends = "systemd-resolved"
+depends = "$auto, iproute2, procps, adduser"
+# The resolved backend uses resolvectl and authorizes the vault user via Polkit.
+recommends = "systemd-resolved, polkitd"
 extended-description = """\
  Vault VPN linux client."""
 license-file = ["../../LICENSE", "1"]
@@ -42,4 +43,4 @@ section = "net"
 # retain automatic shared-library dependency detection above.
 [package.metadata.deb.variants.musl]
 name = "edge"
-depends = "iproute2, procps"
+depends = "iproute2, procps, adduser"

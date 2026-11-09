@@ -56,10 +56,12 @@ can provision forwarding before applying those tunables; see the supernode READM
     Store the process id in this file when daemonizing.
 
 *--user* <USER>::
-    Run as other user.
+    After reading the configuration and acquiring the control socket, switch to this user before starting background threads. Requires starting as root. The log directory must support file creation, append, rename and deletion.
 
 *--group* <GROUP>::
-    Run as other group.
+    Run as other group. Requires starting as root when changing identity.
+
+The process retains CAP_NET_ADMIN, CAP_NET_BIND_SERVICE, CAP_NET_RAW and CAP_DAC_OVERRIDE for network setup, privileged ports and cleanup. This option changes identity but is not a complete privilege sandbox. Debian systemd services instead start directly as the dedicated *vault* user and group with these capabilities supplied by systemd.
 
 *-s* <S>::
     Send a control signal to a running instance. Only *quit* is supported.

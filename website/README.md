@@ -18,11 +18,11 @@ In the GitHub repository, select **Settings → Pages → Build and deployment �
 
 Expected project URL: https://digholenet.github.io/vault/ (available after successful deployment).
 
-Edit text in paired `data-zh` / `data-en` attributes in `index.html`, keeping the default Chinese text in sync. Product claims reflect the repository README; update the development-version notice when formal releases become available. Screenshots are copied from `docs/screenshots/`; replace the website copies when the apps change.
+Edit text in paired `data-zh` / `data-en` attributes in `index.html`, keeping the default Chinese text in sync. Product claims reflect the repository README. The homepage reads `window.vaultRelease` to show the latest stable version and publication date; without a stable release it shows DEV / development status. This status updates with the download links and needs no manual release-time text change. Screenshots are copied from `docs/screenshots/`; replace the website copies when the apps change.
 
 Brand and browser icons use an unchanged copy of `clients/apple/Vault/Assets.xcassets/AppIcon.appiconset/ios-1024.png` at `assets/app-icon.png`. Keep this copy in sync with the app.
 
-Visual direction: bright white and soft blue surfaces with the app’s blue/purple branding. The architecture section precedes app screenshots and documents native platforms, the shared bridge, Rust core, encrypted UDP transport and Linux server responsibilities.
+Visual direction: bright white and soft blue surfaces with the app’s blue/purple branding. The architecture section follows app screenshots and documents native platforms, the shared bridge, Rust core, encrypted UDP transport and Linux server responsibilities.
 
 The hero is a code-native conceptual illustration of encrypted transport, centered on the original app icon. It is not live connection status. The architecture diagram separately presents native platform lanes, the shared mobile bridge, direct Linux linking, Rust core modules and Linux server responsibilities. Real macOS/iOS/Android screenshots complete the introduction, before Architecture.
 
@@ -51,12 +51,12 @@ Downloads follows Architecture and precedes Get started. Five navigation destina
 - Android: the button and QR resolve to the same APK when a stable release contains one; otherwise both point to the release page, with an explicit fallback label.
 - iOS: source builds only; no public Ad Hoc IPA is linked.
 - macOS: the app ZIP from the latest stable release.
-- Linux: separate amd64 Debian packages for `edge` and `supernode`.
+- Linux: separate amd64 and arm64 Debian packages for `edge` and `supernode`, with architecture-labelled download links.
 - Get started: prepare a trusted server or self-host, configure a client, then connect and verify. Self-hosting prerequisites and the example configuration are in an optional native HTML disclosure.
 
 `scripts/update-site-release.py` reads GitHub’s latest stable release, matches the actual asset naming in `.github/workflows/release.yml`, writes `website/release-data.js`, and generates `website/assets/android-release-qr.svg`. It requires `qrcode==8.2` (SVG only; no Pillow). No GitHub API or external QR service is called by visitors’ browsers. No release is a supported empty state; API/network errors fail the update rather than silently claiming no release. Missing assets fall back individually to the release page.
 
-The Pages workflow refreshes the snapshot on website/script pushes, manual runs, release events and daily. Daily refresh also covers releases created by a workflow’s `GITHUB_TOKEN`, which do not normally trigger other workflows. Regenerate the checked-in snapshot locally when needed:
+The Pages workflow refreshes the snapshot on website/script pushes, manual runs, release events, successful tag-push runs of the `Release` workflow, and daily. The `workflow_run` trigger covers automatic releases created with `GITHUB_TOKEN`, whose release events do not trigger another workflow. It accepts only successful `push` runs from this repository and skips failed or manual artifact-only release builds. Deployment checks out `main`, fetches the latest stable release from GitHub, and does not consume artifacts from the triggering run. Daily refresh remains a fallback for later release or asset changes. Regenerate the checked-in snapshot locally when needed:
 
 ```sh
 python3 -m venv /tmp/vault-site-tools

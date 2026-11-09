@@ -33,7 +33,7 @@ assets = [
   ["assets/supernode.target", "/lib/systemd/system/supernode.target", "644"],
   ["target/supernode.1.gz", "/usr/share/man/man1/supernode.1.gz", "644"],
 ]
-depends = "$auto, iptables, procps"
+depends = "$auto, iptables, procps, adduser"
 extended-description = """\
  Vault VPN server (supernode)."""
 license-file = ["../LICENSE", "1"]
@@ -44,4 +44,4 @@ section = "net"
 # retain automatic shared-library dependency detection above.
 [package.metadata.deb.variants.musl]
 name = "supernode"
-depends = "iptables, procps"
+depends = "iptables, procps, adduser"

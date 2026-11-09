@@ -18,8 +18,17 @@ public enum SettingsValidation {
         let values = value.split(separator: ",", omittingEmptySubsequences: false)
         return values.count <= 4 && values.allSatisfy {
             let address = $0.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let ipv6 { return ipv6 ? IPv6Address(address) != nil : IPv4Address(address) != nil }
-            return IPv4Address(address) != nil || IPv6Address(address) != nil
+            if let ipv6 { return ipv6 ? IPv6Address(address) != nil : isValidIPv4(address) }
+            return isValidIPv4(address) || IPv6Address(address) != nil
+        }
+    }
+
+    private static func isValidIPv4(_ value: String) -> Bool {
+        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+        return parts.count == 4 && parts.allSatisfy {
+            !$0.isEmpty && $0.utf8.count <= 3
+                && $0.utf8.allSatisfy { (48 ... 57).contains($0) }
+                && UInt8($0) != nil
         }
     }
 

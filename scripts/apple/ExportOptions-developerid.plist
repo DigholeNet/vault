@@ -2,9 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Developer ID export (macOS): re-signs the app from the archive with
-         the Developer ID Application certificate (must be in the keychain),
-         replacing the development signature. The exported app still needs
+    <!-- Developer ID export (macOS): exports the Release archive with the
+         Developer ID Application certificate (must be in the keychain).
+         The exported app still needs
          notarization (NOTARY_PROFILE in scripts/package-apple.sh) before it
          can run on other Macs. teamID is injected by the packaging script
          when TEAM_ID is set.

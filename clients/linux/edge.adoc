@@ -36,10 +36,12 @@ reconnect with exponential backoff.
     Store the process id in this file when daemonizing.
 
 *--user* <USER>::
-    Run as other user.
+    After reading the configuration and acquiring the control socket, switch to this user before starting background threads. Requires starting as root. The log directory and storage parent must support file creation, append, rename and deletion.
 
 *--group* <GROUP>::
-    Run as other group.
+    Run as other group. Requires starting as root when changing identity.
+
+The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network setup and access to configuration and control files. This option changes identity but is not a complete privilege sandbox. Debian systemd services instead start directly as the dedicated *vault* user and group with these capabilities supplied by systemd. The systemd-resolved backend also requires Polkit authorization; the Debian package installs the corresponding account-scoped rule.
 
 *-s* <S>::
     Send a control signal to a running instance. Only *quit* is supported.
@@ -56,6 +58,22 @@ reconnect with exponential backoff.
 *-h, --help*::
     Print help information.
 
+SIGINT and SIGTERM use the same graceful shutdown and network cleanup path as *-s quit*.
+
+== DNS
+Automatic DNS requires systemd-resolved's local stub: */etc/resolv.conf*
+nameservers must all be *127.0.0.53* or *127.0.0.54*, and *resolvectl statistics*
+must succeed. With Polkit authorization, Edge configures DNS on its own TUN
+and reverts the link settings on exit. Other setups, including
+*/run/systemd/resolve/resolv.conf* uplink mode, require manual DNS configuration.
+Edge leaves */etc/resolv.conf* unchanged.
+
+== Route recovery
+Reserve route protocol *242* for Edge within its network namespace. On restart,
+Edge recovers marked routes for the current server addresses.
+For conflicts with legacy *proto static* routes, inspect the route in the log
+and confirm ownership before removing it manually.
+
 == Files
 */etc/vault/edge.toml*::
     Configuration file. See *edge.toml.example* for the available options
@@ -64,3 +82,8 @@ reconnect with exponential backoff.
 */run/edge.socket*::
     Unix datagram socket used to deliver the quit signal to a running
     instance.
+
+*/run/edge.socket.lock*::
+    Persistent file used for the process-lifetime instance lock. Duplicate
+    starts cannot replace an active control socket. Do not delete the lock
+    file while the service is running.

@@ -13,14 +13,10 @@ mod imp {
     };
 
     pub fn run() -> anyhow::Result<()> {
-        app_main::<SuperNodeConfig, _, _>("supernode", logger_init, |signal, config, privdrop| {
-            // TUN device, UDP socket and iptables are all set up in new();
-            // only then is it safe to drop privileges. The retained
-            // CAP_NET_ADMIN covers the iptables cleanup in SuperNode::drop.
+        app_main::<SuperNodeConfig, _, _>("supernode", logger_init, |signal, config| {
             let node = SuperNode::<SystemTimeSource>::new(config, signal).inspect_err(|error| {
                 tracing::error!("Supernode initialization failed: {error:#}");
             })?;
-            privdrop.apply()?;
             node.run()
         })
     }

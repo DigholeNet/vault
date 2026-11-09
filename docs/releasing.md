@@ -1,11 +1,9 @@
 # Releasing
 
-## Current status and build versions
+## Release version and builds
 
-There are no formal releases yet. `0.1.0` in the workspace manifest is the
-current development version; all existing changes are recorded under
-`Unreleased` in `CHANGELOG.md`. Do not treat development snapshots as a
-supported release series.
+The first stable release target is `0.1.0`, with tag `v0.1.0`. Complete the
+validation and publication steps below before announcing it.
 
 The root `Cargo.toml` is the version source for Rust and packaged artifacts.
 Android packaging and release CI inject `versionName`/`versionCode`; direct
@@ -26,14 +24,14 @@ Linux packaging regenerates manpages explicitly before `cargo deb`; it does
 not rely on Cargo build-script side effects or cached generated files. For
 direct `cargo deb` use, first run `scripts/package-linux.sh --manpages-only`.
 
-Local `scripts/package-linux.sh` cross-builds x86_64 musl binaries with Zig;
-the release workflow builds native GNU/Linux binaries on Ubuntu after all
-platform checks pass. Both produce
-Debian packages, but libc/linking requirements can differ. Local musl packages
-select the `musl` cargo-deb variant and declare only
-runtime command dependencies (iproute2/procps for edge, iptables/procps for
-supernode). Native CI packages use cargo-deb's `$auto` detection for shared-library
-dependencies, in addition to those runtime commands.
+Local `scripts/package-linux.sh` cross-builds amd64 and arm64 musl binaries
+with Zig; the release workflow builds native GNU/Linux binaries for both
+architectures on x86_64 and ARM64 Ubuntu runners after all platform checks pass.
+Both produce Debian packages, but libc/linking requirements can differ. Local musl packages
+select the `musl` cargo-deb variant and declare runtime dependencies without
+`$auto`: iproute2/procps/adduser for edge and iptables/procps/adduser for
+supernode. Native CI packages use cargo-deb's `$auto` detection for
+shared-library dependencies, in addition to those runtime packages.
 Validate each package on the intended Debian/Ubuntu host; do not assume the
 local script reproduces CI binaries byte for byte.
 
@@ -70,36 +68,44 @@ they are not passed into Apple's marketing-version field.
 
 ## Release process
 
-1. Choose the release version in the root `Cargo.toml` (the packaged version source;
-   `scripts/package-android.sh` injects it into the Gradle build as
-   `-PversionName`/`-PversionCode`).
-2. Move completed entries from `Unreleased` into a dated version section in
-   `CHANGELOG.md`. For the first release, create the first version section then;
-   there is no historical `0.1.0` release to preserve.
-3. Commit and push the changes.
-4. Review device/network validation for affected paths, then create a tag
-   matching the chosen manifest version. Release CI invokes the Rust, Android
-   and Apple check workflows on that exact commit, including the Linux network
-   namespace check, before any platform packaging job can run. Failed checks
-   block packaging and publication. Check workflows also support manual runs
-   without PR/push path filters. For an initial
-   `0.1.0` release: `git tag -a v0.1.0 -m "Release v0.1.0"`
-5. Push the tag (using the same version): `git push origin v0.1.0`
-6. Tagging `v*.*.*` triggers `.github/workflows/release.yml`, which publishes
-   the Linux client deb, Linux supernode deb, signed Android APK, and
-   notarized macOS app zip in one release. The signed iOS IPA is built in the
-   same workflow for validation but is not uploaded as an artifact or Release
-   asset: its Ad Hoc profile contains the team name and device UDIDs.
-   Build locally when you need the IPA — see *Apple signing in CI* below.
-   Apple packaging requires the signing secrets described in *Apple signing
-   in CI* below; the
-   `apple-packages` job fails fast with a list of missing secrets if they
-   are not configured. The separate Apple CI (`.github/workflows/apple.yml`)
-   performs PR/push checks: SwiftLint, VaultCore unit tests, unsigned macOS
-   and iOS Simulator app builds and `VaultTests`, plus an iOS navigation
-   smoke test. Test result bundles are uploaded even when tests fail.
-   Apple artifacts can also be built locally as
-   described below.
+1. Merge all release fixes and the `0.1.0` changelog, README and release-document
+   updates into `main`. Keep `Cargo.toml` at `0.1.0`; adjust the changelog date
+   if publication moves to another day. Start from a clean checkout:
+
+   ```bash
+   git switch main
+   git pull --ff-only origin main
+   git rev-parse HEAD
+   ```
+
+2. Verify Rust, Android and Apple checks for that exact commit, including Linux
+   namespace tests and affected device/network checks. In **Actions → Release →
+   Run workflow**, select `main` for a full packaging rehearsal. Confirm its
+   commit matches the SHA above and it succeeds; this manual run builds signed
+   artifacts without publishing. Resolve failures before tagging.
+3. From the same validated `main` commit, create and push the version tag:
+
+   ```bash
+   git tag -a v0.1.0 -m "Release v0.1.0"
+   git push origin v0.1.0
+   ```
+
+   The tag-triggered Release reruns all platform checks before packaging;
+   failed checks block publication. If the commit changes, validate it again.
+4. After Release succeeds, verify its six public assets:
+   `vault-android-v0.1.0.apk`, `Vault-macOS-v0.1.0.zip`, and both `amd64` and
+   `arm64` packages named `edge-v0.1.0-<arch>.deb` and
+   `supernode-v0.1.0-<arch>.deb`. The Ad Hoc iOS IPA is built for validation
+   but is never uploaded as an artifact or Release asset.
+5. Wait for **GitHub Pages** to deploy from `main`. Check the
+   [website](https://digholenet.github.io/vault/) shows `v0.1.0` and its publication
+   date, all six download links resolve, and the Android QR opens the same APK
+   as the Android button. Announce the release after these checks pass.
+
+Pages reads the latest stable release after a successful tag-triggered Release;
+manual artifact-only runs do not trigger deployment. Release events, manual
+Pages runs and the daily refresh also update the snapshot. Without a stable
+release, the homepage retains its DEV status. Signing requirements are below.
 
 ## Apple packaging and signing
 

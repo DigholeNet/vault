@@ -20,16 +20,29 @@
   let language = 'zh';
   try { language = localStorage.getItem('vault-language') || (navigator.language.startsWith('zh') ? 'zh' : 'en'); } catch {}
   if (!['zh', 'en'].includes(language)) language = 'zh';
-  function renderDownloads() {
+  function renderRelease() {
     const release = window.vaultRelease || { assets: {}, url: 'https://github.com/DigholeNet/vault/releases' };
+    document.getElementById('hero-release-version').textContent = release.version || 'DEV';
+    if (release.version) {
+      document.getElementById('hero-release-description').textContent = language === 'zh'
+        ? '正式版已发布 · ' + release.published
+        : 'Stable release · ' + release.published;
+    }
     const labels = language === 'zh'
-      ? { android: '下载 APK', macos: '下载 macOS ZIP', edge: '下载客户端', supernode: '下载服务端' }
-      : { android: 'Download APK', macos: 'Download macOS ZIP', edge: 'Download client', supernode: 'Download server' };
+      ? { android: '下载 APK', macos: '下载 macOS ZIP', 'edge-amd64': '下载 edge · amd64', 'edge-arm64': '下载 edge · arm64', 'supernode-amd64': '下载 supernode · amd64', 'supernode-arm64': '下载 supernode · arm64' }
+      : { android: 'Download APK', macos: 'Download macOS ZIP', 'edge-amd64': 'Download edge · amd64', 'edge-arm64': 'Download edge · arm64', 'supernode-amd64': 'Download supernode · amd64', 'supernode-arm64': 'Download supernode · arm64' };
+    const fallbackLabels = {
+      'edge-amd64': 'edge · amd64',
+      'edge-arm64': 'edge · arm64',
+      'supernode-amd64': 'supernode · amd64',
+      'supernode-arm64': 'supernode · arm64',
+    };
     document.querySelectorAll('[data-release-asset]').forEach(link => {
-      const asset = release.assets[link.dataset.releaseAsset];
+      const key = link.dataset.releaseAsset;
+      const asset = release.assets[key];
       link.href = asset || release.url;
       const label = link.querySelector('.download-label');
-      if (label) label.textContent = asset ? labels[link.dataset.releaseAsset] : (language === 'zh' ? '查看发布页' : 'View releases');
+      if (label) label.textContent = asset ? labels[key] : (fallbackLabels[key] || (language === 'zh' ? '查看发布页' : 'View releases'));
     });
     document.getElementById('release-notes').href = release.url;
     if (release.version) {
@@ -53,7 +66,7 @@
         element.append(document.createTextNode(part));
       });
     });
-    renderDownloads();
+    renderRelease();
     button.textContent = language === 'zh' ? 'EN ↗' : '中文 ↗';
     button.setAttribute('aria-label', language === 'zh' ? 'Switch to English' : '切换到中文');
     document.title = language === 'zh' ? 'Vault — 连接，由你掌控。' : 'Vault — Your network. Your rules.';

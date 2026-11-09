@@ -38,8 +38,10 @@ def release_snapshot(release):
     patterns = {
         "android": r"vault-android-v.+\.apk",
         "macos": r"Vault-macOS-v.+\.zip",
-        "edge": r"edge-v.+-amd64\.deb",
-        "supernode": r"supernode-v.+-amd64\.deb",
+        "edge-amd64": r"edge-v.+-amd64\.deb",
+        "edge-arm64": r"edge-v.+-arm64\.deb",
+        "supernode-amd64": r"supernode-v.+-amd64\.deb",
+        "supernode-arm64": r"supernode-v.+-arm64\.deb",
     }
     for asset in release.get("assets", []):
         for platform, pattern in patterns.items():

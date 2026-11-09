@@ -24,7 +24,7 @@ jobs:
   version-gate:
     # Fail fast when the release tag disagrees with the workspace version
     # (root Cargo.toml [workspace.package]), the single version source.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       version_code: ${{ steps.version.outputs.version_code }}
@@ -61,10 +61,16 @@ jobs:
 
   linux-packages:
     needs: [version-gate, rust-checks, android-checks, apple-checks]
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         package: [edge, supernode]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-26.04
+          - arch: arm64
+            runner: ubuntu-26.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
 
@@ -82,8 +88,8 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-release-
+          key: ${{ runner.os }}-cargo-release-${{ matrix.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-release-${{ matrix.arch }}-
 
       - name: Build deb package
         run: |
@@ -91,17 +97,24 @@ jobs:
           # Keep release artifacts outside the cached target directory.
           mkdir -p "$RUNNER_TEMP/deb"
           cargo deb -p ${{ matrix.package }} --locked --output "$RUNNER_TEMP/deb/"
+          shopt -s nullglob
+          packages=("$RUNNER_TEMP"/deb/${{ matrix.package }}_*.deb)
+          if ((${#packages[@]} != 1)); then
+            echo "Expected exactly one ${{ matrix.package }} deb" >&2
+            exit 1
+          fi
+          dpkg-deb --info "${packages[0]}" | grep -Eq "Architecture: ${{ matrix.arch }}$"
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v6
         with:
-          name: deb-${{ matrix.package }}
+          name: deb-${{ matrix.package }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/deb/${{ matrix.package }}_*.deb
           if-no-files-found: error
 
   android-apk:
     needs: [version-gate, rust-checks, android-checks, apple-checks]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: clients/android
@@ -332,20 +345,32 @@ jobs:
 
   publish:
     needs: [version-gate, linux-packages, android-apk, apple-packages]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download deb-edge release artifact
+      - name: Download deb-edge-amd64 release artifact
         uses: actions/download-artifact@v7
         with:
-          name: deb-edge
+          name: deb-edge-amd64
           path: dist
 
-      - name: Download deb-supernode release artifact
+      - name: Download deb-edge-arm64 release artifact
         uses: actions/download-artifact@v7
         with:
-          name: deb-supernode
+          name: deb-edge-arm64
+          path: dist
+
+      - name: Download deb-supernode-amd64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: deb-supernode-amd64
+          path: dist
+
+      - name: Download deb-supernode-arm64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: deb-supernode-arm64
           path: dist
 
       - name: Download android-apk release artifact
@@ -361,8 +386,8 @@ jobs:
           path: dist
 
       - name: Rename artifacts with version
-        # Deb artifacts keep cargo-deb's <pkg>_<ver>-<rel>_amd64.deb names;
-        # match by package prefix so each lands on its own target name.
+        # Match the architecture in each cargo-deb filename so packages cannot
+        # overwrite one another or acquire a misleading release asset name.
         # The iOS IPA is Ad Hoc signed (installable only on devices
         # registered in the profile) and embeds the team name and registered
         # device UDIDs — never upload it as an artifact or Release asset.
@@ -371,8 +396,17 @@ jobs:
           cd dist
           rm -f Vault-iOS.ipa
           for f in *.apk; do mv "$f" "vault-android-v${{ needs.version-gate.outputs.version }}.apk"; done
-          for f in edge_*.deb; do mv "$f" "edge-v${{ needs.version-gate.outputs.version }}-amd64.deb"; done
-          for f in supernode_*.deb; do mv "$f" "supernode-v${{ needs.version-gate.outputs.version }}-amd64.deb"; done
+          for arch in amd64 arm64; do
+            for pkg in edge supernode; do
+              shopt -s nullglob
+              packages=("${pkg}"_*_"${arch}".deb)
+              if ((${#packages[@]} != 1)); then
+                echo "Expected exactly one $pkg $arch deb" >&2
+                exit 1
+              fi
+              mv "${packages[0]}" "$pkg-v${{ needs.version-gate.outputs.version }}-$arch.deb"
+            done
+          done
           mv Vault-macOS.zip "Vault-macOS-v${{ needs.version-gate.outputs.version }}.zip"
           ls -la
 
