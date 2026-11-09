@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //! Entry point; the client uses Linux-only mechanisms (/proc, `ip`,
-//! resolv.conf), so other platforms get a stub main.
+//! systemd-resolved), so other platforms get a stub main.
 
 #[cfg(any(target_os = "linux", test))]
 mod config;

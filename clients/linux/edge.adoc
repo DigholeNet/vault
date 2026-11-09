@@ -41,7 +41,7 @@ reconnect with exponential backoff.
 *--group* <GROUP>::
     Run as other group. Requires starting as root when changing identity.
 
-The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network setup, DNS changes and cleanup. This option changes identity but is not a complete privilege sandbox. Debian systemd services instead start directly as the dedicated *vault* user and group with these capabilities supplied by systemd. The systemd-resolved backend also requires Polkit authorization; the Debian package installs the corresponding account-scoped rule.
+The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network setup and access to configuration and control files. This option changes identity but is not a complete privilege sandbox. Debian systemd services instead start directly as the dedicated *vault* user and group with these capabilities supplied by systemd. The systemd-resolved backend also requires Polkit authorization; the Debian package installs the corresponding account-scoped rule.
 
 *-s* <S>::
     Send a control signal to a running instance. Only *quit* is supported.
@@ -59,6 +59,14 @@ The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network 
     Print help information.
 
 SIGINT and SIGTERM use the same graceful shutdown and network cleanup path as *-s quit*.
+
+== DNS
+Automatic DNS requires systemd-resolved's local stub: */etc/resolv.conf*
+nameservers must all be *127.0.0.53* or *127.0.0.54*, and *resolvectl status*
+must succeed. With Polkit authorization, Edge configures DNS on its own TUN
+and reverts the link settings on exit. Other setups, including
+*/run/systemd/resolve/resolv.conf* uplink mode, require manual DNS configuration.
+Edge leaves */etc/resolv.conf* unchanged.
 
 == Route recovery
 Reserve route protocol *242* for Edge within its network namespace. On restart,

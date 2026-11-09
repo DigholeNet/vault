@@ -73,8 +73,7 @@ fn drop_privileges(
 
     // Re-arm exactly the capabilities the daemons still need: NET_ADMIN for
     // TUN/route/iptables management, NET_RAW for raw packet sockets, and
-    // DAC_OVERRIDE so the edge client can rewrite the root-owned
-    // /etc/resolv.conf on exit.
+    // DAC_OVERRIDE for root-owned configuration and control files in /run.
     let mut wanted: HashSet<Capability> = [
         Capability::CAP_NET_ADMIN,
         Capability::CAP_NET_RAW,

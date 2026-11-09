@@ -8,11 +8,10 @@ implementation used by the Vault Android/iOS clients.
 ## Runtime dependencies
 
 The Debian package installs `iproute2` (`ip`), `procps` (`sysctl`) and
-`adduser` (for the dedicated service account). It recommends `systemd-resolved`
-and `polkitd` for systems where resolved manages `/etc/resolv.conf`; both
-`resolvectl` and Polkit are required by that backend. Other systems use the
-file-based DNS backend. For source installations, install these tools separately
-before starting Edge.
+`adduser` (for the dedicated service account). Automatic DNS configuration
+requires `systemd-resolved`, `resolvectl` and Polkit authorization; the package
+recommends `systemd-resolved` and `polkitd`. Other resolver setups require manual
+DNS configuration. For source installations, install these tools separately.
 
 ## Project structure
 
@@ -25,7 +24,7 @@ clients/linux/
 │   ├── runner.rs               # Startup, network monitoring and cleanup
 │   ├── edge.rs                 # Client session and TUN adapter
 │   ├── config.rs               # TOML configuration
-│   ├── dns.rs                  # DNS setup, recovery and resolved integration
+│   ├── dns.rs                  # systemd-resolved DNS setup and cleanup
 │   ├── routes.rs               # Route ownership and rollback
 │   ├── interface.rs            # Physical-interface discovery
 │   └── storage.rs              # Persistent device ID
@@ -77,35 +76,30 @@ Only one Edge instance can run per network namespace. See [edge(1)](edge.adoc)
 for route recovery and legacy route cleanup.
 
 The old `dns` field is not supported and causes a configuration error. Each
-new field accepts only numeric addresses of its own family. DNS is applied
-after the server assigns tunnel addresses and VPN routes are installed:
+new field accepts only numeric addresses of its own family. With systemd-resolved,
+DNS is applied after tunnel addresses are assigned and VPN routes are installed:
 
 - IPv4-only: use the IPv4 list, up to three entries.
 - IPv6-only: use the IPv6 list, up to three entries.
 - Dual stack: use the first two IPv6 entries followed by the first IPv4 entry.
   Shorter custom lists contribute only their available entries.
 
-The same selection is used by the file and systemd-resolved backends. Address
-family selection follows the assignment; it does not prove that the server has
-working internet egress for that family. Changed assignments recalculate DNS
-without replacing the saved system DNS. Assignment route changes and
-DNS application are serialized so an old poll cannot overwrite the next
-assignment's DNS selection.
+Address family selection follows the assignment; it does not prove that the
+server has working internet egress for that family. Changed assignments update
+the TUN's DNS settings.
 
-When `/etc/resolv.conf` is managed by systemd-resolved, `resolvectl` must be
-available. Edge configures DNS and the `~.` routing domain on its own TUN
-interface after the tunnel becomes active, flushes stale resolver caches when settings
-change, and reverts the link settings on exit. The Debian package grants the
-`vault` account only the corresponding Polkit actions; Linux capabilities alone
-do not authorize these D-Bus requests. Manual runs with another `--user` need
-equivalent Polkit authorization. Edge leaves the managed resolver file and
-physical-interface DNS settings intact. In the file backend, observed DHCP or
-network-manager updates refresh the recovery backup before VPN DNS is reapplied.
-On exit, Edge restores the latest saved system DNS or preserves an external
-update already present in the file. Active DNS settings are checked every 2s so
-late DHCP or network-manager updates do not undo recovery.
-DNS failures are retried without tearing down the session or rolling back its
-routes. Each `resolvectl` command has a 2s timeout.
+Automatic DNS requires systemd-resolved's local stub: `/etc/resolv.conf`
+nameservers must all be `127.0.0.53` or `127.0.0.54`, and `resolvectl status`
+must succeed. Edge configures DNS and the `~.` routing domain on its own TUN,
+flushes resolver caches when settings change, and reverts the link settings on
+exit. The Debian package grants the `vault` account the required Polkit actions;
+manual runs with another `--user` need equivalent authorization. Active settings
+are checked every 2s; failures are retried without tearing down the session.
+Each `resolvectl` command has a 2s timeout.
+
+Other setups, including `/run/systemd/resolve/resolv.conf` uplink mode, require
+manual DNS configuration. Edge leaves `/etc/resolv.conf` and physical-interface
+DNS settings unchanged.
 
 ## Usage and deployment
 
@@ -157,8 +151,8 @@ Changing identity with `--user` must still start as root. The switch happens
 before any logging, Tokio or TUN reader threads start. The selected log
 directory and storage parent must support file creation, append, rename and
 deletion by the target user. Edge retains `CAP_NET_ADMIN`, `CAP_NET_RAW` and
-`CAP_DAC_OVERRIDE` for route/DNS changes and cleanup, so this is not a complete
-privilege sandbox.
+`CAP_DAC_OVERRIDE` for network setup and access to configuration and control
+files, so this is not a complete privilege sandbox.
 
 ## Documentation
 

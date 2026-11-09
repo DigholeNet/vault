@@ -6,7 +6,6 @@ use std::{
         linux::net::SocketAddrExt,
         unix::net::{SocketAddr as UnixSocketAddr, UnixDatagram},
     },
-    path::Path,
     process::Command,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -27,11 +26,6 @@ use crate::dns::DnsGuard;
 use crate::edge::Edge;
 use crate::interface::{self, FamilyExits};
 use crate::routes::{RouteGuard, RouteState};
-
-const RESOLV_CONF_PATH: &str = "/etc/resolv.conf";
-/// Backup of the original resolv.conf on a tmpfs: survives a SIGKILL/OOM
-/// crash so the next start can self-heal, yet is cleaned up by a reboot.
-const RESOLV_CONF_BACKUP_PATH: &str = "/run/edge/resolv.conf.backup";
 
 /// Hold from before the first network mutation until all route/DNS cleanup ends.
 /// The abstract socket name is local to the network namespace and disappears
@@ -75,26 +69,20 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     // Keep the netns lease until DNS/routes/TUN have all been cleaned up.
     // Unlike the control-file lock, this also covers private /run mounts.
     let _network_lock = NetworkLock::acquire()?;
-    // Recover before DNS lookup: the previous process may have left DNS
-    // pointing into a tunnel that no longer exists.
-    DnsGuard::restore_backup(
-        Path::new(RESOLV_CONF_PATH),
-        Path::new(RESOLV_CONF_BACKUP_PATH),
-    )?;
+    let tun = config.get_iface().to_string();
+    let dns = DnsGuard::setup_for_interface(&tun);
     let server_addr = format!("{}:{}", config.get_host(), config.get_port());
     info!("Resolving server address: {}", server_addr);
     let hosts: Vec<_> = server_addr.to_socket_addrs()?.collect();
     if hosts.is_empty() {
         return Err(anyhow::anyhow!("Could not resolve server address"));
     }
-    let tun = config.get_iface().to_string();
     // Probe each address family's physical exit independently: IPv4 and
     // IPv6 default routes may live on different interfaces with different
     // gateways. A family without a default route contributes no exit; its
     // candidates simply lose the core's handshake race.
     let physical_exits = Arc::new(Mutex::new(probe_exits(&hosts, &tun)?));
     // DNS is selected only after the handshake assigns tunnel addresses.
-    let mut dns: Option<DnsGuard> = None;
     let dns_v4 = config.dns_for(true, false);
     let dns_v6 = config.dns_for(false, true);
     let dns_dual = config.dns_for(true, true);
@@ -142,6 +130,9 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
             Ok(())
         },
     )?;
+
+    // Drop DNS before Edge removes the TUN, including on early returns.
+    let mut dns = dns;
 
     // Wait for the quit signal; log traffic stats periodically. The
     // session reconnects itself with exponential backoff on failures.
@@ -202,18 +193,16 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
                     network_available = false;
                 }
             }
-            // DHCP/NetworkManager may publish DNS after the path event or
-            // handshake. Keep checking while active so that ordering does
-            // not leave the restored tunnel using the physical network DNS.
+            // Reapply this link's DNS if resolved loses it during reconnect.
             if network_available && edge.is_active() {
                 let servers = assigned_dns
                     .lock()
                     .map_err(|_| anyhow::anyhow!("DNS state lock poisoned"))?;
                 match servers
                     .as_ref()
-                    .map_or(Ok(false), |servers| update_dns(&mut dns, servers, &tun))
+                    .map_or(Ok(false), |servers| update_dns(&mut dns, servers))
                 {
-                    Ok(true) => info!("VPN DNS configuration restored after external change"),
+                    Ok(true) => info!("VPN interface DNS configuration applied"),
                     Ok(false) => {}
                     Err(e) => warn!("Could not restore VPN DNS configuration: {e:#}"),
                 }
@@ -236,29 +225,15 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     }
 
     edge.shutdown();
+    dns.restore()?;
     drop(edge);
     routes.restore()?;
-    if let Some(mut dns) = dns {
-        dns.restore()?;
-    }
     Ok(())
 }
 
-fn update_dns(dns: &mut Option<DnsGuard>, servers: &[String], tun: &str) -> anyhow::Result<bool> {
-    if let Some(guard) = dns {
-        guard.set_servers(servers)?;
-        guard.ensure_applied()
-    } else {
-        let mut guard = DnsGuard::setup_for_interface(
-            Path::new(RESOLV_CONF_PATH),
-            Path::new(RESOLV_CONF_BACKUP_PATH),
-            servers,
-            tun,
-        )?;
-        guard.ensure_applied()?;
-        *dns = Some(guard);
-        Ok(true)
-    }
+fn update_dns(dns: &mut DnsGuard, servers: &[String]) -> anyhow::Result<bool> {
+    dns.set_servers(servers)?;
+    dns.ensure_applied()
 }
 
 fn required_command(program: &str, args: &[&str]) -> anyhow::Result<()> {
@@ -358,6 +333,7 @@ fn logger_init(
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
+    use std::path::Path;
     use std::process::Stdio;
     use vault_core::device::{DeviceType, setup_device};
 

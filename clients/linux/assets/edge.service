@@ -1,6 +1,7 @@
 [Unit]
 PartOf=edge.target
 Documentation=man:edge(1)
+After=systemd-resolved.service
 
 [Service]
 Type=forking
@@ -16,11 +17,9 @@ MemoryMax=1024M
 PrivateTmp=yes
 ProtectHome=yes
 ProtectSystem=strict
-# /etc/resolv.conf is needed for the DNS takeover (no-op if it is a
-# symlink into /run, which is already covered).
 StateDirectory=vault
 LogsDirectory=vault
-ReadWritePaths=/var/log/vault /run /etc/resolv.conf
+ReadWritePaths=/var/log/vault /run
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE
 DeviceAllow=/dev/net/tun rw
