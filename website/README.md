@@ -22,7 +22,7 @@ Edit text in paired `data-zh` / `data-en` attributes in `index.html`, keeping th
 
 Brand and browser icons use an unchanged copy of `clients/apple/Vault/Assets.xcassets/AppIcon.appiconset/ios-1024.png` at `assets/app-icon.png`. Keep this copy in sync with the app.
 
-Visual direction: bright white and soft blue surfaces with the app’s blue/purple branding. The architecture section precedes app screenshots and documents native platforms, the shared bridge, Rust core, encrypted UDP transport and Linux server responsibilities.
+Visual direction: bright white and soft blue surfaces with the app’s blue/purple branding. The architecture section follows app screenshots and documents native platforms, the shared bridge, Rust core, encrypted UDP transport and Linux server responsibilities.
 
 The hero is a code-native conceptual illustration of encrypted transport, centered on the original app icon. It is not live connection status. The architecture diagram separately presents native platform lanes, the shared mobile bridge, direct Linux linking, Rust core modules and Linux server responsibilities. Real macOS/iOS/Android screenshots complete the introduction, before Architecture.
 
