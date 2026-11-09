@@ -11,9 +11,11 @@ on:
   workflow_dispatch:
   release:
     types: [published, edited, deleted]
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   schedule:
-    # GITHUB_TOKEN-created releases may not trigger another workflow.
-    # Refresh daily as well, so release automation is still picked up.
+    # Reconcile later release or asset changes as a fallback.
     - cron: '23 2 * * *'
 
 permissions:
@@ -27,12 +29,21 @@ concurrency:
 
 jobs:
   deploy:
+    # Release only publishes on tag pushes. Ignore failed runs and manual
+    # artifact-only builds; read fresh release data instead of run artifacts.
+    if: >-
+      ${{ github.event_name != 'workflow_run' ||
+          (github.event.workflow_run.conclusion == 'success' &&
+           github.event.workflow_run.event == 'push' &&
+           github.event.workflow_run.head_repository.full_name == github.repository) }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: main
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'

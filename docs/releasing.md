@@ -100,6 +100,16 @@ they are not passed into Apple's marketing-version field.
    smoke test. Test result bundles are uploaded even when tests fail.
    Apple artifacts can also be built locally as
    described below.
+7. After the tag-triggered `Release` workflow succeeds, the **GitHub Pages**
+   workflow automatically refreshes the website from `main`. It fetches the
+   latest stable release and regenerates download links and the Android QR;
+   the homepage uses the same metadata for the version and publication date.
+   Confirm that this Pages deployment succeeds before announcing the website
+   downloads. The completion trigger ignores failed runs and manual
+   artifact-only builds, and does not consume their workflow artifacts.
+   Release events, manual Pages runs, and the daily refresh remain available
+   for subsequent release or asset changes. Without a stable release, the
+   homepage keeps its DEV / development status.
 
 ## Apple packaging and signing
 
