@@ -66,12 +66,15 @@ storage="/var/lib/vault/storage.dat"
 
 - `password`: Server password for authentication
 - `port`: Server port
-- `iface`: TUN interface name (e.g., "vpn0")
+- `iface`: Unused TUN interface name (e.g., "vpn0"); Edge creates it.
 - `host`: VPN server IP address or hostname
 - `dns_ipv4`: IPv4 DNS server list; omitted or empty uses `1.1.1.1,8.8.8.8`
 - `dns_ipv6`: IPv6 DNS server list; omitted or empty uses Google IPv6 DNS
   `2001:4860:4860::8888,2001:4860:4860::8844`
 - `storage`: Path to storage file for device ID
+
+Only one Edge instance can run per network namespace. See [edge(1)](edge.adoc)
+for route recovery and legacy route cleanup.
 
 The old `dns` field is not supported and causes a configuration error. Each
 new field accepts only numeric addresses of its own family. DNS is applied

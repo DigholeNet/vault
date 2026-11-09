@@ -60,6 +60,12 @@ The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network 
 
 SIGINT and SIGTERM use the same graceful shutdown and network cleanup path as *-s quit*.
 
+== Route recovery
+Reserve route protocol *242* for Edge within its network namespace. On restart,
+Edge recovers marked routes for the current server addresses.
+For conflicts with legacy *proto static* routes, inspect the route in the log
+and confirm ownership before removing it manually.
+
 == Files
 */etc/vault/edge.toml*::
     Configuration file. See *edge.toml.example* for the available options

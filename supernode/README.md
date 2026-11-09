@@ -192,6 +192,16 @@ instance and restore its TUN-local tunables if they still have the applied value
 Enabled forwarding and adjusted upstream RA settings remain in place on
 success, failure, and shutdown. After SIGKILL/OOM, inspect firewall rules manually.
 
+The server exclusively creates a new, non-persistent TUN. An existing interface,
+including a pre-created persistent TUN, is rejected; configure an unused `iface`
+name. The kernel removes the owned TUN when its file descriptors close, including
+after SIGKILL. For IPv4, the server sets only this TUN's `rp_filter=1`; global
+`all`/`default` and physical-interface values remain unchanged. Linux uses
+`max(all, interface)`, so an administrator's global `all=2` retains effective loose
+validation. Authenticated client packets still undergo the server's explicit
+source-IP check against their assigned addresses. IPv6-only setups do not change
+IPv4 reverse-path settings.
+
 ## Automatic host forwarding
 
 At startup, the server enables `net.ipv4.ip_forward=1` for an IPv4 pool and
