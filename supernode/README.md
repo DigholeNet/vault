@@ -13,7 +13,7 @@ System requirements:
 - Linux with TUN/TAP support (`/dev/net/tun`)
 - `iptables` (including `ip6tables` for IPv6) for NAT/masquerade rules
 - `procps` (`sysctl`) for forwarding configuration
-- The Debian package installs these runtime command dependencies automatically
+- Installing the Debian package with APT also installs missing runtime dependencies
 - Root privileges (or `CAP_NET_ADMIN`) to create TUN devices and modify iptables
 
 ## Project structure
@@ -148,7 +148,7 @@ deleted on package removal.
 
 ```bash
 # Install a locally built package (choose amd64 or arm64 to match the host)
-sudo dpkg -i target/debian/supernode_0.1.0-1_amd64.deb
+sudo apt install ./target/debian/supernode_0.1.0-1_amd64.deb
 
 # Create the configuration on a fresh installation. Set a strong password
 # and review the address pools before starting the service.

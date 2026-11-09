@@ -2,10 +2,9 @@
 
 ## Supported Versions
 
-There are no formal releases yet. `0.1.0` is the current development version.
-Security fixes currently land on `main`; development snapshots have no supported
-release series or backport guarantee. A supported-version table will be added
-when the first version is released.
+Security fixes target the latest stable release, starting with `0.1.0`.
+Fixes land on `main` before release. Development snapshots and older releases
+have no backport guarantee.
 
 ## Reporting a Vulnerability
 
@@ -83,7 +82,7 @@ Security properties:
 ## Known Limitations
 
 We believe in being upfront about the weak spots of the current protocol. These are
-known limitations of the current development protocol:
+known limitations of the current protocol:
 
 1. **Symmetric, network-level trust model.** Clients and the supernode authenticate to
    each other with the *same* password-derived key. Anyone who holds the password can
@@ -153,7 +152,7 @@ known limitations of the current development protocol:
 
 ## Security Updates
 
-Once formal releases begin, the target security-update schedule is:
+The target security-update schedule is:
 
 - **Critical**: Immediate patch release
 - **High**: Next scheduled release (within 2 weeks)

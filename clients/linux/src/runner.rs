@@ -16,7 +16,7 @@ use dashmap::DashMap;
 use tracing::{error, info, warn};
 use vault_core::{
     SysSignal, app_main,
-    device::{Ipv4, Ipv6, TunTapDevice},
+    device::{self, Ipv4, Ipv6, TunTapDevice},
     logger::rolling::{LoggerGuard, cli_log_levels, init_logger},
     util,
 };
@@ -69,7 +69,9 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     // Keep the netns lease until DNS/routes/TUN have all been cleaned up.
     // Unlike the control-file lock, this also covers private /run mounts.
     let _network_lock = NetworkLock::acquire()?;
-    let tun = config.get_iface().to_string();
+    // Resolve name templates before configuring routes or DNS.
+    let device = device::setup_device(config.get_iface(), &device::DeviceType::Tun)?;
+    let tun = device.get_ifname().to_string();
     let dns = DnsGuard::setup_for_interface(&tun);
     let server_addr = format!("{}:{}", config.get_host(), config.get_port());
     info!("Resolving server address: {}", server_addr);
@@ -88,10 +90,7 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     let dns_dual = config.dns_for(true, true);
     let assigned_dns = Arc::new(Mutex::new(None::<Vec<String>>));
     let assignment_dns = assigned_dns.clone();
-    let routes = RouteGuard::new(
-        config.get_iface(),
-        hosts.iter().map(|addr| addr.ip()).collect(),
-    );
+    let routes = RouteGuard::new(&tun, hosts.iter().map(|addr| addr.ip()).collect());
     let route_state = routes.shared();
     // The server must bypass the VPN before the first handshake, and after
     // every exit change, rather than waiting for on_ip_assigned.
@@ -103,6 +102,7 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
 
     let mut edge = Edge::new(
         config,
+        device,
         physical_exits.clone(),
         hosts.clone(),
         move |exits, device, _, ipv4, ipv6| {
@@ -493,9 +493,10 @@ mod tests {
             .unwrap();
             for v4 in [true, false] {
                 let before = host_values();
-                // Exercise both actual setup and assignment, including a dotted
-                // interface name and an inherited strict TUN setting.
-                let device = setup_device("vault.test", &DeviceType::Tun).unwrap();
+                // Exercise a dotted template name and inherited strict RPF.
+                let device = setup_device("vault.test%d", &DeviceType::Tun).unwrap();
+                let tun = device.get_ifname().to_string();
+                assert!(!tun.contains('%'));
                 assert_eq!(rpf(device.get_ifname()).trim(), "1");
                 let routes = RouteGuard::new(device.get_ifname(), vec![]);
                 on_ip_assigned(
@@ -513,9 +514,9 @@ mod tests {
                 drop(device);
                 // /proc follows this network namespace; an inherited sysfs
                 // mount can still show the host namespace's interfaces.
-                let local_rpf = Path::new("/proc/sys/net/ipv4/conf/vault.test/rp_filter");
+                let local_rpf = format!("/proc/sys/net/ipv4/conf/{tun}/rp_filter");
                 let deadline = Instant::now() + Duration::from_secs(2);
-                while local_rpf.exists() {
+                while Path::new(&local_rpf).exists() {
                     assert!(Instant::now() < deadline, "owned TUN survived fd close");
                     std::thread::sleep(Duration::from_millis(20));
                 }

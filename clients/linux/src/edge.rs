@@ -9,7 +9,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 use vault_core::client::{ClientCallbacks, ClientConfig, ClientSession, TrafficStats};
-use vault_core::device::{self, Ipv4, Ipv6, TunTapDevice};
+use vault_core::device::{Ipv4, Ipv6, TunTapDevice};
 use vault_core::{Buffer, PeerId};
 
 /// Thin platform adapter over `vault_core::client::ClientSession`.
@@ -27,6 +27,7 @@ pub struct Edge {
 impl Edge {
     pub fn new<F>(
         config: EdgeConfig,
+        device: TunTapDevice,
         exits: Arc<Mutex<FamilyExits>>,
         hosts: Vec<SocketAddr>,
         on_ip_assigned: F,
@@ -63,10 +64,7 @@ impl Edge {
                 .map_err(|_| anyhow::anyhow!("Invalid id length"))?,
         );
 
-        let device = Arc::new(device::setup_device(
-            config.get_iface(),
-            &device::DeviceType::Tun,
-        )?);
+        let device = Arc::new(device);
 
         // The TUN fd stays in blocking mode: the reader thread sleeps in the
         // kernel until a packet arrives instead of polling a non-blocking fd.
