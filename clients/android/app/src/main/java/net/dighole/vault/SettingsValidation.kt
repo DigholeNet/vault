@@ -14,7 +14,9 @@ internal object SettingsValidation {
         value.all { it in "0123456789abcdefABCDEF:." } &&
             runCatching { java.net.InetAddress.getByName(value) }.isSuccess
     } else value.split('.').let { parts ->
-        parts.size == 4 && parts.all { it.isNotEmpty() && it.all(Char::isDigit) && it.toIntOrNull() in 0..255 }
+        parts.size == 4 && parts.all { part ->
+            part.isNotEmpty() && part.all { it in '0'..'9' } && part.toIntOrNull() in 0..255
+        }
     }
     fun server(value: String): Boolean = address(value) || domain(value)
     fun dns(value: String, ipv6: Boolean? = null): Boolean {
@@ -22,7 +24,9 @@ internal object SettingsValidation {
         val entries = value.split(',')
         return entries.size <= 4 && entries.all {
             val literal = it.trim()
-            address(literal) && (ipv6 == null || (java.net.InetAddress.getByName(literal) is java.net.Inet6Address) == ipv6)
+            address(literal) && (ipv6 == null || runCatching {
+                (java.net.InetAddress.getByName(literal) is java.net.Inet6Address) == ipv6
+            }.getOrDefault(false))
         }
     }
     fun domains(value: String): Boolean {

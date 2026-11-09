@@ -433,6 +433,18 @@ mod tests {
     use super::*;
     use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
+    fn wait_for_packet(socket: &UdpSocket) {
+        socket.set_nonblocking(false).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        // Peek leaves the datagram queued, including a zero-length datagram.
+        socket
+            .peek_from(&mut [0])
+            .expect("UDP packet did not arrive");
+        socket.set_nonblocking(true).unwrap();
+    }
+
     #[test]
     fn receive_burst() {
         let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -447,6 +459,7 @@ mod tests {
         let capacity = buffer.buffer().len();
         let mut received = 0_u8;
         while received < 65 {
+            wait_for_packet(&receiver);
             let before = received;
             recv_batch(&receiver, &mut buffer, |buffer, source, _| {
                 assert_eq!(source, sender.local_addr().unwrap());
@@ -481,6 +494,7 @@ mod tests {
         let mut buffer = Buffer::new(128);
         let mut received = 0;
         while received < packets.len() {
+            wait_for_packet(&receiver);
             let before = received;
             recv_batch(&receiver, &mut buffer, |buffer, _, _| {
                 assert_eq!(buffer.as_ref(), packets[received]);
@@ -503,8 +517,13 @@ mod tests {
         }
         let mut buffer = Buffer::new(128);
         let mut received = 0;
+        wait_for_packet(&receiver);
         recv_batch(&receiver, &mut buffer, |_, _, _| {
             received += 1;
+            if received == 1 {
+                // Ensure time-budget yielding is tested with another packet ready.
+                wait_for_packet(&receiver);
+            }
             std::thread::sleep(UDP_BATCH_TIME + Duration::from_millis(1));
         })
         .unwrap();

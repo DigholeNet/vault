@@ -30,6 +30,15 @@ class SettingsValidationTest {
         assertFalse(SettingsValidation.dns("1.1.1.1,2001:4860:4860::8888", ipv6 = false))
         assertFalse(SettingsValidation.dns("example.com", ipv6 = true))
     }
+    @Test fun dnsDigits() {
+        listOf("١.٢.٣.٤", "１.２.３.４", "1.２.3.4", "2001:db8::１", "::ffff:١.٢.٣.٤").forEach {
+            assertFalse(it, SettingsValidation.dns(it, ipv6 = false))
+            assertFalse(it, SettingsValidation.dns(it, ipv6 = true))
+            assertFalse(it, SettingsValidation.dns(it))
+            assertFalse(it, SettingsValidation.address(it))
+            assertFalse(it, SettingsValidation.server(it))
+        }
+    }
     @Test fun listLimits() {
         assertTrue(SettingsValidation.dns(List(4) { "1.1.1.1" }.joinToString(","), ipv6 = false))
         assertFalse(SettingsValidation.dns(List(5) { "1.1.1.1" }.joinToString(","), ipv6 = false))
