@@ -20,6 +20,19 @@
   let language = 'zh';
   try { language = localStorage.getItem('vault-language') || (navigator.language.startsWith('zh') ? 'zh' : 'en'); } catch {}
   if (!['zh', 'en'].includes(language)) language = 'zh';
+  let selectedLinuxArch = 'amd64';
+  const linuxDialog = document.getElementById('linux-download-dialog');
+  const linuxDialogTitle = document.getElementById('linux-dialog-title');
+  const linuxDialogClose = document.getElementById('linux-dialog-close');
+  function updateLinuxDialog() {
+    const archLabel = selectedLinuxArch[0].toUpperCase() + selectedLinuxArch.slice(1);
+    linuxDialogTitle.textContent = `${archLabel} releases`;
+    linuxDialogClose.setAttribute('aria-label', language === 'zh' ? '关闭下载窗口' : 'Close download dialog');
+    linuxDialog.querySelectorAll('[data-linux-component]').forEach(link => {
+      const format = link.dataset.linuxFormat === 'deb' ? '' : `${link.dataset.linuxFormat}-`;
+      link.dataset.releaseAsset = `${link.dataset.linuxComponent}-${format}${selectedLinuxArch}`;
+    });
+  }
   function renderRelease() {
     const release = window.vaultRelease || { assets: {}, url: 'https://github.com/DigholeNet/vault/releases' };
     document.getElementById('hero-release-version').textContent = release.version || 'DEV';
@@ -29,20 +42,26 @@
         : 'Stable release · ' + release.published;
     }
     const labels = language === 'zh'
-      ? { android: '下载 APK', macos: '下载 macOS ZIP', 'edge-amd64': '下载 edge · amd64', 'edge-arm64': '下载 edge · arm64', 'supernode-amd64': '下载 supernode · amd64', 'supernode-arm64': '下载 supernode · arm64' }
-      : { android: 'Download APK', macos: 'Download macOS ZIP', 'edge-amd64': 'Download edge · amd64', 'edge-arm64': 'Download edge · arm64', 'supernode-amd64': 'Download supernode · amd64', 'supernode-arm64': 'Download supernode · arm64' };
-    const fallbackLabels = {
-      'edge-amd64': 'edge · amd64',
-      'edge-arm64': 'edge · arm64',
-      'supernode-amd64': 'supernode · amd64',
-      'supernode-arm64': 'supernode · arm64',
-    };
+      ? { android: '下载 APK', macos: '下载 macOS ZIP' }
+      : { android: 'Download APK', macos: 'Download macOS ZIP' };
+    const formatLabels = { deb: 'DEB', binary: 'Binary (.tar.gz)' };
     document.querySelectorAll('[data-release-asset]').forEach(link => {
       const key = link.dataset.releaseAsset;
       const asset = release.assets[key];
       link.href = asset || release.url;
       const label = link.querySelector('.download-label');
-      if (label) label.textContent = asset ? labels[key] : (fallbackLabels[key] || (language === 'zh' ? '查看发布页' : 'View releases'));
+      if (label) {
+        const fallback = language === 'zh' ? '查看发布页' : 'View releases';
+        label.textContent = asset ? (formatLabels[link.dataset.linuxFormat] || labels[key] || fallback) : fallback;
+      }
+    });
+    document.querySelectorAll('[data-linux-arch]').forEach(archButton => {
+      const arch = archButton.dataset.linuxArch;
+      const hasAssets = release.assets[`edge-${arch}`] || release.assets[`edge-binary-${arch}`];
+      const archLabel = arch[0].toUpperCase() + arch.slice(1);
+      archButton.querySelector('span').textContent = hasAssets
+        ? `Download ${archLabel}`
+        : `${archLabel} releases`;
     });
     document.getElementById('release-notes').href = release.url;
     if (release.version) {
@@ -66,6 +85,7 @@
         element.append(document.createTextNode(part));
       });
     });
+    updateLinuxDialog();
     renderRelease();
     button.textContent = language === 'zh' ? 'EN ↗' : '中文 ↗';
     button.setAttribute('aria-label', language === 'zh' ? 'Switch to English' : '切换到中文');
@@ -78,6 +98,22 @@
     language = language === 'zh' ? 'en' : 'zh';
     try { localStorage.setItem('vault-language', language); } catch {}
     render();
+  });
+  document.querySelectorAll('[data-linux-arch]').forEach(archButton => {
+    archButton.addEventListener('click', () => {
+      selectedLinuxArch = archButton.dataset.linuxArch;
+      updateLinuxDialog();
+      renderRelease();
+      linuxDialog.showModal();
+    });
+  });
+  linuxDialogClose.addEventListener('click', () => linuxDialog.close());
+  linuxDialog.addEventListener('click', event => {
+    if (event.target !== linuxDialog) return;
+    const bounds = linuxDialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+      linuxDialog.close();
+    }
   });
   copy.addEventListener('click', async () => {
     const command = 'git clone https://github.com/DigholeNet/vault.git';

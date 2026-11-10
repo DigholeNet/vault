@@ -97,7 +97,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 ./gradlew connectedAndroidTest
 ```
 
-Direct Gradle builds default to version `0.1.0` / code `1`. For versioned
+Direct Gradle builds default to version `0.1.1` / code `1`. For versioned
 release artifacts, run `scripts/package-android.sh` from the repository root;
 it injects the workspace version and derived Android version code.
 The script writes `dist/vault-android.apk`, retaining all three supported ABIs

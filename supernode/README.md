@@ -113,6 +113,18 @@ The server needs working IPv6 egress for clients to reach IPv6 internet targets.
 
 ## Usage and deployment
 
+Release archives named `supernode-v<version>-<arch>.tar.gz` contain only the
+static musl executable, LICENSE and NOTICE. They do not install configuration,
+user accounts or service units. Install `iptables` and `procps` (or the
+corresponding packages for your distribution), extract the matching archive,
+and create `/etc/vault/supernode.toml` as described above. For example on amd64:
+
+```bash
+tar -xzf supernode-v0.1.1-amd64.tar.gz
+./supernode-v0.1.1-amd64/supernode --help
+sudo ./supernode-v0.1.1-amd64/supernode --config /etc/vault/supernode.toml
+```
+
 Command line usage:
 
 ```bash
@@ -148,7 +160,7 @@ deleted on package removal.
 
 ```bash
 # Install a locally built package (choose amd64 or arm64 to match the host)
-sudo apt install ./target/debian/supernode_0.1.0-1_amd64.deb
+sudo apt install ./target/debian/supernode_0.1.1-1_amd64.deb
 
 # Create the configuration on a fresh installation. Set a strong password
 # and review the address pools before starting the service.

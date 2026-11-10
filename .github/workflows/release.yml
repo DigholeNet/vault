@@ -1,6 +1,6 @@
 name: Release
 
-# One tag releases everything: Linux client (.deb) + Linux server (.deb) +
+# One tag releases everything: Linux client/server (.deb + static binary tar.gz),
 # Android client (signed APK) + notarized macOS app zip. The signed iOS IPA
 # is built too, but is never uploaded (its Ad Hoc provisioning profile
 # contains the team name and registered device UDIDs). Public workflow
@@ -110,6 +110,75 @@ jobs:
         with:
           name: deb-${{ matrix.package }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/deb/${{ matrix.package }}_*.deb
+          if-no-files-found: error
+
+  linux-binary-packages:
+    needs: [version-gate, rust-checks, android-checks, apple-checks]
+    strategy:
+      matrix:
+        package: [edge, supernode]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-26.04
+            target: x86_64-unknown-linux-musl
+          - arch: arm64
+            runner: ubuntu-26.04-arm
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+
+      - name: Install protoc and cargo-zigbuild
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          cargo install cargo-zigbuild --locked
+
+      - name: Cache cargo registry and target dir
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-binary-release-${{ matrix.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-binary-release-${{ matrix.arch }}-
+
+      - name: Build and validate static binary archive
+        env:
+          DIST_DIR: ${{ runner.temp }}/binary
+          PACKAGE: ${{ matrix.package }}
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.version-gate.outputs.version }}
+        run: |
+          scripts/package-linux.sh --binary "$PACKAGE" "$TARGET"
+          bundle="$PACKAGE-v$VERSION-$ARCH"
+          archive="$DIST_DIR/$bundle.tar.gz"
+          test -f "$archive"
+          tar -tzf "$archive" | sort | diff -u \
+            <(printf '%s\n' "$bundle/" "$bundle/LICENSE" "$bundle/NOTICE" "$bundle/$PACKAGE" | sort) -
+          mkdir -p "$RUNNER_TEMP/binary-smoke"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/binary-smoke"
+          binary="$RUNNER_TEMP/binary-smoke/$bundle/$PACKAGE"
+          test -x "$binary"
+          file "$binary" | grep -q 'statically linked'
+          "$binary" --help >/dev/null
+
+      - name: Upload binary archive artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: binary-${{ matrix.package }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/binary/${{ matrix.package }}-v${{ needs.version-gate.outputs.version }}-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
   android-apk:
@@ -344,7 +413,7 @@ jobs:
           fi
 
   publish:
-    needs: [version-gate, linux-packages, android-apk, apple-packages]
+    needs: [version-gate, linux-packages, linux-binary-packages, android-apk, apple-packages]
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
@@ -371,6 +440,30 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: deb-supernode-arm64
+          path: dist
+
+      - name: Download binary-edge-amd64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: binary-edge-amd64
+          path: dist
+
+      - name: Download binary-edge-arm64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: binary-edge-arm64
+          path: dist
+
+      - name: Download binary-supernode-amd64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: binary-supernode-amd64
+          path: dist
+
+      - name: Download binary-supernode-arm64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: binary-supernode-arm64
           path: dist
 
       - name: Download android-apk release artifact
@@ -405,6 +498,7 @@ jobs:
                 exit 1
               fi
               mv "${packages[0]}" "$pkg-v${{ needs.version-gate.outputs.version }}-$arch.deb"
+              test -f "$pkg-v${{ needs.version-gate.outputs.version }}-$arch.tar.gz"
             done
           done
           mv Vault-macOS.zip "Vault-macOS-v${{ needs.version-gate.outputs.version }}.zip"

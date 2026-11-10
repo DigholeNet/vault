@@ -3,7 +3,11 @@
 Notable changes to Vault are recorded here using the
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) structure.
 
-## [Unreleased]
+## [0.1.1] - Unreleased
+
+### Added
+
+- Minimal statically linked musl binary archives for Linux edge and supernode on amd64 and arm64
 
 ## [0.1.0] - 2026-11-10
 
@@ -40,5 +44,5 @@ Initial public release.
 - Website version, download links and Android QR code synchronized with stable releases
 - Contributor, security, privacy, protocol, diagnostics and release documentation
 
-[Unreleased]: https://github.com/DigholeNet/vault/compare/v0.1.0...HEAD
+[0.1.1]: https://github.com/DigholeNet/vault/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/DigholeNet/vault/releases/tag/v0.1.0

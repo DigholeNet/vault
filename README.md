@@ -132,9 +132,9 @@ diagnostic probes use the app process's default routing; see
 ### For users — prebuilt artifacts
 
 Download packages from [GitHub Releases](https://github.com/DigholeNet/vault/releases).
-The `0.1.0` release includes:
+The `0.1.1` release includes:
 
-- Linux client (`edge`) and server (`supernode`): Debian packages for amd64 and arm64.
+- Linux client (`edge`) and server (`supernode`): Debian packages and minimal static musl binary tar.gz archives for amd64 and arm64.
 - Android: signed APK for API 36 or newer.
 - macOS: notarized app ZIP for Intel and Apple Silicon, requiring macOS 15.5 or newer.
 

@@ -131,7 +131,7 @@ TEAM_ID=ABCDE12345 scripts/package-apple.sh
 
 Outputs go to `dist/`. Packaging takes the marketing version from the root
 Cargo manifest; direct Xcode builds retain the project development default
-`1.0` unless `MARKETING_VERSION` is overridden. Signing profiles, notarization and CI setup are documented
+`0.1.1` unless `MARKETING_VERSION` is overridden. Signing profiles, notarization and CI setup are documented
 in [Releasing](../../docs/releasing.md#apple-packaging-and-signing).
 For a fork, change `APP_BUNDLE_ID_PREFIX` and `APP_GROUP_ID` in
 `Config/Shared.xcconfig` to identifiers registered to your team, and supply your

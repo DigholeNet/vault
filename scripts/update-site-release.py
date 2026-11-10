@@ -40,8 +40,12 @@ def release_snapshot(release):
         "macos": r"Vault-macOS-v.+\.zip",
         "edge-amd64": r"edge-v.+-amd64\.deb",
         "edge-arm64": r"edge-v.+-arm64\.deb",
+        "edge-binary-amd64": r"edge-v.+-amd64\.tar\.gz",
+        "edge-binary-arm64": r"edge-v.+-arm64\.tar\.gz",
         "supernode-amd64": r"supernode-v.+-amd64\.deb",
         "supernode-arm64": r"supernode-v.+-arm64\.deb",
+        "supernode-binary-amd64": r"supernode-v.+-amd64\.tar\.gz",
+        "supernode-binary-arm64": r"supernode-v.+-arm64\.tar\.gz",
     }
     for asset in release.get("assets", []):
         for platform, pattern in patterns.items():

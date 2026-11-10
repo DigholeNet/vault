@@ -105,11 +105,20 @@ DNS settings unchanged.
 
 ### Run directly (requires root)
 
+Release archives named `edge-v<version>-<arch>.tar.gz` contain only the static
+musl executable, LICENSE and NOTICE. They do not install configuration, user
+accounts or service units. Install the runtime commands listed above, then
+extract the matching archive (amd64 shown here):
+
 ```bash
+tar -xzf edge-v0.1.1-amd64.tar.gz
+./edge-v0.1.1-amd64/edge --help
 sudo install -d -m 700 /etc/vault
 # Create /etc/vault/edge.toml as described above, then:
-sudo ./target/release/edge --config /etc/vault/edge.toml
+sudo ./edge-v0.1.1-amd64/edge --config /etc/vault/edge.toml
 ```
+
+For a source build, use `./target/release/edge` instead.
 
 To change identity, add `--user USER --group GROUP`; see the security notes
 below.

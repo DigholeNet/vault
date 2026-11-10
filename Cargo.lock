@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "edge"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "dashmap",
@@ -1351,7 +1351,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "supernode"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "dashmap",
@@ -1846,7 +1846,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vault-bridge"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "android_log-sys",
  "libc",
@@ -1862,7 +1862,7 @@ dependencies = [
 
 [[package]]
 name = "vault-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "caps",

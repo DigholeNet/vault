@@ -282,6 +282,11 @@ footer p,footer>div{font-size:13px}
 .release-banner p{grid-row:2;grid-column:1;font-size:14px;margin:0;max-width:800px}
 .release-banner>a{grid-row:1/3;grid-column:2;align-self:center;font-size:13px;color:var(--blue)}
 .download-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.download-group-heading{margin:0 0 18px;color:#7885a3;font:10px monospace;letter-spacing:1.8px}
+.download-group-separator{display:flex;align-items:center;gap:20px;margin:50px 0 28px;color:#707e9e;font:11px monospace;letter-spacing:1.6px}
+.download-group-separator:before,.download-group-separator:after{content:"";height:1px;flex:1;background:#ccd4e8}
+.download-group-separator span{white-space:nowrap}
+.download-server-grid{grid-template-columns:1fr}
 .download-card{display:flex;flex-direction:column;min-width:0;padding:28px 30px;min-height:245px;background:#fff;border:1px solid #dee4f4;border-radius:16px}
 .download-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .download-platform-number{font:8px monospace;color:#96a0ba;letter-spacing:1px}
@@ -333,6 +338,8 @@ footer p,footer>div{font-size:13px}
 [data-theme="dark"] .download-platform-number,[data-theme="dark"] .download-format{color:#a9b4d3}
 [data-theme="dark"] .download-format{border-color:#4a5471}
 [data-theme="dark"] .download-requirement,[data-theme="dark"] #android-qr-caption,[data-theme="dark"] .download-build-link{color:#adb8d5}
+[data-theme="dark"] .download-group-heading,[data-theme="dark"] .download-group-separator{color:#aeb9d6}
+[data-theme="dark"] .download-group-separator:before,[data-theme="dark"] .download-group-separator:after{background:#46526f}
 [data-theme="dark"] .download-action{background:#353154;border-color:#5c537d;color:#d3c9ff}
 [data-theme="dark"] .download-action:hover{background:#453b69;border-color:#8876a8}
 [data-theme="dark"] .ios-build-note{background:#29324d;border-color:#3b4561}
@@ -364,6 +371,29 @@ footer p,footer>div{font-size:13px}
 .package-actions .download-build-link{margin:0;font-size:12px}
 .package-hint{font-size:11px;color:#8993ae;line-height:1.8;flex:1;min-width:130px}
 .package-linux-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:auto}
+.package-supernode-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:auto}
+.linux-arch-action{width:100%;text-align:left;white-space:nowrap}
+.linux-download-dialog{width:min(560px,calc(100% - 32px));max-height:calc(100dvh - 40px);padding:0;border:1px solid #dce3f4;border-radius:18px;background:#fff;color:var(--ink);box-shadow:0 30px 90px #111a3d38;overflow:auto}
+.linux-download-dialog::backdrop{background:#11182c80;backdrop-filter:blur(4px)}
+.linux-dialog-header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:26px 26px 12px}
+.linux-dialog-header h3{margin:8px 0 0;font-size:26px}
+.linux-dialog-close{display:flex;align-items:center;justify-content:center;width:36px;height:36px;flex-shrink:0;border:1px solid #e0e5f2;border-radius:50%;background:#f5f6fb;color:#65718e;font-size:24px;line-height:1}
+.linux-dialog-close:hover{background:#e9eaf5;color:var(--ink)}
+.linux-download-dialog>p{margin:0;padding:0 26px 18px;font-size:14px}
+.linux-dialog-packages{padding:0 26px}
+.linux-dialog-package{padding:18px 0}
+.linux-dialog-package:not([hidden]) + .linux-dialog-package:not([hidden]){border-top:1px solid #e5e9f3}
+.linux-dialog-package-heading{display:flex;align-items:baseline;gap:12px;margin-bottom:13px}
+.linux-dialog-package-heading h4{margin:0;font-size:18px}
+.linux-dialog-package-heading span{font-size:12px;color:#7c88a4}
+.linux-dialog-links{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.linux-download-dialog>p.linux-dialog-note{padding:16px 26px 22px;font-size:12px;line-height:1.8}
+[data-theme="dark"] .linux-download-dialog{background:#222b44;border-color:#46516f;color:var(--ink)}
+[data-theme="dark"] .linux-dialog-close{background:#2d3652;border-color:#4b5675;color:#c2cbe2}
+[data-theme="dark"] .linux-dialog-close:hover{background:#394362}
+[data-theme="dark"] .linux-dialog-package:not([hidden]) + .linux-dialog-package:not([hidden]){border-color:#3d4866}
+[data-theme="dark"] .linux-dialog-package-heading span{color:#adb8d5}
+@media(max-width:520px){.linux-dialog-header{padding:22px 20px 10px}.linux-dialog-header h3{font-size:23px}.linux-download-dialog>p{padding-inline:20px}.linux-dialog-packages{padding-inline:20px}.linux-dialog-links{grid-template-columns:1fr;gap:9px}.linux-download-dialog>p.linux-dialog-note{padding:14px 20px 20px}}
 .android-scan{display:flex;align-items:center;gap:27px;border:1px solid #dfe5f5;background:#eef1fc;border-radius:15px;padding:25px 30px;margin-top:24px}
 .android-scan .android-qr-link{align-self:center;padding:5px;flex-shrink:0;border-radius:8px}
 .android-scan .android-qr-link img{width:112px;height:112px}
@@ -376,9 +406,9 @@ footer p,footer>div{font-size:13px}
 [data-theme="dark"] .android-scan{background:#242e48;border-color:#3e4a6b}
 [data-theme="dark"] .scan-eyebrow{color:#a6b2d2}
 [data-theme="dark"] .android-scan #android-qr-caption{color:#b5b1f1}
-@media(max-width:1000px){.download-card{padding:25px 23px}.package-actions{gap:14px}.package-actions .download-action{min-width:145px}.package-linux-actions{gap:9px}.package-hint{font-size:11px}.android-scan{padding:24px}}
+@media(max-width:1000px){.download-card{padding:25px 23px}.package-actions{gap:14px}.package-actions .download-action{min-width:145px}.package-linux-actions,.package-supernode-actions{gap:9px}.package-supernode-actions{grid-template-columns:1fr 1fr}.package-hint{font-size:11px}.android-scan{padding:24px}}
 @media(max-width:760px){.download-grid{grid-template-columns:1fr;gap:16px}.download-card{padding:25px 22px;min-height:0}.package-heading h3{font-size:23px}.download-card>p{font-size:14px;line-height:1.9;margin:20px 0 23px}.package-actions .download-action{min-width:160px}.package-actions .download-build-link{font-size:12px}.download-action{font-size:13px;padding:12px 13px}.android-scan{gap:18px;padding:22px 18px;align-items:flex-start}.android-scan .android-qr-link{align-self:flex-start;margin-top:5px}.android-scan .android-qr-link img{width:90px;height:90px}.android-scan-copy h3{font-size:16px;line-height:1.6;margin-top:8px}.android-scan-copy p{font-size:12px}.scan-eyebrow{font-size:8px;letter-spacing:.4px}.android-scan #android-qr-caption{font-size:11px}.package-hint{flex-basis:100%;font-size:12px}}
-@media(max-width:380px){.android-scan{flex-direction:column}.android-scan .android-qr-link img{width:112px;height:112px}}
+@media(max-width:380px){.package-linux-actions,.package-supernode-actions{grid-template-columns:1fr}.android-scan{flex-direction:column}.android-scan .android-qr-link img{width:112px;height:112px}}
 
 .hero-preview .client-showcase{margin-bottom:20px}.hero-preview .client-guide-foot{padding-top:3px}
 /* Compact native platform lanes without reducing readable type sizes. */

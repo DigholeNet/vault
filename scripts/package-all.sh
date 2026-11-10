@@ -2,7 +2,7 @@
 #
 # Packages all platforms into dist/:
 #   - Android signed APK
-#   - Linux client + server .deb (amd64 + arm64)
+#   - Linux client + server .deb and static binary tar.gz (amd64 + arm64)
 #   - Apple iOS IPA + macOS app zip
 #
 # Usage: TEAM_ID=<your-team-id> scripts/package-all.sh
