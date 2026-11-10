@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
 # Packages the Linux client (edge) and server (supernode) as amd64 and arm64
-# .deb packages and minimal statically linked binary tarballs.
+# .deb/.rpm packages and minimal statically linked binary tarballs.
 #
 # Cross-building uses Zig for Linux C dependencies (ring and bundled SQLite)
 # as well as linking. rust-lld alone cannot compile those dependencies.
 #
 # Prerequisites:
 #   - rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
-#   - cargo install cargo-deb (except for binary-only builds)
+#   - cargo install cargo-deb cargo-generate-rpm (except for binary-only builds)
 #   - cargo install cargo-zigbuild
 #   - zig (on macOS: brew install zig)
-#   - asciidoctor (only for Debian packaging)
+#   - asciidoctor (only for system packaging)
 #
 # Usage: scripts/package-linux.sh
 #        scripts/package-linux.sh --binaries-only
@@ -111,10 +111,12 @@ for target in "${TARGETS[@]}"; do
 done
 
 if [[ "$mode" == all ]]; then
-    if ! command -v cargo-deb >/dev/null 2>&1; then
-        echo "error: cargo-deb not found; install with: cargo install cargo-deb" >&2
-        exit 1
-    fi
+    for tool in cargo-deb cargo-generate-rpm; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            echo "error: $tool not found; install with: cargo install $tool" >&2
+            exit 1
+        fi
+    done
     if ! command -v asciidoctor >/dev/null 2>&1; then
         echo "error: asciidoctor not found; install with: gem install asciidoctor" >&2
         exit 1
@@ -130,6 +132,7 @@ if [[ "$mode" == all ]]; then
     generate_manpages
 fi
 for target in "${TARGETS[@]}"; do
+    arch="$(arch_for_target "$target")"
     packages=(edge supernode)
     if [[ "$mode" == single ]]; then
         packages=("$single_pkg")
@@ -137,7 +140,12 @@ for target in "${TARGETS[@]}"; do
     for pkg in "${packages[@]}"; do
         build_binary "$pkg" "$target"
         if [[ "$mode" == all ]]; then
+            rpm_dir="$pkg"
+            if [[ "$pkg" == edge ]]; then
+                rpm_dir=clients/linux
+            fi
             cargo deb -p "$pkg" --variant musl --target "$target" --no-build --no-strip --output "$DIST_DIR/"
+            cargo generate-rpm -p "$rpm_dir" --variant musl --target "$target" --output "$DIST_DIR/$pkg-v$VERSION-$arch.rpm"
         fi
     done
 done
@@ -145,5 +153,5 @@ done
 echo ""
 echo "Done:"
 shopt -s nullglob
-artifacts=("$DIST_DIR"/*.deb "$DIST_DIR"/*.tar.gz)
+artifacts=("$DIST_DIR"/*.deb "$DIST_DIR"/*.rpm "$DIST_DIR"/*.tar.gz)
 ls -lh "${artifacts[@]}"

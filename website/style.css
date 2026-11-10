@@ -371,7 +371,8 @@ footer p,footer>div{font-size:13px}
 .package-actions .download-build-link{margin:0;font-size:12px}
 .package-hint{font-size:11px;color:#8993ae;line-height:1.8;flex:1;min-width:130px}
 .package-linux-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:auto}
-.package-supernode-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:auto}
+.package-supernode-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:auto}
+.package-supernode-divider{grid-column:1/-1;border-top:1px dashed currentColor;opacity:.2;margin:2px 0}
 .linux-arch-action{width:100%;text-align:left;white-space:nowrap}
 .linux-download-dialog{width:min(560px,calc(100% - 32px));max-height:calc(100dvh - 40px);padding:0;border:1px solid #dce3f4;border-radius:18px;background:#fff;color:var(--ink);box-shadow:0 30px 90px #111a3d38;overflow:auto}
 .linux-download-dialog::backdrop{background:#11182c80;backdrop-filter:blur(4px)}
@@ -386,7 +387,7 @@ footer p,footer>div{font-size:13px}
 .linux-dialog-package-heading{display:flex;align-items:baseline;gap:12px;margin-bottom:13px}
 .linux-dialog-package-heading h4{margin:0;font-size:18px}
 .linux-dialog-package-heading span{font-size:12px;color:#7c88a4}
-.linux-dialog-links{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.linux-dialog-links{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .linux-download-dialog>p.linux-dialog-note{padding:16px 26px 22px;font-size:12px;line-height:1.8}
 [data-theme="dark"] .linux-download-dialog{background:#222b44;border-color:#46516f;color:var(--ink)}
 [data-theme="dark"] .linux-dialog-close{background:#2d3652;border-color:#4b5675;color:#c2cbe2}
@@ -406,7 +407,7 @@ footer p,footer>div{font-size:13px}
 [data-theme="dark"] .android-scan{background:#242e48;border-color:#3e4a6b}
 [data-theme="dark"] .scan-eyebrow{color:#a6b2d2}
 [data-theme="dark"] .android-scan #android-qr-caption{color:#b5b1f1}
-@media(max-width:1000px){.download-card{padding:25px 23px}.package-actions{gap:14px}.package-actions .download-action{min-width:145px}.package-linux-actions,.package-supernode-actions{gap:9px}.package-supernode-actions{grid-template-columns:1fr 1fr}.package-hint{font-size:11px}.android-scan{padding:24px}}
+@media(max-width:1000px){.download-card{padding:25px 23px}.package-actions{gap:14px}.package-actions .download-action{min-width:145px}.package-linux-actions,.package-supernode-actions{gap:9px}.package-hint{font-size:11px}.android-scan{padding:24px}}
 @media(max-width:760px){.download-grid{grid-template-columns:1fr;gap:16px}.download-card{padding:25px 22px;min-height:0}.package-heading h3{font-size:23px}.download-card>p{font-size:14px;line-height:1.9;margin:20px 0 23px}.package-actions .download-action{min-width:160px}.package-actions .download-build-link{font-size:12px}.download-action{font-size:13px;padding:12px 13px}.android-scan{gap:18px;padding:22px 18px;align-items:flex-start}.android-scan .android-qr-link{align-self:flex-start;margin-top:5px}.android-scan .android-qr-link img{width:90px;height:90px}.android-scan-copy h3{font-size:16px;line-height:1.6;margin-top:8px}.android-scan-copy p{font-size:12px}.scan-eyebrow{font-size:8px;letter-spacing:.4px}.android-scan #android-qr-caption{font-size:11px}.package-hint{flex-basis:100%;font-size:12px}}
 @media(max-width:380px){.package-linux-actions,.package-supernode-actions{grid-template-columns:1fr}.android-scan{flex-direction:column}.android-scan .android-qr-link img{width:112px;height:112px}}
 

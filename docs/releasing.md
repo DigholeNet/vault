@@ -20,32 +20,43 @@ minimum. Cargo.lock fixes Rust dependency resolution, not the compiler or all
 external tools. Record compiler, SDK, NDK, Xcode and packaging-tool versions
 when diagnosing or reproducing a build.
 
-Linux packaging regenerates manpages explicitly before `cargo deb`; it does
-not rely on Cargo build-script side effects or cached generated files. For
-direct `cargo deb` use, first run `scripts/package-linux.sh --manpages-only`.
+Linux packaging regenerates manpages explicitly before `cargo deb` or
+`cargo generate-rpm`; it does not rely on Cargo build-script side effects or
+cached generated files. For direct package builds, first run
+`scripts/package-linux.sh --manpages-only`. For edge, build an RPM with
+`cargo generate-rpm -p clients/linux`; for the server, use
+`cargo generate-rpm -p supernode`.
 
 Local `scripts/package-linux.sh` cross-builds amd64 and arm64 musl binaries
-with Zig and produces both Debian packages and minimal binary tar.gz archives.
-Use `--binaries-only` to skip Debian packaging. Each archive contains only the
-executable, LICENSE and NOTICE under a versioned top-level directory; it does
-not include configuration, service units or install scripts. Static linking
-removes libc dependencies, but runtime commands such as ip, sysctl and iptables
-remain host prerequisites documented by each component.
+with Zig and produces Debian packages, RPM packages and minimal binary tar.gz
+archives. Use `--binaries-only` to skip both system package formats. RPMs in
+`dist/` use public names such as `edge-v0.1.1-amd64.rpm`; their filenames use
+amd64/arm64, while their internal RPM architectures are x86_64/aarch64. Each
+archive contains only the executable, LICENSE and NOTICE under a versioned
+top-level directory; it does not include configuration, service units or
+install scripts. Static linking removes libc dependencies, but runtime commands
+such as ip, sysctl and iptables remain host prerequisites documented by each
+component.
 
-The release workflow builds native GNU/Linux binaries for Debian packages on
-x86_64 and ARM64 Ubuntu runners after all platform checks pass. Local musl
-packages select the `musl` cargo-deb variant and declare runtime dependencies
-without `$auto`: iproute2/procps/adduser for edge and iptables/procps/adduser
-for supernode. Native CI packages use cargo-deb's `$auto` detection for
-shared-library dependencies, in addition to those runtime packages. Validate
-each package on the intended Debian/Ubuntu host; do not assume the local script
+The release workflow builds native GNU/Linux binaries on x86_64 and ARM64
+Ubuntu runners after all platform checks pass. The same Linux package matrix
+builds and validates DEB and RPM packages for edge and supernode. Local musl
+packages select the `musl` cargo-deb and generate-rpm variants. Debian packages
+declare iproute2/procps/adduser for edge and iptables/procps/adduser for
+supernode. RPM packages require iproute/procps-ng/shadow-utils for edge and
+iptables/procps-ng/shadow-utils for supernode; edge also has weak dependencies
+on polkit and systemd-resolved. Native CI Debian packages use cargo-deb's
+`$auto` detection for shared-library dependencies in addition to those runtime
+packages. RPM systemd units are installed under `/usr/lib/systemd/system`,
+while Debian units use `/lib/systemd/system`. Validate each package on an
+intended Debian/Ubuntu or RPM-based host; do not assume the local script
 reproduces CI binaries byte for byte.
 
 A separate release matrix builds the static musl tar.gz archives with Zig,
 checks their exact three-file contents and executable permissions, verifies
 static linking, and runs each binary's `--help` command on its target
 architecture. Release CI writes packages into runner temporary directories
-outside the Cargo cache and uploads only each matrix component's package.
+outside the Cargo cache and uploads only each matrix component's packages.
 Cached packages from previous builds are not collected as release artifacts.
 
 ## Android version-code policy
@@ -101,16 +112,17 @@ they are not passed into Apple's marketing-version field.
 
    The tag-triggered Release reruns all platform checks before packaging;
    failed checks block publication. If the commit changes, validate it again.
-4. After Release succeeds, verify its ten public assets:
+4. After Release succeeds, verify its fourteen public assets:
    `vault-android-v0.1.1.apk`, `Vault-macOS-v0.1.1.zip`, and both `amd64` and
    `arm64` packages named `edge-v0.1.1-<arch>.deb`,
-   `edge-v0.1.1-<arch>.tar.gz`, `supernode-v0.1.1-<arch>.deb` and
+   `edge-v0.1.1-<arch>.rpm`, `edge-v0.1.1-<arch>.tar.gz`,
+   `supernode-v0.1.1-<arch>.deb`, `supernode-v0.1.1-<arch>.rpm` and
    `supernode-v0.1.1-<arch>.tar.gz`. The Ad Hoc iOS IPA is built for validation
    but is never uploaded as an artifact or Release asset.
 5. Wait for **GitHub Pages** to deploy from `main`. Check the
    [website](https://digholenet.github.io/vault/) shows `v0.1.1` and its publication
-   date, all ten download links resolve, and the Android QR opens the same APK
-   as the Android button. Announce the release after these checks pass.
+   date, all fourteen download links resolve, and the Android QR opens the same
+   APK as the Android button. Announce the release after these checks pass.
 
 Pages reads the latest stable release after a successful tag-triggered Release;
 manual artifact-only runs do not trigger deployment. Release events, manual

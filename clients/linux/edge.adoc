@@ -41,7 +41,7 @@ reconnect with exponential backoff.
 *--group* <GROUP>::
     Run as other group. Requires starting as root when changing identity.
 
-The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network setup and access to configuration and control files. This option changes identity but is not a complete privilege sandbox. Debian systemd services instead start directly as the dedicated *vault* user and group with these capabilities supplied by systemd. The systemd-resolved backend also requires Polkit authorization; the Debian package installs the corresponding account-scoped rule.
+The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network setup and access to configuration and control files. This option changes identity but is not a complete privilege sandbox. Packaged systemd services instead start directly as the dedicated *vault* user and group with these capabilities supplied by systemd. The DNS backends also require Polkit authorization; Debian and RPM packages install the corresponding account-scoped rule.
 
 *-s* <S>::
     Send a control signal to a running instance. Only *quit* is supported.
@@ -61,12 +61,18 @@ The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network 
 SIGINT and SIGTERM use the same graceful shutdown and network cleanup path as *-s quit*.
 
 == DNS
-Automatic DNS requires systemd-resolved's local stub: */etc/resolv.conf*
-nameservers must all be *127.0.0.53* or *127.0.0.54*, and *resolvectl statistics*
-must succeed. With Polkit authorization, Edge configures DNS on its own TUN
-and reverts the link settings on exit. Other setups, including
-*/run/systemd/resolve/resolv.conf* uplink mode, require manual DNS configuration.
-Edge leaves */etc/resolv.conf* unchanged.
+Automatic DNS supports systemd-resolved and NetworkManager with Polkit
+authorization. With resolved's local stub, Edge configures DNS and the *~.*
+routing domain on its own TUN and reverts the link settings on exit.
+
+When NetworkManager generates */etc/resolv.conf*, Edge replaces its active
+nameservers after address assignment and checks them every 2 seconds after
+NetworkManager rewrites the file. Startup and exit use
+*nmcli general reload dns-rc*, so NetworkManager regenerates DNS from its current
+connections; Edge does not save or restore a historical DNS snapshot.
+
+Other resolver setups, including */run/systemd/resolve/resolv.conf* uplink mode,
+require manual DNS configuration. Each resolver command has a 2s timeout.
 
 == Route recovery
 Reserve route protocol *242* for Edge within its network namespace. On restart,

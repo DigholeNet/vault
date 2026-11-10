@@ -12,15 +12,15 @@ System requirements:
 
 - Linux with TUN/TAP support (`/dev/net/tun`)
 - `iptables` (including `ip6tables` for IPv6) for NAT/masquerade rules
-- `procps` (`sysctl`) for forwarding configuration
-- Installing the Debian package with APT also installs missing runtime dependencies
+- `procps` (`sysctl`; `procps-ng` on RPM-based distributions) for forwarding configuration
+- Installing a Debian or RPM package with APT or DNF also installs missing runtime dependencies
 - Root privileges (or `CAP_NET_ADMIN`) to create TUN devices and modify iptables
 
 ## Project structure
 
 ```text
 supernode/
-├── Cargo.toml              # Package manifest with debian metadata
+├── Cargo.toml              # Package manifest with Debian and RPM metadata
 ├── supernode.adoc          # Manpage source (AsciiDoc format)
 ├── src/
 │   ├── main.rs             # Application entry point
@@ -38,16 +38,15 @@ supernode/
     ├── supernode.toml.example    # Example configuration file
     ├── supernode.service         # systemd service unit
     ├── supernode.target          # systemd target unit
-    └── deb-scripts/
-        ├── postinst              # Debian post-install script
-        ├── prerm                 # Stop and disable before removal
-        └── postrm                # Reload systemd after removal
+    ├── deb-scripts/              # Debian lifecycle scripts
+    └── rpm-scripts/              # RPM lifecycle scripts
 ```
 
 ## Build and test
 
-Prerequisites: the stable Rust toolchain (Rust 1.98 or newer) and
-`asciidoctor` for Debian packaging (not needed for plain binary builds). The server runs only on
+Prerequisites: the stable Rust toolchain (Rust 1.98 or newer). System packaging
+also requires `asciidoctor`, `cargo-deb` and `cargo-generate-rpm`; none of these
+packaging tools is needed for plain binary builds. The server runs only on
 Linux (TUN/TAP); on other platforms the crate still compiles as a stub, so
 `cargo check -p supernode` works everywhere.
 
@@ -61,9 +60,10 @@ cargo build -p supernode --release
 # Run tests
 cargo test -p supernode
 
-# Create Debian package (requires cargo-deb and asciidoctor)
+# Create Debian and RPM packages
 scripts/package-linux.sh --manpages-only
 cargo deb -p supernode
+cargo generate-rpm -p supernode
 ```
 
 Build artifacts:
@@ -151,16 +151,19 @@ not supported. The project includes systemd unit files:
   - Device access: `/dev/net/tun` (read-write)
 - **supernode.target**: target unit for grouping
 
-### Debian package installation
+### System package installation
 
-The package creates the shared `vault` system account and migrates ownership of
-logs created as root by earlier versions. Upgrades restart only an
-already-running service; removal stops and disables it. The account is not
-deleted on package removal.
+Debian packages depend on `iptables`, `procps` and `adduser`; RPM packages
+depend on `iptables`, `procps-ng` and `shadow-utils`. Both create the shared
+`vault` system account and migrate ownership of logs created as root by earlier
+versions. Upgrades restart only an already-running service; removal stops and
+disables it. The account is not deleted on package removal.
 
 ```bash
-# Install a locally built package (choose amd64 or arm64 to match the host)
-sudo apt install ./target/debian/supernode_0.1.1-1_amd64.deb
+# Install a package from scripts/package-linux.sh (choose amd64 or arm64)
+sudo apt install ./dist/supernode_0.1.1-1_amd64.deb
+# Or, on Fedora and other DNF-based distributions:
+sudo dnf install ./dist/supernode-v0.1.1-amd64.rpm
 
 # Create the configuration on a fresh installation. Set a strong password
 # and review the address pools before starting the service.
@@ -171,11 +174,11 @@ sudoedit /etc/vault/supernode.toml
 sudo systemctl enable --now supernode
 ```
 
-File locations (Debian):
+File locations (Debian and RPM):
 
 - Binary: `/usr/bin/supernode`
 - Config example: `/etc/vault/supernode.toml.example`
-- systemd units: `/lib/systemd/system/`
+- systemd units: `/lib/systemd/system/` (Debian) or `/usr/lib/systemd/system/` (RPM)
 - Manpage: `/usr/share/man/man1/supernode.1.gz`
 
 ## Network configuration
@@ -268,7 +271,8 @@ Common issues:
 2. **TUN device error**: check `/dev/net/tun` exists and is accessible
 3. **Address already in use**: another process is using the configured UDP port
 4. **Missing manpage when packaging**: install `asciidoctor` and run
-   `scripts/package-linux.sh --manpages-only` before `cargo deb`
+   `scripts/package-linux.sh --manpages-only` before `cargo deb` or
+   `cargo generate-rpm`
 
 Run with `--verbose` to enable debug-level logging for troubleshooting
 connection issues.

@@ -8,6 +8,8 @@ Notable changes to Vault are recorded here using the
 ### Added
 
 - Minimal statically linked musl binary archives for Linux edge and supernode on amd64 and arm64
+- RPM packages for Linux edge and supernode on amd64 and arm64, built with cargo-generate-rpm
+- Automatic Linux DNS through NetworkManager-managed resolv.conf, with current-state regeneration on network changes and exit
 
 ## [0.1.0] - 2026-11-10
 

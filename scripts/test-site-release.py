@@ -30,9 +30,30 @@ class ReleaseSnapshotTests(unittest.TestCase):
             self.assertEqual(state["url"], f"{BASE}/releases")
 
     def test_actual_release_asset_names_match_publishing_workflow(self):
-        data = release(["vault-android-v0.1.1.apk", "Vault-macOS-v0.1.1.zip", "edge-v0.1.1-amd64.deb", "edge-v0.1.1-arm64.deb", "edge-v0.1.1-amd64.tar.gz", "edge-v0.1.1-arm64.tar.gz", "supernode-v0.1.1-amd64.deb", "supernode-v0.1.1-arm64.deb", "supernode-v0.1.1-amd64.tar.gz", "supernode-v0.1.1-arm64.tar.gz", "Vault-iOS.ipa"])
-        state = site_release.release_snapshot(data)
-        self.assertEqual(set(state["assets"]), {"android", "macos", "edge-amd64", "edge-arm64", "edge-binary-amd64", "edge-binary-arm64", "supernode-amd64", "supernode-arm64", "supernode-binary-amd64", "supernode-binary-arm64"})
+        names = [
+            "vault-android-v0.1.1.apk",
+            "Vault-macOS-v0.1.1.zip",
+            "Vault-iOS.ipa",
+        ]
+        for package in ["edge", "supernode"]:
+            for arch in ["amd64", "arm64"]:
+                names.extend(
+                    f"{package}-v0.1.1-{arch}.{extension}"
+                    for extension in ["deb", "rpm", "tar.gz"]
+                )
+        state = site_release.release_snapshot(release(names))
+        expected = {"android", "macos"}
+        for package in ["edge", "supernode"]:
+            for arch in ["amd64", "arm64"]:
+                expected.update(
+                    {
+                        f"{package}-{arch}",
+                        f"{package}-rpm-{arch}",
+                        f"{package}-binary-{arch}",
+                    }
+                )
+        self.assertEqual(set(state["assets"]), expected)
+        self.assertEqual(len(state["assets"]), 14)
         self.assertEqual(state["version"], "v0.1.1")
         self.assertEqual(state["published"], "2026-11-01")
 

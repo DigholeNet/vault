@@ -91,7 +91,7 @@ Each client only handles: TUN fd I/O, route/DNS configuration, OS VPN API integr
 |---|---|---|---|
 | Apple | `vault-bridge` (staticlib, UniFFI) | XCFramework + Swift bindings | NetworkExtension / PacketTunnelProvider |
 | Android | `vault-bridge` (cdylib, UniFFI) | jniLibs + Kotlin bindings | VpnService / network-change listening |
-| Linux | none (links core directly) | binary + deb/systemd | TUN / route / DNS setup and rollback |
+| Linux | none (links core directly) | binary + deb/rpm + systemd | TUN / route / DNS setup and rollback |
 
 Both mobile platforms share a single bridge crate (`clients/bridge/`): one UniFFI interface definition generates both the Kotlin and Swift bindings.
 
@@ -134,7 +134,7 @@ diagnostic probes use the app process's default routing; see
 Download packages from [GitHub Releases](https://github.com/DigholeNet/vault/releases).
 The `0.1.1` release includes:
 
-- Linux client (`edge`) and server (`supernode`): Debian packages and minimal static musl binary tar.gz archives for amd64 and arm64.
+- Linux client (`edge`) and server (`supernode`): Debian and RPM packages plus minimal static musl binary tar.gz archives for amd64 and arm64.
 - Android: signed APK for API 36 or newer.
 - macOS: notarized app ZIP for Intel and Apple Silicon, requiring macOS 15.5 or newer.
 
@@ -145,7 +145,7 @@ Its Ad Hoc IPA is built in CI for validation but is not publicly distributed.
 The setup below applies to release packages and locally packaged builds.
 Minimal setup: one Linux server as the supernode, one client.
 
-**1. Server (Linux)** — install the supernode deb and write
+**1. Server (Linux)** — install the supernode DEB or RPM package and write
 `/etc/vault/supernode.toml`:
 
 ```toml
@@ -171,7 +171,7 @@ sudo systemctl enable --now supernode
 Open UDP port 9527 on the firewall. The server takes the first pool address
 (`192.168.10.1`) for its own TUN device.
 
-**2. Linux client** — install the edge deb and write `/etc/vault/edge.toml`:
+**2. Linux client** — install the edge DEB or RPM package and write `/etc/vault/edge.toml`:
 
 ```toml
 password = "a-long-random-password"  # must match the server
@@ -190,8 +190,10 @@ sudo systemctl enable --now edge
 The client is assigned an address from the pool (e.g. `192.168.10.2`);
 `ping 192.168.10.1` verifies the tunnel.
 
-Automatic DNS requires systemd-resolved's local stub and Polkit authorization;
-other resolver setups require manual DNS configuration. See the
+Automatic DNS supports systemd-resolved's local stub and NetworkManager-managed
+`/etc/resolv.conf`, with Polkit authorization. NetworkManager restores DNS from
+its current connections on exit; other resolver setups require manual DNS
+configuration. See the
 [Linux client setup](clients/linux/README.md#configuration-options).
 
 **3. Android** — install the APK, enter the same host, port and password,
@@ -216,11 +218,12 @@ their binaries are stubs.
 ```bash
 cargo build --workspace                    # Linux: everything (macOS: plain `cargo build`)
 cargo test -p vault-core --features test   # protocol integration test (mock server)
-# Debian packaging additionally requires cargo-deb and asciidoctor:
+# System packaging additionally requires cargo-deb, cargo-generate-rpm and asciidoctor:
 # Debian/Ubuntu: sudo apt-get install asciidoctor
-cargo install cargo-deb --locked
+cargo install cargo-deb cargo-generate-rpm --locked
 scripts/package-linux.sh --manpages-only
 cargo deb -p edge                          # Linux: deb package (also: -p supernode)
+cargo generate-rpm -p clients/linux         # Linux: RPM package (also: -p supernode)
 ```
 
 **Android** — requires a device running API 36 or newer. Building needs the
@@ -280,9 +283,14 @@ One-command local packaging (artifacts land in `dist/`):
 ```bash
 TEAM_ID=ABCDE12345 scripts/package-all.sh     # all platforms
 scripts/package-android.sh    # signed Android APK only
-scripts/package-linux.sh      # Linux debs only (cross-built via cargo-zigbuild; requires Zig and asciidoctor)
+scripts/package-linux.sh      # Linux DEB+RPM+tar.gz (requires Zig, cargo-deb, cargo-generate-rpm and asciidoctor)
+scripts/package-linux.sh --binaries-only   # Linux tar.gz only; skips system packages
 TEAM_ID=ABCDE12345 scripts/package-apple.sh   # Apple only (iOS IPA + macOS app)
 ```
+
+Linux packages are cross-built with cargo-zigbuild. Local RPMs use public names
+such as `dist/edge-v0.1.1-amd64.rpm`; filenames use amd64/arm64, while the RPM
+metadata uses x86_64/aarch64.
 
 Apple packaging requires an Apple Developer team; tagging `v*.*.*` triggers the
 release workflow. Release mechanics, signing keys, and provisioning profiles:
@@ -305,5 +313,5 @@ release workflow. Release mechanics, signing keys, and provisioning profiles:
 ## License
 
 MIT — see [LICENSE](LICENSE). Application bundles include LICENSE and NOTICE.
-Debian packages include the project license
-in their copyright file and NOTICE under `/usr/share/doc/<package>/`.
+Debian and RPM packages include the project license and NOTICE under
+`/usr/share/doc/<package>/`.

@@ -44,7 +44,7 @@
     const labels = language === 'zh'
       ? { android: '下载 APK', macos: '下载 macOS ZIP' }
       : { android: 'Download APK', macos: 'Download macOS ZIP' };
-    const formatLabels = { deb: 'DEB', binary: 'Binary (.tar.gz)' };
+    const formatLabels = { deb: 'DEB', rpm: 'RPM', binary: 'Binary (.tar.gz)' };
     document.querySelectorAll('[data-release-asset]').forEach(link => {
       const key = link.dataset.releaseAsset;
       const asset = release.assets[key];
@@ -57,7 +57,7 @@
     });
     document.querySelectorAll('[data-linux-arch]').forEach(archButton => {
       const arch = archButton.dataset.linuxArch;
-      const hasAssets = release.assets[`edge-${arch}`] || release.assets[`edge-binary-${arch}`];
+      const hasAssets = release.assets[`edge-${arch}`] || release.assets[`edge-rpm-${arch}`] || release.assets[`edge-binary-${arch}`];
       const archLabel = arch[0].toUpperCase() + arch.slice(1);
       archButton.querySelector('span').textContent = hasAssets
         ? `Download ${archLabel}`

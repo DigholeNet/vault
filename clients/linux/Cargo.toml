@@ -44,3 +44,30 @@ section = "net"
 [package.metadata.deb.variants.musl]
 name = "edge"
 depends = "iproute2, procps, adduser"
+
+[package.metadata.generate-rpm]
+assets = [
+  { source = "../../LICENSE", dest = "/usr/share/doc/edge/LICENSE", mode = "644", doc = true },
+  { source = "../../NOTICE", dest = "/usr/share/doc/edge/NOTICE", mode = "644", doc = true },
+  { source = "target/release/edge", dest = "/usr/bin/edge", mode = "755" },
+  { source = "assets/edge.toml.example", dest = "/etc/vault/edge.toml.example", mode = "600" },
+  { source = "assets/edge.service", dest = "/usr/lib/systemd/system/edge.service", mode = "644" },
+  { source = "assets/edge.target", dest = "/usr/lib/systemd/system/edge.target", mode = "644" },
+  { source = "assets/edge-resolved.rules", dest = "/usr/share/polkit-1/rules.d/50-edge.rules", mode = "644" },
+  { source = "target/edge.1.gz", dest = "/usr/share/man/man1/edge.1.gz", mode = "644" },
+]
+post_install_script = "assets/rpm-scripts/postinst"
+pre_uninstall_script = "assets/rpm-scripts/prerm"
+post_uninstall_script = "assets/rpm-scripts/postrm"
+
+[package.metadata.generate-rpm.requires]
+iproute = "*"
+procps-ng = "*"
+shadow-utils = "*"
+
+[package.metadata.generate-rpm.recommends]
+polkit = "*"
+systemd-resolved = "*"
+
+[package.metadata.generate-rpm.variants.musl]
+auto-req = "no"

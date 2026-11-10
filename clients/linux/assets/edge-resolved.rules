@@ -1,10 +1,11 @@
-// Grant the shared vault service account the resolvectl actions used by edge.
+// Grant only the DNS actions used by edge's resolved and NetworkManager backends.
 polkit.addRule(function(action, subject) {
     if (subject.user == "vault" &&
         (action.id == "org.freedesktop.resolve1.set-dns-servers" ||
          action.id == "org.freedesktop.resolve1.set-domains" ||
          action.id == "org.freedesktop.resolve1.flush-caches" ||
-         action.id == "org.freedesktop.resolve1.revert")) {
+         action.id == "org.freedesktop.resolve1.revert" ||
+         action.id == "org.freedesktop.NetworkManager.reload")) {
         return polkit.Result.YES;
     }
 });
