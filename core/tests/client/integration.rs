@@ -93,6 +93,7 @@ async fn handshake_heartbeat_data() {
     })
     .await
     .expect("session becomes active after platform setup");
+    assert_eq!(session.connection_status().public_ip, "127.0.0.1");
 
     // Send an encrypted data packet through the tunnel.
     session
@@ -107,6 +108,7 @@ async fn handshake_heartbeat_data() {
 
     session.shutdown().expect("shutdown");
     assert!(!session.is_active());
+    assert!(session.connection_status().public_ip.is_empty());
 }
 
 struct RejectConfiguration {

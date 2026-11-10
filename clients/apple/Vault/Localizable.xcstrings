@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Public IP" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "公网 IP"
+          }
+        }
+      }
+    },
     "IPv4 DNS" : {
       "localizations": {
         "zh-Hans": {

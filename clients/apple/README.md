@@ -102,12 +102,15 @@ IPv4 or IPv6 tunnel address, including IPv6-only assignments.
 ## Usage and deployment
 
 - **iOS:** Status shows the connection button, session clock, assigned IPv4/IPv6
-  addresses and traffic. Configure validates a draft; Save applies connection settings
-  on the next connection. Language changes apply immediately. Diagnostics holds
-  connection checks and logs. About shows the app icon and version.
+  addresses, the server-observed public/egress IP when available, and traffic.
+  Configure validates a draft; Save applies connection settings on the next
+  connection. Language changes apply immediately. Diagnostics holds connection
+  checks and logs. About shows the app icon and version.
 - **macOS:** the menu bar shows connection state. The popover has a connection
-  button, session clock, traffic, and Diagnostics / Settings / Quit actions.
-  Settings groups General, Connection, Network and Advanced; connection/network/
+  button, session clock, the server-observed public/egress IP when available,
+  traffic, and Diagnostics / Settings / Quit actions. Diagnostics also lists the
+  public IP separately from the tunnel addresses. Settings groups General,
+  Connection, Network and Advanced; connection/network/
   advanced edits require Save and apply on the next connection. General changes
   apply immediately. About is at the bottom of the Settings sidebar.
 - Closing a macOS window leaves the VPN running; Quit waits for the VPN profile

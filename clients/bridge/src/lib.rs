@@ -282,6 +282,7 @@ impl ClientCallbacks for CallbackAdapter {
 pub struct ConnectionStatus {
     pub connected: bool,
     pub generation: u64,
+    pub public_ip: String,
 }
 
 #[derive(uniffi::Record, Clone, Default)]
@@ -396,7 +397,7 @@ impl RustEdge {
         Ok(())
     }
 
-    /// Read readiness and transport generation in one core snapshot.
+    /// Read readiness, transport generation and observed public IP in one core snapshot.
     pub fn get_connection_status(&self) -> ConnectionStatus {
         self.session
             .lock()
@@ -407,6 +408,7 @@ impl RustEdge {
                     ConnectionStatus {
                         connected: status.connected,
                         generation: status.generation,
+                        public_ip: status.public_ip,
                     }
                 })
             })

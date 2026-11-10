@@ -233,19 +233,36 @@ private struct MacosConnectionDiagnostics: View {
     }
 
     private var sessionAddresses: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "network").foregroundStyle(.secondary)
-            Text(appData.vpnStatus == .connected || appData.isRecovering
-                ?
-                (appData.assignedIp.isEmpty ? languageManager.tr("Waiting for server-assigned addresses…") : appData.assignedIp
-                    .replacingOccurrences(
-                        of: "/",
-                        with: "  ·  "
-                    ))
-                : languageManager.tr("Disconnected"))
-                .font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "network").foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(languageManager.tr("Tunnel")).font(.caption).foregroundStyle(.secondary)
+                    Text(appData.vpnStatus == .connected || appData.isRecovering
+                        ?
+                        (appData.assignedIp.isEmpty ? languageManager.tr("Waiting for server-assigned addresses…") : appData.assignedIp
+                            .replacingOccurrences(
+                                of: "/",
+                                with: "  ·  "
+                            ))
+                        : languageManager.tr("Disconnected"))
+                        .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            if !appData.publicIp.isEmpty {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "globe").foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(languageManager.tr("Public IP")).font(.caption).foregroundStyle(.secondary)
+                        Text(verbatim: appData.publicIp)
+                            .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
         }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
     }

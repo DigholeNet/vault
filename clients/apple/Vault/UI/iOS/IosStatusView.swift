@@ -53,69 +53,69 @@ struct IosStatusView: View {
                             ConnectionDurationView(since: since)
                         }
 
-                        Spacer().frame(height: 10)
-
-                        // Connection Info & Statistics (combined, no background)
                         if appData.vpnStatus == .connected {
                             let ips = parsedIPs
+                            let hasTunnelIps = ips.ipv4 != nil || ips.ipv6 != nil
 
-                            VStack(spacing: 16) {
-                                // IP Addresses Section
-                                if ips.ipv4 != nil || ips.ipv6 != nil {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        if let ipv4 = ips.ipv4 {
+                            if !appData.publicIp.isEmpty || hasTunnelIps {
+                                VStack(alignment: .leading, spacing: 14) {
+                                    if !appData.publicIp.isEmpty {
+                                        VStack(alignment: .leading, spacing: 8) {
                                             HStack(spacing: 8) {
-                                                Image(systemName: "server.rack")
-                                                    .foregroundColor(.blue)
-                                                    .font(.system(size: 14))
-                                                Text(verbatim: "IPv4:")
-                                                    .font(.system(size: 14))
-                                                    .foregroundColor(.gray)
-                                                Text(ipv4)
-                                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                                    .foregroundColor(.primary)
+                                                Image(systemName: "globe")
+                                                    .font(.system(size: 16, weight: .medium))
+                                                    .foregroundColor(.accentColor)
+                                                Text(languageManager.tr("Public IP"))
+                                                    .font(.system(size: 12))
+                                                    .foregroundColor(.secondary)
                                             }
+                                            Text(verbatim: appData.publicIp)
+                                                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                                                .lineLimit(1)
+                                                .minimumScaleFactor(0.75)
+                                                .textSelection(.enabled)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
                                         }
+                                    }
 
-                                        if let ipv6 = ips.ipv6 {
-                                            HStack(spacing: 8) {
-                                                Image(systemName: "server.rack")
-                                                    .foregroundColor(.green)
-                                                    .font(.system(size: 14))
-                                                Text(verbatim: "IPv6:")
-                                                    .font(.system(size: 14))
-                                                    .foregroundColor(.gray)
-                                                Text(ipv6)
-                                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                                    .foregroundColor(.primary)
-                                                    .fixedSize(horizontal: false, vertical: true)
+                                    if !appData.publicIp.isEmpty, hasTunnelIps {
+                                        Divider()
+                                    }
+
+                                    if hasTunnelIps {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            if let ipv4 = ips.ipv4 {
+                                                TunnelAddressRow(family: "IPv4", address: ipv4, color: .blue)
+                                            }
+                                            if let ipv6 = ips.ipv6 {
+                                                TunnelAddressRow(family: "IPv6", address: ipv6, color: .green)
                                             }
                                         }
                                     }
                                 }
+                                .padding(14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+                                .padding(.horizontal, 20)
+                                .padding(.top, 16)
+                            }
 
-                                if ips.ipv4 != nil || ips.ipv6 != nil {
-                                    Divider()
-                                        .padding(.horizontal, 10)
-                                }
-
-                                // Statistics Section - Same width as IP section
-                                HStack(spacing: 0) {
-                                    TrafficColumn(
-                                        title: "Uplink", symbol: "arrow.up.circle.fill", color: .blue,
-                                        packets: appData.packetsSent, bytes: appData.bytesSent,
-                                        rate: appData.bytesSentPerSecond
-                                    )
-                                    Divider().frame(height: 70)
-                                    TrafficColumn(
-                                        title: "Downlink", symbol: "arrow.down.circle.fill", color: .green,
-                                        packets: appData.packetsReceived, bytes: appData.bytesReceived,
-                                        rate: appData.bytesReceivedPerSecond
-                                    )
-                                }
+                            HStack(spacing: 0) {
+                                TrafficColumn(
+                                    title: "Uplink", symbol: "arrow.up.circle.fill", color: .blue,
+                                    packets: appData.packetsSent, bytes: appData.bytesSent,
+                                    rate: appData.bytesSentPerSecond
+                                )
+                                Divider().frame(height: 70)
+                                TrafficColumn(
+                                    title: "Downlink", symbol: "arrow.down.circle.fill", color: .green,
+                                    packets: appData.packetsReceived, bytes: appData.bytesReceived,
+                                    rate: appData.bytesReceivedPerSecond
+                                )
                             }
                             .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
+                            .padding(.top, 24)
+                            .padding(.bottom, 16)
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -123,6 +123,30 @@ struct IosStatusView: View {
                     Spacer()
                 }.frame(minHeight: geometry.size.height)
             }
+        }
+    }
+}
+
+private struct TunnelAddressRow: View {
+    let family: String
+    let address: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "server.rack")
+                .font(.system(size: 13))
+                .foregroundColor(color)
+                .frame(width: 16)
+            Text(verbatim: family)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+            Spacer(minLength: 8)
+            Text(verbatim: address)
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .textSelection(.enabled)
         }
     }
 }
@@ -146,20 +170,15 @@ private struct TrafficColumn: View {
                     .font(.system(size: 13))
                     .foregroundColor(.gray)
             }
-            Text("\(packets)")
+            Text(PacketStats.formatBytes(rate) + "/s")
                 .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .foregroundColor(color)
             Text(PacketStats.formatBytes(bytes))
                 .font(.system(size: 11))
                 .foregroundColor(.gray)
-            HStack(spacing: 2) {
-                Text("+")
-                    .font(.system(size: 10))
-                    .foregroundColor(color)
-                Text(PacketStats.formatBytes(rate) + "/s")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(color)
-            }
-            .padding(.top, 2)
+            Text(languageManager.tr("Packets") + " \(packets)")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
     }

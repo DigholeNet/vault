@@ -145,6 +145,10 @@ impl Edge {
         self.session.traffic_stats()
     }
 
+    pub fn connection_status(&self) -> vault_core::client::ConnectionStatus {
+        self.session.connection_status()
+    }
+
     pub fn is_active(&self) -> bool {
         self.session.is_active()
     }

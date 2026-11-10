@@ -1123,6 +1123,30 @@ extension VaultTests {
         XCTAssertEqual(data.bytesSent, 150)
     }
 
+    func testPublicIpUpdatesAndClears() {
+        let data = AppData()
+        let status = ProviderStatus(ip: "10.0.0.2", stats: .zero, session: "same", publicIp: "203.0.113.10")
+        data.applyStatus(status)
+        XCTAssertEqual(data.publicIp, "203.0.113.10")
+
+        var updates = 0
+        let observer = data.objectWillChange.sink { updates += 1 }
+        defer { observer.cancel() }
+        data.applyStatus(status)
+        XCTAssertEqual(updates, 0)
+
+        data.applyStatus(ProviderStatus(ip: "10.0.0.2", stats: .zero, session: "same", publicIp: "2001:db8::10"))
+        XCTAssertEqual(updates, 1)
+        XCTAssertEqual(data.publicIp, "2001:db8::10")
+        data.applyStatus(ProviderStatus(ip: "10.0.0.2", stats: .zero, session: "same"))
+        XCTAssertEqual(updates, 2)
+        XCTAssertTrue(data.publicIp.isEmpty)
+
+        data.applyStatus(status)
+        data.resetStats()
+        XCTAssertTrue(data.publicIp.isEmpty)
+    }
+
     func testQuietStats() {
         let data = AppData()
         var stats = PacketStats.Stats.zero

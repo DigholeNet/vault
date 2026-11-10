@@ -220,6 +220,7 @@ mod tests {
             version: vault_core::PROTOCOL_VERSION,
             device_name: "test".into(),
             platform: "test".into(),
+            request_public_ip: false,
         };
         let request_key = client_public.bytes().as_slice().try_into().unwrap();
         let pending = PendingHandshake::new(

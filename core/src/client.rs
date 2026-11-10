@@ -173,10 +173,12 @@ pub struct ClientConfig {
 }
 
 /// Atomic snapshot of transport readiness and its attempt generation.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ConnectionStatus {
     pub connected: bool,
     pub generation: u64,
+    /// Server-observed outer source IP from the current authenticated handshake.
+    pub public_ip: String,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -215,6 +217,7 @@ struct ClientState {
     is_active: bool,
     connection_generation: u64,
     assigned_addresses: Option<(String, String, String, i32)>,
+    public_ip: String,
     is_closing: bool,
     last_pong: Instant,
     receive_handle: Option<JoinHandle<()>>,
@@ -407,6 +410,7 @@ impl ClientSession {
         ConnectionStatus {
             connected: state.is_active,
             generation: state.connection_generation,
+            public_ip: state.public_ip.clone(),
         }
     }
 
@@ -463,6 +467,7 @@ impl ClientSession {
             }
 
             state.is_active = false;
+            state.public_ip.clear();
             (handles, report_totals)
         };
 
@@ -525,6 +530,7 @@ impl ClientState {
             is_active: false,
             connection_generation: 0,
             assigned_addresses: None,
+            public_ip: String::new(),
             is_closing: false,
             last_pong: Instant::now(),
             receive_handle: None,
@@ -634,6 +640,7 @@ impl ClientInner {
         state.uplink_tx = None;
         state.uplink_queue_metrics = None;
         state.is_active = false;
+        state.public_ip.clear();
     }
 
     async fn try_connect(self: &Arc<Self>) -> Result<(), ClientError> {
@@ -712,6 +719,7 @@ impl ClientInner {
             if state.is_closing {
                 return Err(ClientError::NotConnected);
             }
+            state.public_ip = response.public_ip;
             state.is_active = true;
         }
 

@@ -413,6 +413,11 @@ impl<TS: TimeSource> SuperNode<TS> {
                                     .get_ipv6()
                                     .as_ref()
                                     .map_or(0, |ip| ip.prefix_len() as i32),
+                                if r.request_public_ip {
+                                    addr.ip().to_canonical().to_string()
+                                } else {
+                                    String::new()
+                                },
                                 TS::now(),
                                 &r.public_key_data,
                                 &pake_key,

@@ -29,6 +29,9 @@ message HandshakeRequest {
     string device_name = 7;
     // Client platform: android/ios/macos/linux; empty on old clients.
     string platform = 8;
+    // Requests the server-observed source IP in the response. Old clients
+    // leave this false so their response confirmation MAC stays unchanged.
+    bool request_public_ip = 9;
 }
 
 message HandshakeResponse {
@@ -50,6 +53,9 @@ message HandshakeResponse {
     // PAKE-derived confirmation key: proves the server holds the password
     // before the client sends any traffic.
     bytes confirm_mac = 11;
+    // Server-observed outer source IP without a port. Empty on old servers or
+    // when the client did not request it.
+    string public_ip = 12;
 }
 
 message HandshakeMessage {

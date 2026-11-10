@@ -147,6 +147,7 @@ pub struct HandshakeRequest {
     pub version: u32,
     pub device_name: String,
     pub platform: String,
+    pub request_public_ip: bool,
 }
 
 pub struct HandshakeResponse {
@@ -161,6 +162,7 @@ pub struct HandshakeResponse {
     pub timestamp: Time,
     pub request_public_key: Vec<u8>,
     pub confirm_mac: Vec<u8>,
+    pub public_ip: String,
 }
 
 pub struct Ping {
@@ -194,6 +196,7 @@ impl TryFrom<pb::HandshakeRequest> for HandshakeRequest {
             version: value.version,
             device_name: value.device_name,
             platform: value.platform,
+            request_public_ip: value.request_public_ip,
         })
     }
 }
@@ -223,6 +226,7 @@ impl TryFrom<pb::HandshakeResponse> for HandshakeResponse {
             timestamp: value.timestamp,
             request_public_key: value.request_public_key,
             confirm_mac: value.confirm_mac,
+            public_ip: value.public_ip,
         })
     }
 }
@@ -258,6 +262,7 @@ mod tests {
             version: 0,
             device_name: String::new(),
             platform: String::new(),
+            request_public_ip: false,
         }
     }
 
@@ -285,6 +290,7 @@ mod tests {
             timestamp: 0,
             request_public_key: vec![],
             confirm_mac: vec![],
+            public_ip: String::new(),
         };
         assert!(HandshakeResponse::try_from(response).is_err());
     }

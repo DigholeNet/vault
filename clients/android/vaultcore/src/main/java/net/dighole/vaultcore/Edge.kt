@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import android.os.Build
 import android.util.Log
+import net.dighole.vaultcore.uniffi.ConnectionStatus
 import net.dighole.vaultcore.uniffi.EdgeCallbacks
 import net.dighole.vaultcore.uniffi.RustEdge
 import net.dighole.vaultcore.uniffi.TrafficStats
@@ -133,7 +134,13 @@ class Edge(
     }
 
     @Synchronized
-    fun isConnected(): Boolean = rustEdge?.isConnected() ?: false
+    fun getConnectionStatus(): ConnectionStatus {
+        return rustEdge?.getConnectionStatus()
+            ?: ConnectionStatus(connected = false, generation = 0u, publicIp = "")
+    }
+
+    @Synchronized
+    fun isConnected(): Boolean = getConnectionStatus().connected
 
     @Synchronized
     fun getTrafficStats(): TrafficStats {

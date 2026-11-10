@@ -361,11 +361,12 @@ class VaultVpnService : VpnService() {
                         }
                     ) { iface ->
                         vpnIoHandler = createTunnelIo(iface)
-                        saveVpnState(true, ipv4, ipv6)
+                        val publicIp = edge?.getConnectionStatus()?.publicIp.orEmpty()
+                        connectedEvent = VpnStatusEvent.Connected(ipv4, ipv6, publicIp)
+                        saveVpnState(true, ipv4, ipv6, publicIp)
                         serviceRunning.set(true)
                         connectJob = null
                         vpnIoHandler?.startReadingAndWriting()
-                        connectedEvent = VpnStatusEvent.Connected(ipv4, ipv6)
                         lastCoreConnected = null
                         startTrafficStats(sessionToken)
                     }
@@ -375,7 +376,7 @@ class VaultVpnService : VpnService() {
                     sessionGate.updateIf(sessionToken, { sequence == tunnelConfigurationSequence }) {
                         Log.e(TAG, "Failed to configure VPN interface", error)
                         connectJob = null
-                        saveVpnState(false, "", "")
+                        saveVpnState(false, "", "", "")
                         emitVpnEvent(VpnStatusEvent.Error(error.message))
                         stopSelf()
                     }
@@ -418,7 +419,7 @@ class VaultVpnService : VpnService() {
         stopTrafficStats()
         connectedEvent = null
         lastCoreConnected = null
-        saveVpnState(false, "", "")
+        saveVpnState(false, "", "", "")
 
         // Each cleanup step is independent; one failure must not skip the others.
         try {
@@ -566,15 +567,16 @@ class VaultVpnService : VpnService() {
         emitVpnEvent(event)
     }
 
-    private fun saveVpnState(connected: Boolean, ipv4: String, ipv6: String) {
+    private fun saveVpnState(connected: Boolean, ipv4: String, ipv6: String, publicIp: String) {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().apply {
             putBoolean("vpn_connected", connected)
             putString("vpn_assigned_ipv4", ipv4)
             putString("vpn_assigned_ipv6", ipv6)
+            putString("vpn_public_ip", publicIp)
             commit()
         }
 
-        Log.d(TAG, "Saved VPN state: connected=$connected, ipv4=$ipv4, ipv6=$ipv6")
+        Log.d(TAG, "Saved VPN state: connected=$connected, ipv4=$ipv4, ipv6=$ipv6, publicIp=$publicIp")
     }
 
     /**
@@ -679,15 +681,24 @@ class VaultVpnService : VpnService() {
             while (serviceRunning.get() && isActive) {
                 try {
                     edge?.let { e ->
+                        val status = e.getConnectionStatus()
                         val stats = e.getTrafficStats()
                         // Native calls may finish after disconnect cancelled us.
                         coroutineContext.ensureActive()
                         sessionGate.update(sessionToken) {
-                            val connected = e.isConnected()
-                            if (lastCoreConnected != connected) {
+                            val connected = status.connected
+                            val publicIpChanged = connected && connectedEvent?.publicIp != status.publicIp
+                            if (lastCoreConnected != connected || publicIpChanged) {
                                 lastCoreConnected = connected
                                 if (connected) {
-                                    connectedEvent?.let { showConnected(it) }
+                                    connectedEvent?.let { cached ->
+                                        val event = cached.copy(publicIp = status.publicIp)
+                                        connectedEvent = event
+                                        if (publicIpChanged) {
+                                            saveVpnState(true, event.ipv4, event.ipv6, event.publicIp)
+                                        }
+                                        showConnected(event)
+                                    }
                                 } else {
                                     notificationManager.updateNotification(getString(R.string.notification_connecting))
                                     emitVpnEvent(VpnStatusEvent.Reconnecting)

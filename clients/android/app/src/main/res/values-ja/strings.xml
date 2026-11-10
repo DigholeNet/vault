@@ -21,6 +21,7 @@
     <string name="toggle_vpn_description">VPN 切り替え</string>
     <string name="ip_format">IPv4：%1$s</string>
     <string name="ipv6_format">IPv6：%1$s</string>
+    <string name="status_public_ip">パブリック IP</string>
     <string name="traffic_sent">↑ 送信：%1$s (%2$s/s)</string>
     <string name="traffic_received">↓ 受信：%1$s (%2$s/s)</string>
 

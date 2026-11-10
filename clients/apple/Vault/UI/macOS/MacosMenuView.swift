@@ -49,6 +49,9 @@ struct MacosMenuView: View {
                appData.vpnStatus == .connected || (appData.vpnStatus == .connecting && appData.isRecovering) {
                 ConnectionDurationView(since: since)
             }
+            if appData.vpnStatus == .connected || appData.isRecovering, !appData.publicIp.isEmpty {
+                publicIp
+            }
             if appData.isRecovering {
                 Text(languageManager.tr("Network changed. Reconnecting…"))
                     .font(.body).foregroundStyle(.primary.opacity(0.8))
@@ -194,6 +197,29 @@ struct MacosMenuView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 7)
             .contentShape(Rectangle())
+    }
+
+    private var publicIp: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "globe")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                Text(languageManager.tr("Public IP"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(verbatim: appData.publicIp)
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var traffic: some View {

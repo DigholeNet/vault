@@ -81,6 +81,15 @@ async fn full_handshake_heartbeat_and_data() {
         other => panic!("unexpected event: {:?}", other),
     }
 
+    timeout(Duration::from_secs(1), async {
+        while !edge.is_connected() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("bridge session becomes active");
+    assert_eq!(edge.get_connection_status().public_ip, "127.0.0.1");
+
     // Send an encrypted data packet through the tunnel.
     edge.write_data(b"hello rust".to_vec()).expect("write data");
 

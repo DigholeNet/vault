@@ -31,7 +31,7 @@ class StatusPresentationTest {
         assertEquals(10000L, clock.connected(10000))
     }
 
-    private val connected = VpnStatusEvent.Connected("192.0.2.1", "2001:db8::1")
+    private val connected = VpnStatusEvent.Connected("192.0.2.1", "2001:db8::1", "198.51.100.20")
 
     @Test fun connecting() {
         val live = VpnUiState().applying(connected).applying(VpnStatusEvent.Connecting)
@@ -40,6 +40,7 @@ class StatusPresentationTest {
         assertFalse(live.isConnected)
         assertEquals("", live.ipv4)
         assertEquals("", live.ipv6)
+        assertEquals("", live.publicIp)
         assertEquals(live, live.applying(VpnStatusEvent.TrafficStats(0, 0, 0, 0)))
     }
 
@@ -57,6 +58,7 @@ class StatusPresentationTest {
         assertFalse(live.isConnecting)
         assertEquals(connected.ipv4, live.ipv4)
         assertEquals(connected.ipv6, live.ipv6)
+        assertEquals(connected.publicIp, live.publicIp)
     }
 
     @Test fun reconnectState() {
@@ -65,6 +67,7 @@ class StatusPresentationTest {
         assertTrue(state.isConnecting)
         assertEquals(connected.ipv4, state.ipv4)
         assertEquals(connected.ipv6, state.ipv6)
+        assertEquals(connected.publicIp, state.publicIp)
         assertEquals(VpnUiState().applying(connected), state.applying(connected))
     }
 

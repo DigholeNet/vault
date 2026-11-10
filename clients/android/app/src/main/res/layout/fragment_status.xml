@@ -57,104 +57,176 @@
             android:includeFontPadding="false"
             android:textColor="?attr/colorOnSurface"
             android:visibility="gone"/>
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/networkCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:visibility="gone"
+            app:cardBackgroundColor="?attr/colorSurfaceVariant"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:cardMaxElevation="0dp"
+            app:strokeWidth="0dp">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="14dp">
+                <LinearLayout
+                    android:id="@+id/publicIpSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+                        <ImageView
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:importantForAccessibility="no"
+                            android:src="@drawable/ic_public_ip"
+                            app:tint="?attr/colorPrimary"/>
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:includeFontPadding="false"
+                            android:text="@string/status_public_ip"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="12sp"/>
+                    </LinearLayout>
+                    <TextView
+                        android:id="@+id/tvPublicIpAddress"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:ellipsize="none"
+                        android:fontFamily="monospace"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:textColor="?attr/colorOnSurface"
+                        android:textIsSelectable="true"
+                        android:textSize="14sp"
+                        app:autoSizeMaxTextSize="14sp"
+                        app:autoSizeMinTextSize="10sp"
+                        app:autoSizeStepGranularity="0.5sp"
+                        app:autoSizeTextType="uniform"/>
+                </LinearLayout>
+                <View
+                    android:id="@+id/networkDivider"
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="14dp"
+                    android:layout_marginBottom="14dp"
+                    android:background="?attr/colorOutlineVariant"
+                    android:visibility="gone"/>
+                <LinearLayout
+                    android:id="@+id/ipAddresses"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+                    <LinearLayout
+                        android:id="@+id/rowIpv4"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:visibility="gone">
+                        <ImageView
+                            android:layout_width="16dp"
+                            android:layout_height="16dp"
+                            android:importantForAccessibility="no"
+                            android:src="@drawable/ic_server_rack"
+                            app:tint="@color/status_uplink"/>
+                        <TextView
+                            android:id="@+id/labelIpv4"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:includeFontPadding="false"
+                            android:text="IPv4"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="12sp"/>
+                        <TextView
+                            android:id="@+id/tvIpv4Address"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:ellipsize="none"
+                            android:fontFamily="monospace"
+                            android:gravity="end"
+                            android:includeFontPadding="false"
+                            android:maxLines="1"
+                            android:textColor="?attr/colorOnSurface"
+                            android:textIsSelectable="true"
+                            android:textSize="14sp"
+                            app:autoSizeMaxTextSize="14sp"
+                            app:autoSizeMinTextSize="10sp"
+                            app:autoSizeStepGranularity="0.5sp"
+                            app:autoSizeTextType="uniform"/>
+                    </LinearLayout>
+                    <LinearLayout
+                        android:id="@+id/rowIpv6"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:visibility="gone">
+                        <ImageView
+                            android:layout_width="16dp"
+                            android:layout_height="16dp"
+                            android:importantForAccessibility="no"
+                            android:src="@drawable/ic_server_rack"
+                            app:tint="@color/status_downlink"/>
+                        <TextView
+                            android:id="@+id/labelIpv6"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:includeFontPadding="false"
+                            android:text="IPv6"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="12sp"/>
+                        <TextView
+                            android:id="@+id/tvIpv6Address"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:ellipsize="none"
+                            android:fontFamily="monospace"
+                            android:gravity="end"
+                            android:includeFontPadding="false"
+                            android:maxLines="1"
+                            android:textColor="?attr/colorOnSurface"
+                            android:textIsSelectable="true"
+                            android:textSize="14sp"
+                            app:autoSizeMaxTextSize="14sp"
+                            app:autoSizeMinTextSize="10sp"
+                            app:autoSizeStepGranularity="0.5sp"
+                            app:autoSizeTextType="uniform"/>
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
         <LinearLayout
             android:id="@+id/connectionInfo"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="50dp"
-            android:paddingVertical="16dp"
             android:orientation="vertical"
             android:gravity="center_horizontal"
             android:visibility="gone">
             <LinearLayout
-                android:id="@+id/ipAddresses"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
-                <LinearLayout
-                    android:id="@+id/rowIpv4"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="0dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:visibility="gone">
-                    <ImageView
-                        android:layout_width="14dp"
-                        android:layout_height="14dp"
-                        android:src="@drawable/ic_server_rack"
-                        android:importantForAccessibility="no"
-                        app:tint="@color/status_uplink"/>
-                    <TextView
-                        android:id="@+id/labelIpv4"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="14sp"
-                        android:includeFontPadding="false"
-                        android:text="IPv4:"
-                        android:layout_marginStart="8dp"
-                        android:textColor="?android:attr/textColorSecondary"/>
-                    <TextView
-                        android:id="@+id/tvIpv4Address"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="14sp"
-                        android:includeFontPadding="false"
-                        android:layout_marginStart="8dp"
-                        android:textColor="?attr/colorOnSurface"
-                        android:fontFamily="monospace"
-                        android:textStyle="bold"
-                        android:textIsSelectable="true"
-                        android:breakStrategy="simple"/>
-                </LinearLayout>
-                <LinearLayout
-                    android:id="@+id/rowIpv6"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:visibility="gone">
-                    <ImageView
-                        android:layout_width="14dp"
-                        android:layout_height="14dp"
-                        android:src="@drawable/ic_server_rack"
-                        android:importantForAccessibility="no"
-                        app:tint="@color/status_downlink"/>
-                    <TextView
-                        android:id="@+id/labelIpv6"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="14sp"
-                        android:includeFontPadding="false"
-                        android:text="IPv6:"
-                        android:layout_marginStart="8dp"
-                        android:textColor="?android:attr/textColorSecondary"/>
-                    <TextView
-                        android:id="@+id/tvIpv6Address"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="14sp"
-                        android:includeFontPadding="false"
-                        android:layout_marginStart="8dp"
-                        android:textColor="?attr/colorOnSurface"
-                        android:fontFamily="monospace"
-                        android:textStyle="bold"
-                        android:textIsSelectable="true"
-                        android:breakStrategy="simple"/>
-                </LinearLayout>
-            </LinearLayout>
-            <View
-                android:id="@+id/ipDivider"
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginHorizontal="10dp"
-                android:layout_marginTop="16dp"
-                android:background="?attr/colorOutlineVariant"/>
-            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:baselineAligned="false">
@@ -185,35 +257,33 @@
                             android:textColor="?android:attr/textColorSecondary"/>
                     </LinearLayout>
                     <TextView
-                        android:id="@+id/tvSentPackets"
+                        android:id="@+id/tvSentSpeed"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textSize="15sp"
-                        android:includeFontPadding="false"
-                        android:text="0"
                         android:layout_marginTop="6dp"
                         android:fontFamily="monospace"
-                        android:textStyle="bold"
-                        android:textColor="?attr/colorOnSurface"/>
+                        android:includeFontPadding="false"
+                        android:text="0.00 B/s"
+                        android:textColor="@color/status_uplink"
+                        android:textSize="15sp"
+                        android:textStyle="bold"/>
                     <TextView
                         android:id="@+id/tvSentBytes"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textSize="11sp"
+                        android:layout_marginTop="6dp"
                         android:includeFontPadding="false"
                         android:text="0.00 B"
-                        android:layout_marginTop="6dp"
-                        android:textColor="?android:attr/textColorSecondary"/>
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="11sp"/>
                     <TextView
-                        android:id="@+id/tvSentSpeed"
+                        android:id="@+id/tvSentPackets"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textSize="10sp"
+                        android:layout_marginTop="6dp"
                         android:includeFontPadding="false"
-                        android:text="+ 0.00 B/s"
-                        android:layout_marginTop="8dp"
-                        android:fontFamily="monospace"
-                        android:textColor="@color/status_uplink"/>
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="11sp"/>
                 </LinearLayout>
                 <View
                     android:layout_width="1dp"
@@ -246,35 +316,33 @@
                             android:textColor="?android:attr/textColorSecondary"/>
                     </LinearLayout>
                     <TextView
-                        android:id="@+id/tvReceivedPackets"
+                        android:id="@+id/tvReceivedSpeed"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textSize="15sp"
-                        android:includeFontPadding="false"
-                        android:text="0"
                         android:layout_marginTop="6dp"
                         android:fontFamily="monospace"
-                        android:textStyle="bold"
-                        android:textColor="?attr/colorOnSurface"/>
+                        android:includeFontPadding="false"
+                        android:text="0.00 B/s"
+                        android:textColor="@color/status_downlink"
+                        android:textSize="15sp"
+                        android:textStyle="bold"/>
                     <TextView
                         android:id="@+id/tvReceivedBytes"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textSize="11sp"
+                        android:layout_marginTop="6dp"
                         android:includeFontPadding="false"
                         android:text="0.00 B"
-                        android:layout_marginTop="6dp"
-                        android:textColor="?android:attr/textColorSecondary"/>
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="11sp"/>
                     <TextView
-                        android:id="@+id/tvReceivedSpeed"
+                        android:id="@+id/tvReceivedPackets"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textSize="10sp"
+                        android:layout_marginTop="6dp"
                         android:includeFontPadding="false"
-                        android:text="+ 0.00 B/s"
-                        android:layout_marginTop="8dp"
-                        android:fontFamily="monospace"
-                        android:textColor="@color/status_downlink"/>
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="11sp"/>
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>

@@ -634,7 +634,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     var providerStatus: ProviderStatus? {
         guard startFinished, !stopRequested, Self.activeProvider === self else { return nil }
-        return statsSession.status(ip: assignedIp)
+        return statsSession.status(ip: assignedIp, publicIp: edge?.connectionStatus.publicIp)
     }
 
     var providerStarted: Bool { !stopRequested && (pendingStart != nil || startFinished) }

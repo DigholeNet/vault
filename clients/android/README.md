@@ -15,6 +15,7 @@ Features:
 - Encrypted client-to-server tunnels (SPAKE2 PAKE handshake, X25519 key exchange, AEAD ciphers); the supernode decrypts and relays traffic
 - Automatic reconnection on network changes
 - IPv4 and IPv6 support
+- Displays tunnel addresses and the server-observed public/egress IP on the status screen
 - Excludes server addresses from VPN routing to avoid routing loops
 
 ## Project structure

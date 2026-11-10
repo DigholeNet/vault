@@ -136,9 +136,9 @@ extension PacketStats {
             self.stats = stats
         }
 
-        public func status(ip: String) -> ProviderStatus? {
+        public func status(ip: String, publicIp: String? = nil) -> ProviderStatus? {
             guard let id else { return nil }
-            return ProviderStatus(ip: ip, stats: stats, session: id)
+            return ProviderStatus(ip: ip, stats: stats, session: id, publicIp: publicIp)
         }
     }
 }

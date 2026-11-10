@@ -20,6 +20,9 @@ this document and the changelog, and coordinate client/server upgrades. Rebuild
 and deploy all affected peers for such an upgrade; the current handshake does
 not support rolling upgrades across wire versions. Optional protobuf fields
 may evolve without a bump only when omitted/default values remain compatible.
+The public-IP capability flag keeps this compatible in both directions: old
+servers ignore the request flag and omit the response field, while new servers
+omit it for old clients so their re-encoded confirmation MAC remains unchanged.
 
 ## Packet types
 
@@ -54,6 +57,8 @@ Client                           Server
   |     tolerance)                 |
   |   - Device name, platform      |
   |     (empty on old clients)     |
+  |   - Public-IP capability flag  |
+  |     (false on old clients)     |
   |                                |
   |<-- HandshakeResponse ----------|
   |   - ID (16 bytes)              |
@@ -66,9 +71,16 @@ Client                           Server
   |   - Timestamp                  |
   |   - Confirmation MAC           |
   |     (HMAC-SHA256, PAKE-keyed)  |
+  |   - Server-observed outer      |
+  |     source IP, if requested    |
   |                                |
   [Encrypted session established]
 ```
+
+The observed source IP contains no port and is covered by the confirmation MAC.
+It is normally the client's NAT/public egress address, but can be a private or
+loopback address in direct or test deployments, or a proxy address if a proxy
+rewrites the UDP source.
 
 Security properties:
 

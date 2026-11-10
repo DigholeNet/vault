@@ -21,6 +21,7 @@
     <string name="toggle_vpn_description">Cambiar VPN</string>
     <string name="ip_format">IPv4: %1$s</string>
     <string name="ipv6_format">IPv6: %1$s</string>
+    <string name="status_public_ip">IP pública</string>
     <string name="traffic_sent">↑ Enviado: %1$s (%2$s/s)</string>
     <string name="traffic_received">↓ Recibido: %1$s (%2$s/s)</string>
 

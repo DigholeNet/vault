@@ -140,10 +140,23 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     let mut last_network_check = Instant::now();
     let mut network_available = true;
     let mut last_route_error = None;
+    let mut last_handshake_generation = 0;
     while !signal.is_exited() {
         std::thread::sleep(Duration::from_millis(500));
         if let Some(error) = edge.configuration_error() {
             anyhow::bail!("VPN network configuration failed: {}", error);
+        }
+        let connection = edge.connection_status();
+        if connection.connected && connection.generation != last_handshake_generation {
+            if connection.public_ip.is_empty() {
+                info!("Handshake succeeded: generation={}", connection.generation);
+            } else {
+                info!(
+                    "Handshake succeeded: generation={} public_ip={}",
+                    connection.generation, connection.public_ip
+                );
+            }
+            last_handshake_generation = connection.generation;
         }
         // Reuse the runner instead of adding a netlink thread/dependency.
         // A two-second snapshot naturally coalesces network event bursts.
