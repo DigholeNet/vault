@@ -14,34 +14,20 @@
     <string name="status_connecting">连接中…</string>
     <string name="status_tap_to_connect">点击连接</string>
     <string name="status_tap_to_disconnect">点击断开</string>
-    <string name="status_please_wait">请稍候…</string>
     <string name="status_configure_first">请先配置服务器</string>
     <string name="status_error_prefix">错误：%1$s</string>
-    <string name="status_error_starting">启动 VPN 出错：%1$s</string>
     <string name="toggle_vpn_description">切换 VPN</string>
-    <string name="ip_format">IPv4：%1$s</string>
-    <string name="ipv6_format">IPv6：%1$s</string>
-    <string name="status_public_ip">公网 IP</string>
-    <string name="traffic_sent">↑ 发送：%1$s (%2$s/s)</string>
-    <string name="traffic_received">↓ 接收：%1$s (%2$s/s)</string>
 
     <!-- Configure Fragment -->
-    <string name="configure_title">配置</string>
     <string name="cancel_description">取消</string>
     <string name="save_description">保存</string>
     <string name="server_host">服务器地址</string>
-    <string name="server_host_hint">例如：192.168.1.1</string>
     <string name="port">端口</string>
-    <string name="port_default">9527</string>
     <string name="password">密码</string>
-    <string name="password_hint">输入密码</string>
     <string name="dns_ipv4_servers">IPv4 DNS（逗号分隔）</string>
     <string name="dns_ipv6_servers">IPv6 DNS（逗号分隔）</string>
-    <string name="error_host_required">服务器地址不能为空</string>
     <string name="error_port_invalid">端口号无效</string>
     <string name="error_password_required">密码不能为空</string>
-    <string name="config_saved">配置已保存</string>
-    <string name="changes_cancelled">已取消更改</string>
 
     <!-- About Fragment -->
     <string name="app_icon_description">应用图标</string>
@@ -97,11 +83,10 @@
     <string name="not_measured">尚未检测</string>
     <string name="copy">复制</string>
     <string name="clear">清空</string>
-    <string name="refresh">刷新</string>
     <string name="no_logs">暂无日志。</string>
     <string name="logs_failed">无法读取或清空日志，请重试。</string>
     <string name="elapsed">耗时：%1$d ms</string>
-    <string name="packets">%1$d 个数据包</string>
+    <string name="packets">数据包 %1$d</string>
     <string name="connected_duration">已连接 %1$s</string>
     <string name="uplink">上行</string>
     <string name="downlink">下行</string>

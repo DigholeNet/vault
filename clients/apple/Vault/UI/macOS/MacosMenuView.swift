@@ -49,8 +49,8 @@ struct MacosMenuView: View {
                appData.vpnStatus == .connected || (appData.vpnStatus == .connecting && appData.isRecovering) {
                 ConnectionDurationView(since: since)
             }
-            if appData.vpnStatus == .connected || appData.isRecovering, !appData.publicIp.isEmpty {
-                publicIp
+            if appData.vpnStatus == .connected || appData.isRecovering {
+                sessionAddresses
             }
             if appData.isRecovering {
                 Text(languageManager.tr("Network changed. Reconnecting…"))
@@ -199,79 +199,49 @@ struct MacosMenuView: View {
             .contentShape(Rectangle())
     }
 
-    private var publicIp: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "globe")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-                Text(languageManager.tr("Public IP"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    @ViewBuilder private var sessionAddresses: some View {
+        let addresses = appData.assignedIp.parsedIPv4AndIPv6()
+        let hasTunnelAddresses = addresses.ipv4 != nil || addresses.ipv6 != nil
+        if !appData.publicIp.isEmpty || hasTunnelAddresses {
+            VStack(alignment: .leading, spacing: 10) {
+                if !appData.publicIp.isEmpty {
+                    MacosStatusAddressRow(
+                        title: "WAN", address: appData.publicIp, symbol: "network", color: .accentColor
+                    )
+                }
+                if !appData.publicIp.isEmpty, hasTunnelAddresses { Divider() }
+                if hasTunnelAddresses {
+                    VStack(spacing: 8) {
+                        if let ipv4 = addresses.ipv4 {
+                            MacosStatusAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: .blue)
+                        }
+                        if let ipv6 = addresses.ipv6 {
+                            MacosStatusAddressRow(title: "IPv6", address: ipv6, symbol: "server.rack", color: .green)
+                        }
+                    }
+                }
             }
-            Text(verbatim: appData.publicIp)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var traffic: some View {
-        // Explicit cell widths keep live values from redistributing the grid.
-        // All values use the same font; large counters wrap instead of scaling.
-        Grid(alignment: .trailing, horizontalSpacing: 8, verticalSpacing: 2) {
-            GridRow {
-                Color.clear.frame(width: 72, height: 24)
-                trafficHeading("Uplink", symbol: "arrow.up.circle.fill", color: .blue)
-                trafficHeading("Downlink", symbol: "arrow.down.circle.fill", color: .green)
-            }
-            GridRow {
-                trafficLabel("VPN Rate")
-                trafficValue(PacketStats.formatBytes(appData.bytesSentPerSecond) + "/s")
-                trafficValue(PacketStats.formatBytes(appData.bytesReceivedPerSecond) + "/s")
-            }
-            GridRow {
-                trafficLabel("VPN Traffic")
-                trafficValue(PacketStats.formatBytes(appData.bytesSent))
-                trafficValue(PacketStats.formatBytes(appData.bytesReceived))
-            }
-            GridRow {
-                trafficLabel("Packets")
-                trafficValue(String(appData.packetsSent))
-                trafficValue(String(appData.packetsReceived))
-            }
+        HStack(spacing: 0) {
+            MacosTrafficColumn(
+                title: "Uplink", symbol: "arrow.up.circle.fill", color: .blue,
+                packets: appData.packetsSent, bytes: appData.bytesSent, rate: appData.bytesSentPerSecond
+            )
+            Divider().frame(height: 70)
+            MacosTrafficColumn(
+                title: "Downlink", symbol: "arrow.down.circle.fill", color: .green,
+                packets: appData.packetsReceived, bytes: appData.bytesReceived, rate: appData.bytesReceivedPerSecond
+            )
         }
-        .font(.system(size: NSFont.systemFontSize))
         .transaction { $0.animation = nil }
         .frame(maxWidth: .infinity)
-    }
-
-    private func trafficHeading(_ title: String, symbol: String, color: Color) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: symbol).foregroundStyle(color)
-            Text(languageManager.tr(title)).foregroundStyle(.secondary)
-        }
-        .frame(width: 100, height: 24, alignment: .trailing)
-    }
-
-    private func trafficLabel(_ title: String) -> some View {
-        Text(languageManager.tr(title))
-            .foregroundStyle(.secondary)
-            .frame(width: 72, height: 34, alignment: .leading)
-    }
-
-    private func trafficValue(_ value: String) -> some View {
-        Text(verbatim: value)
-            .monospacedDigit()
-            .lineLimit(2)
-            .multilineTextAlignment(.trailing)
-            .frame(width: 100, height: 34, alignment: .trailing)
     }
 
     private func toggleConnection() {
@@ -280,6 +250,68 @@ struct MacosMenuView: View {
 
     private func open(_ id: String) { dismiss()
         WindowManager.shared.showWindow(withIdentifier: id)
+    }
+}
+
+struct MacosStatusAddressRow: View {
+    let title: String
+    let address: String
+    let symbol: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 13))
+                .foregroundStyle(color)
+                .frame(width: 16)
+            Text(verbatim: title)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+            Text(verbatim: address)
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+}
+
+private struct MacosTrafficColumn: View {
+    let title: String
+    let symbol: String
+    let color: Color
+    let packets: UInt64
+    let bytes: UInt64
+    let rate: UInt64
+    @EnvironmentObject var languageManager: LanguageManager
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: symbol)
+                    .font(.system(size: 18))
+                    .foregroundStyle(color)
+                Text(languageManager.tr(title))
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            Text(PacketStats.formatBytes(rate) + "/s")
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color)
+            Text(PacketStats.formatBytes(bytes))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Text(languageManager.tr("Packets") + " \(packets)")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
     }
 }
 

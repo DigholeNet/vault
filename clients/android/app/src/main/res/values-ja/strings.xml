@@ -14,34 +14,20 @@
     <string name="status_connecting">接続中…</string>
     <string name="status_tap_to_connect">タップして接続</string>
     <string name="status_tap_to_disconnect">タップして切断</string>
-    <string name="status_please_wait">お待ちください…</string>
     <string name="status_configure_first">サーバーを設定してください</string>
     <string name="status_error_prefix">エラー：%1$s</string>
-    <string name="status_error_starting">VPN の起動エラー：%1$s</string>
     <string name="toggle_vpn_description">VPN 切り替え</string>
-    <string name="ip_format">IPv4：%1$s</string>
-    <string name="ipv6_format">IPv6：%1$s</string>
-    <string name="status_public_ip">パブリック IP</string>
-    <string name="traffic_sent">↑ 送信：%1$s (%2$s/s)</string>
-    <string name="traffic_received">↓ 受信：%1$s (%2$s/s)</string>
 
     <!-- Configure Fragment -->
-    <string name="configure_title">設定</string>
     <string name="cancel_description">キャンセル</string>
     <string name="save_description">保存</string>
     <string name="server_host">サーバーアドレス</string>
-    <string name="server_host_hint">例：192.168.1.1</string>
     <string name="port">ポート</string>
-    <string name="port_default">9527</string>
     <string name="password">パスワード</string>
-    <string name="password_hint">パスワードを入力</string>
     <string name="dns_ipv4_servers">IPv4 DNS（カンマ区切り）</string>
     <string name="dns_ipv6_servers">IPv6 DNS（カンマ区切り）</string>
-    <string name="error_host_required">サーバーアドレスを入力してください</string>
     <string name="error_port_invalid">ポート番号が無効です</string>
     <string name="error_password_required">パスワードを入力してください</string>
-    <string name="config_saved">設定を保存しました</string>
-    <string name="changes_cancelled">変更をキャンセルしました</string>
 
     <!-- About Fragment -->
     <string name="app_icon_description">アプリアイコン</string>
@@ -97,11 +83,10 @@
 <string name="not_measured">未測定</string>
 <string name="copy">コピー</string>
 <string name="clear">消去</string>
-<string name="refresh">更新</string>
 <string name="no_logs">ログはありません。</string>
 <string name="logs_failed">ログを読み込みまたは消去できません。再試行してください。</string>
 <string name="elapsed">経過時間：%1$d ms</string>
-<string name="packets">%1$d パケット</string>
+<string name="packets">パケット %1$d</string>
 <string name="connected_duration">接続時間 %1$s</string>
 <string name="uplink">上り</string>
 <string name="downlink">下り</string>

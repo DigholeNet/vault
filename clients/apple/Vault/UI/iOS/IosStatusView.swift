@@ -60,22 +60,10 @@ struct IosStatusView: View {
                             if !appData.publicIp.isEmpty || hasTunnelIps {
                                 VStack(alignment: .leading, spacing: 14) {
                                     if !appData.publicIp.isEmpty {
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            HStack(spacing: 8) {
-                                                Image(systemName: "globe")
-                                                    .font(.system(size: 16, weight: .medium))
-                                                    .foregroundColor(.accentColor)
-                                                Text(languageManager.tr("Public IP"))
-                                                    .font(.system(size: 12))
-                                                    .foregroundColor(.secondary)
-                                            }
-                                            Text(verbatim: appData.publicIp)
-                                                .font(.system(size: 14, weight: .medium, design: .monospaced))
-                                                .lineLimit(1)
-                                                .minimumScaleFactor(0.75)
-                                                .textSelection(.enabled)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                        }
+                                        StatusAddressRow(
+                                            title: "WAN", address: appData.publicIp,
+                                            symbol: "network", color: .accentColor
+                                        )
                                     }
 
                                     if !appData.publicIp.isEmpty, hasTunnelIps {
@@ -85,10 +73,14 @@ struct IosStatusView: View {
                                     if hasTunnelIps {
                                         VStack(alignment: .leading, spacing: 8) {
                                             if let ipv4 = ips.ipv4 {
-                                                TunnelAddressRow(family: "IPv4", address: ipv4, color: .blue)
+                                                StatusAddressRow(
+                                                    title: "IPv4", address: ipv4, symbol: "server.rack", color: .blue
+                                                )
                                             }
                                             if let ipv6 = ips.ipv6 {
-                                                TunnelAddressRow(family: "IPv6", address: ipv6, color: .green)
+                                                StatusAddressRow(
+                                                    title: "IPv6", address: ipv6, symbol: "server.rack", color: .green
+                                                )
                                             }
                                         }
                                     }
@@ -127,26 +119,28 @@ struct IosStatusView: View {
     }
 }
 
-private struct TunnelAddressRow: View {
-    let family: String
+private struct StatusAddressRow: View {
+    let title: String
     let address: String
+    let symbol: String
     let color: Color
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "server.rack")
+            Image(systemName: symbol)
                 .font(.system(size: 13))
                 .foregroundColor(color)
                 .frame(width: 16)
-            Text(verbatim: family)
+            Text(verbatim: title)
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
-            Spacer(minLength: 8)
+                .fixedSize(horizontal: true, vertical: false)
             Text(verbatim: address)
                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                 .lineLimit(1)
                 .minimumScaleFactor(0.55)
                 .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 }

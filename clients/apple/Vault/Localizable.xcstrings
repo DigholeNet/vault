@@ -1,16 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "Public IP" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "公网 IP"
-          }
-        }
-      }
-    },
     "IPv4 DNS" : {
       "localizations": {
         "zh-Hans": {
@@ -77,36 +67,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "一款用于跨区域连接的安全 VPN 客户端。"
-          }
-        }
-      }
-    },
-    "VPN Client" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "VPN 客户端"
-          }
-        }
-      }
-    },
-    "VPN Rate" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "VPN 速率"
-          }
-        }
-      }
-    },
-    "VPN Traffic" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "VPN 流量"
           }
         }
       }
@@ -617,16 +577,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请输入服务器密码。"
-          }
-        }
-      }
-    },
-    "Enter valid DNS IP addresses, separated by commas." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请输入有效的 DNS IP 地址，多个地址用逗号分隔。"
           }
         }
       }
@@ -1291,16 +1241,6 @@
         }
       }
     },
-    "DNS server address separated by comma." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "DNS 服务器地址，用逗号分隔。"
-          }
-        }
-      }
-    },
     "Host" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1467,16 +1407,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "系统扩展将在重启后生效。"
-          }
-        }
-      }
-    },
-    "Vault version : %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vault 版本：%@"
           }
         }
       }

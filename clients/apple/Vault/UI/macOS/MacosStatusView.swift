@@ -233,30 +233,32 @@ private struct MacosConnectionDiagnostics: View {
     }
 
     private var sessionAddresses: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "network").foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(languageManager.tr("Tunnel")).font(.caption).foregroundStyle(.secondary)
-                    Text(appData.vpnStatus == .connected || appData.isRecovering
-                        ?
-                        (appData.assignedIp.isEmpty ? languageManager.tr("Waiting for server-assigned addresses…") : appData.assignedIp
-                            .replacingOccurrences(
-                                of: "/",
-                                with: "  ·  "
-                            ))
-                        : languageManager.tr("Disconnected"))
-                        .font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
+        let active = appData.vpnStatus == .connected || appData.isRecovering
+        let addresses = appData.assignedIp.parsedIPv4AndIPv6()
+        let hasTunnelAddresses = addresses.ipv4 != nil || addresses.ipv6 != nil
+        return VStack(alignment: .leading, spacing: 10) {
+            if active, !appData.publicIp.isEmpty {
+                MacosStatusAddressRow(
+                    title: "WAN", address: appData.publicIp, symbol: "network", color: .accentColor
+                )
+                Divider()
             }
-            if !appData.publicIp.isEmpty {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "globe").foregroundStyle(Color.accentColor)
+            if active, hasTunnelAddresses {
+                VStack(spacing: 8) {
+                    if let ipv4 = addresses.ipv4 {
+                        MacosStatusAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: .blue)
+                    }
+                    if let ipv6 = addresses.ipv6 {
+                        MacosStatusAddressRow(title: "IPv6", address: ipv6, symbol: "server.rack", color: .green)
+                    }
+                }
+            } else {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "server.rack")
+                        .font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 16)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(languageManager.tr("Public IP")).font(.caption).foregroundStyle(.secondary)
-                        Text(verbatim: appData.publicIp)
+                        Text(languageManager.tr("Tunnel")).font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(languageManager.tr(active ? "Waiting for server-assigned addresses…" : "Disconnected"))
                             .font(.system(.body, design: .monospaced)).textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }

@@ -14,34 +14,20 @@
     <string name="status_connecting">Conectando…</string>
     <string name="status_tap_to_connect">Toca para conectar</string>
     <string name="status_tap_to_disconnect">Toca para desconectar</string>
-    <string name="status_please_wait">Por favor espera…</string>
     <string name="status_configure_first">Por favor configura el servidor primero</string>
     <string name="status_error_prefix">Error: %1$s</string>
-    <string name="status_error_starting">Error al iniciar VPN: %1$s</string>
     <string name="toggle_vpn_description">Cambiar VPN</string>
-    <string name="ip_format">IPv4: %1$s</string>
-    <string name="ipv6_format">IPv6: %1$s</string>
-    <string name="status_public_ip">IP pública</string>
-    <string name="traffic_sent">↑ Enviado: %1$s (%2$s/s)</string>
-    <string name="traffic_received">↓ Recibido: %1$s (%2$s/s)</string>
 
     <!-- Configure Fragment -->
-    <string name="configure_title">Configuración</string>
     <string name="cancel_description">Cancelar</string>
     <string name="save_description">Guardar</string>
     <string name="server_host">Servidor</string>
-    <string name="server_host_hint">ej. 192.168.1.1</string>
     <string name="port">Puerto</string>
-    <string name="port_default">9527</string>
     <string name="password">Contraseña</string>
-    <string name="password_hint">Ingresa contraseña</string>
     <string name="dns_ipv4_servers">DNS IPv4 (separados por coma)</string>
     <string name="dns_ipv6_servers">DNS IPv6 (separados por coma)</string>
-    <string name="error_host_required">El servidor es requerido</string>
     <string name="error_port_invalid">Número de puerto inválido</string>
     <string name="error_password_required">La contraseña es requerida</string>
-    <string name="config_saved">Configuración guardada</string>
-    <string name="changes_cancelled">Cambios cancelados</string>
 
     <!-- About Fragment -->
     <string name="app_icon_description">Icono de la app</string>
@@ -97,11 +83,10 @@
 <string name="not_measured">Sin medir</string>
 <string name="copy">Copiar</string>
 <string name="clear">Borrar</string>
-<string name="refresh">Actualizar</string>
 <string name="no_logs">No hay registros.</string>
 <string name="logs_failed">No se pudieron leer o borrar los registros. Inténtalo de nuevo.</string>
 <string name="elapsed">Tiempo: %1$d ms</string>
-<string name="packets">Paquetes: %1$d</string>
+<string name="packets">Paquetes %1$d</string>
 <string name="connected_duration">Conectado %1$s</string>
 <string name="uplink">Subida</string>
 <string name="downlink">Bajada</string>

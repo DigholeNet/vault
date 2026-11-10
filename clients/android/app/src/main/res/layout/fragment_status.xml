@@ -4,8 +4,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true"
-    android:background="@color/status_background">
+    android:fillViewport="true">
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -63,7 +62,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:visibility="gone"
-            app:cardBackgroundColor="?attr/colorSurfaceVariant"
+            app:cardBackgroundColor="@color/vault_surface"
             app:cardCornerRadius="16dp"
             app:cardElevation="0dp"
             app:cardMaxElevation="0dp"
@@ -78,42 +77,39 @@
                     android:id="@+id/publicIpSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
                     android:visibility="gone">
-                    <LinearLayout
+                    <ImageView
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:importantForAccessibility="no"
+                        android:src="@drawable/ic_public_ip"
+                        app:tint="?attr/colorPrimary"/>
+                    <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-                        <ImageView
-                            android:layout_width="18dp"
-                            android:layout_height="18dp"
-                            android:importantForAccessibility="no"
-                            android:src="@drawable/ic_public_ip"
-                            app:tint="?attr/colorPrimary"/>
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="8dp"
-                            android:includeFontPadding="false"
-                            android:text="@string/status_public_ip"
-                            android:textColor="?android:attr/textColorSecondary"
-                            android:textSize="12sp"/>
-                    </LinearLayout>
+                        android:layout_marginStart="8dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/status_wan"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12sp"/>
                     <TextView
                         android:id="@+id/tvPublicIpAddress"
-                        android:layout_width="match_parent"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
                         android:ellipsize="none"
                         android:fontFamily="monospace"
+                        android:gravity="end"
                         android:includeFontPadding="false"
                         android:maxLines="1"
                         android:textColor="?attr/colorOnSurface"
                         android:textIsSelectable="true"
                         android:textSize="14sp"
                         app:autoSizeMaxTextSize="14sp"
-                        app:autoSizeMinTextSize="10sp"
+                        app:autoSizeMinTextSize="7.5sp"
                         app:autoSizeStepGranularity="0.5sp"
                         app:autoSizeTextType="uniform"/>
                 </LinearLayout>
@@ -167,7 +163,7 @@
                             android:textIsSelectable="true"
                             android:textSize="14sp"
                             app:autoSizeMaxTextSize="14sp"
-                            app:autoSizeMinTextSize="10sp"
+                            app:autoSizeMinTextSize="7.5sp"
                             app:autoSizeStepGranularity="0.5sp"
                             app:autoSizeTextType="uniform"/>
                     </LinearLayout>
@@ -209,7 +205,7 @@
                             android:textIsSelectable="true"
                             android:textSize="14sp"
                             app:autoSizeMaxTextSize="14sp"
-                            app:autoSizeMinTextSize="10sp"
+                            app:autoSizeMinTextSize="7.5sp"
                             app:autoSizeStepGranularity="0.5sp"
                             app:autoSizeTextType="uniform"/>
                     </LinearLayout>
