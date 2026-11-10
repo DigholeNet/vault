@@ -12,6 +12,10 @@ Notable changes to Vault are recorded here using the
 - Automatic Linux DNS through NetworkManager-managed resolv.conf, with current-state regeneration on network changes and exit
 - Server-observed client public/egress IP in compatible handshake responses, with status display on Android, iOS and macOS and handshake-success logging on Linux
 
+### Fixed
+
+- Repeated ICMP Redirect messages during IPv4 client-to-client relay
+
 ## [0.1.0] - 2026-11-10
 
 Initial public release.

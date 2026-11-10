@@ -183,10 +183,8 @@ File locations (Debian and RPM):
 
 ## Network configuration
 
-The supernode automatically enables host-wide forwarding for each configured
-address family when needed (below). It never disables forwarding on shutdown.
-On startup it sets redirect switches to zero on its own new TUN interface.
-If global IPv4 redirect sending remains enabled, it warns and continues startup. For both IPv4 and IPv6 it installs:
+The server configures [host forwarding](#automatic-host-forwarding) and installs
+the following rules for each configured address family:
 
 - MASQUERADE rules restricted to the VPN source CIDR and routed exit interface
 - FORWARD rules restricted to the TUN interface and VPN CIDR, including outbound
@@ -200,12 +198,11 @@ Exits are taken from usable routes exposed by Linux for the configured address
 families, including default, connected and static routes over physical or virtual
 interfaces. Loopback, the server's TUN, rejected routes and IPv6 local/multicast
 routes are excluded. LAN-only deployments do not require a default route.
-Routes must be present when the server starts; restart after changing exit interfaces. A missing egress interface or a failed sysctl/firewall
-command aborts startup.
+Routes must be present when the server starts; restart after changing exit
+interfaces. A missing egress interface or a failed firewall command aborts startup.
 Partial startup failures and normal shutdown remove only rules added by this
 instance and restore its TUN-local tunables if they still have the applied values.
-Enabled forwarding and adjusted upstream RA settings remain in place on
-success, failure, and shutdown. After SIGKILL/OOM, inspect firewall rules manually.
+After SIGKILL/OOM, inspect firewall rules manually.
 
 The server exclusively creates a new, non-persistent TUN. An existing interface,
 including a pre-created persistent TUN, is rejected; configure an unused `iface`
@@ -214,8 +211,7 @@ after SIGKILL. For IPv4, the server sets only this TUN's `rp_filter=1`; global
 `all`/`default` and physical-interface values remain unchanged. Linux uses
 `max(all, interface)`, so an administrator's global `all=2` retains effective loose
 validation. Authenticated client packets still undergo the server's explicit
-source-IP check against their assigned addresses. IPv6-only setups do not change
-IPv4 reverse-path settings.
+source-IP check against their assigned addresses.
 
 ## Automatic host forwarding
 
@@ -224,11 +220,19 @@ At startup, the server enables `net.ipv4.ip_forward=1` for an IPv4 pool and
 configuration is required, including after reboot. Startup fails if a required
 sysctl cannot be read or written.
 
+For IPv4, it then sets `net.ipv4.conf.all.send_redirects=0` and disables redirect
+sending on its TUN. Both switches must be zero to prevent ICMP Redirect messages
+during client-to-client relay; `default` and other interfaces keep their own
+redirect settings. IPv6-only setups leave IPv4 settings unchanged.
+
 Before enabling IPv6 forwarding, the server changes `accept_ra=1` to
 `accept_ra=2` on detected exit interfaces to preserve Router Advertisement
-reception in router mode. Explicitly disabled RA (`0`) stays disabled.
-Forwarding and uplink RA changes are not rolled back, even if startup later
-fails, because other services may depend on them.
+reception in router mode. Explicitly disabled RA (`0`) stays disabled. It also
+disables IPv6 redirect acceptance on its TUN.
+
+Forwarding, global IPv4 redirect, and uplink RA changes are not rolled back,
+even if startup later fails, because other services or server instances may
+depend on them.
 
 Changing IPv4 `ip_forward` resets other IPv4 settings to host/router defaults.
 Hosts with custom IPv4 tunables can still provision forwarding before applying
@@ -236,6 +240,7 @@ those tunables using `/etc/sysctl.d/90-vault-forwarding.conf`:
 
 ```ini
 net.ipv4.ip_forward = 1
+net.ipv4.conf.all.send_redirects = 0
 # For an RA-dependent IPv6 uplink, replace eth0 with the actual interface:
 net.ipv6.conf.eth0.accept_ra = 2
 net.ipv6.conf.all.forwarding = 1
@@ -244,7 +249,8 @@ net.ipv6.conf.all.forwarding = 1
 Apply optional persistent configuration with
 `sudo sysctl -p /etc/sysctl.d/90-vault-forwarding.conf`.
 If a network manager owns these settings, configure it consistently so it does
-not disable forwarding while the server is running.
+not disable forwarding or re-enable the global IPv4 redirect switch while the
+server is running.
 
 ## Security considerations
 

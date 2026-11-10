@@ -156,13 +156,10 @@ ipv4 = "192.168.10.0/24"
 # ipv6 = "fd00::/96"  # optional IPv6 pool
 ```
 
-The daemon automatically enables host forwarding for each configured address
-family. Before enabling IPv6 forwarding, it changes detected exit interfaces
-from `accept_ra=1` to `accept_ra=2` to preserve Router Advertisement reception.
-These global changes remain after shutdown or a later startup failure. Hosts
-with custom sysctl settings should review
+The daemon configures forwarding and VPN networking automatically. Some host-wide
+settings remain changed after shutdown or a later startup failure; see
 [automatic host forwarding](supernode/README.md#automatic-host-forwarding)
-before starting the service.
+for details and custom sysctl configuration.
 
 ```bash
 sudo systemctl enable --now supernode
