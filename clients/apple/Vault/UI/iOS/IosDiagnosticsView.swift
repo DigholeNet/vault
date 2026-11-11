@@ -19,8 +19,7 @@ struct IosDiagnosticsView: View {
                 Text(tr("Runtime Logs")).tag(1)
             }.pickerStyle(.segmented).labelsHidden()
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
-            if tab == 0 { checks }
-            else { logs }
+            if tab == 0 { checks } else { logs }
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(tr("Diagnostics"))
@@ -28,8 +27,7 @@ struct IosDiagnosticsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if tab == 0 {
-                    if model.running { ProgressView().accessibilityLabel(tr("Running Diagnostics...")) }
-                    else {
+                    if model.running { ProgressView().accessibilityLabel(tr("Running Diagnostics...")) } else {
                         Button(tr(model.result == nil ? "Start" : "Run Again")) {
                             model.run(using: vpnManager, connected: appData.vpnStatus == .connected)
                         }.disabled(appData.vpnStatus != .connected)
@@ -46,8 +44,7 @@ struct IosDiagnosticsView: View {
     private var checks: some View {
         List {
             Section {
-                if model.running || model.result != nil { resultHeader }
-                else {
+                if model.running || model.result != nil { resultHeader } else {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Check your connection")).font(.headline)
                         Text(tr(appData.vpnStatus == .connected
@@ -60,8 +57,7 @@ struct IosDiagnosticsView: View {
             Section {
                 ForEach(DiagnosticsPresentation.visibleChecks(model.result), id: \.self) { id in
                     let probes = (model.result?.probes ?? []).filter { $0.stage == id }
-                    if probes.isEmpty { checkRow(id) }
-                    else {
+                    if probes.isEmpty { checkRow(id) } else {
                         DisclosureGroup {
                             if DiagnosticsPresentation.pingCheckIDs.contains(id) {
                                 Text(tr(DiagnosticsPresentation.pingNote))
@@ -125,8 +121,7 @@ struct IosDiagnosticsView: View {
 
     private var resultHeader: some View {
         HStack(alignment: .top, spacing: 12) {
-            if model.running { ProgressView().padding(.top, 4) }
-            else {
+            if model.running { ProgressView().padding(.top, 4) } else {
                 Image(systemName: model.passed ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                     .font(.title2).foregroundStyle(model.passed ? Color.green : .orange)
             }
@@ -152,8 +147,7 @@ struct IosDiagnosticsView: View {
     private func checkRow(_ id: String) -> some View {
         let row = DiagnosticsPresentation.checkRow(id, result: model.result, running: model.running)
         return HStack(spacing: 10) {
-            if row.active { ProgressView().frame(width: 22) }
-            else {
+            if row.active { ProgressView().frame(width: 22) } else {
                 Image(systemName: row.state == .passed ? "checkmark.circle.fill"
                     : (row.state == .failed ? "exclamationmark.circle.fill" : "minus.circle.fill"))
                     .foregroundStyle(row.state == .passed ? Color.green : (row.state == .failed ? .orange : .gray))

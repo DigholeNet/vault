@@ -7,7 +7,13 @@ import NetworkExtension
 import os.log
 import VaultCore
 
-typealias VpnStatus = VPNConnectionLifecycle.Phase
+typealias VpnStatus = VpnConnectionLifecycle.Phase
+
+struct ProviderOperation {
+    let id: UInt64
+    let preparing: Bool
+    let stopping: Bool
+}
 
 class VpnManager {
     let config: VaultConfig
@@ -37,9 +43,13 @@ class VpnManager {
     }
     #endif
     /// Serializes preparation, cancellation and teardown on both platforms.
-    private var connectionLifecycle = VPNConnectionLifecycle()
-    var providerOperation: (id: UInt64, preparing: Bool, stopping: Bool) {
-        (connectionLifecycle.generation, connectionLifecycle.isPreparing, connectionLifecycle.isStopping)
+    private var connectionLifecycle = VpnConnectionLifecycle()
+    var providerOperation: ProviderOperation {
+        ProviderOperation(
+            id: connectionLifecycle.generation,
+            preparing: connectionLifecycle.isPreparing,
+            stopping: connectionLifecycle.isStopping
+        )
     }
 
     private var connectInFlight: Bool { connectionLifecycle.isPreparing }
@@ -95,8 +105,11 @@ class VpnManager {
     private func logStage(_ stage: String, operation: UInt64, since started: TimeInterval, error: Error? = nil) {
         let elapsed = Int(((ProcessInfo.processInfo.systemUptime - started) * 1000).rounded())
         let message = "[operation:\(operation)] \(stage) durationMs=\(elapsed)"
-        if let error { Logger.network.errorAndFile("\(message) error=\(error.localizedDescription)") }
-        else { Logger.network.noticeAndFile(message) }
+        if let error {
+            Logger.network.errorAndFile("\(message) error=\(error.localizedDescription)")
+        } else {
+            Logger.network.noticeAndFile(message)
+        }
     }
 
     /// Pick this app's configuration from the list returned by
@@ -134,15 +147,7 @@ class VpnManager {
             stopResult = !connectionLifecycle.stopFailed
         }
         let oldStatus = appData.vpnStatus
-
-        let status: VpnStatus
-        switch manager.connection.status {
-        case .disconnected, .invalid: status = .disconnected
-        case .connecting, .reasserting: status = .connecting
-        case .connected: status = .connected
-        case .disconnecting: status = .disconnecting
-        @unknown default: status = vpnStatus
-        }
+        let status = presentationStatus(for: manager.connection.status)
         let unexpectedDisconnect = connectionLifecycle.observe(status, updateIntent: stopResult == nil)
         publishStatus(recovering: manager.connection.status == .reasserting)
 
@@ -150,12 +155,20 @@ class VpnManager {
 
         if self.vpnStatus == .connected {
             self.appData.connectionError = nil
-        } else if self.vpnStatus == .disconnected {
-            if unexpectedDisconnect {
-                self.appData.connectionError = "Connection ended unexpectedly. Check your network and server configuration."
-            }
+        } else if self.vpnStatus == .disconnected && unexpectedDisconnect {
+            self.appData.connectionError = "Connection ended unexpectedly. Check your network and server configuration."
         }
         if let stopResult { finishDisconnect(succeeded: stopResult) }
+    }
+
+    private func presentationStatus(for status: NEVPNStatus) -> VpnStatus {
+        switch status {
+        case .disconnected, .invalid: return .disconnected
+        case .connecting, .reasserting: return .connecting
+        case .connected: return .connected
+        case .disconnecting: return .disconnecting
+        @unknown default: return vpnStatus
+        }
     }
 
     private func publishStatus(recovering: Bool = false) {
@@ -178,7 +191,8 @@ class VpnManager {
             Logger.network.noticeAndFile(
                 """
                 VPN status: \(oldStatus) -> \(self.vpnStatus) (NEVPNStatus rawValue \
-                \(manager.connection.status.rawValue)) terminating=\(terminationInProgress) interfaces=\(FileLogger.tunnelInterfaceSummary())
+                \(manager.connection.status.rawValue)) terminating=\(terminationInProgress) \
+                interfaces=\(FileLogger.tunnelInterfaceSummary())
                 """
             )
             if self.vpnStatus == .connected {
@@ -319,6 +333,52 @@ class VpnManager {
         }
     }
 
+    private func makeLaunchConfiguration() -> TunnelLaunchConfiguration? {
+        // Defensive clamp: a port persisted before range validation
+        // existed must not trap UInt16(Int). Repair the stored value too.
+        let port = min(max(config.port, 1), 65535)
+        if port != config.port {
+            Logger.network.errorAndFile(
+                "Persisted port \(config.port) out of range, clamping to \(port)"
+            )
+            config.port = port
+        }
+        do {
+            return try TunnelLaunchConfiguration(
+                draft: config.connectionDraft,
+                id: config.id,
+                clearLogsToken: logPreferences.string(forKey: "clearLogsToken")
+            )
+        } catch {
+            Logger.network.errorAndFile("Invalid tunnel launch configuration: \(error)")
+            return nil
+        }
+    }
+
+    private func configureProviderManager(
+        _ manager: NETunnelProviderManager, launch: TunnelLaunchConfiguration
+    ) -> Bool {
+        guard let originConf = manager.protocolConfiguration as? NETunnelProviderProtocol else {
+            Logger.network.errorAndFile("Invalid protocol configuration type")
+            return false
+        }
+        #if os(macOS)
+        // Configs created by older app-extension builds lack this and
+        // keep launching the stale embedded appex.
+        originConf.providerBundleIdentifier = SystemExtensionManager.extensionBundleIdentifier
+        #endif
+        originConf.serverAddress = config.host
+        originConf.providerConfiguration = launch.providerConfiguration
+        manager.protocolConfiguration = originConf
+        manager.isEnabled = true
+        // Keep the tunnel up across suspends, network switches and
+        // extension crashes: without an on-demand rule the system never
+        // restarts a tunnel that died on its own.
+        manager.onDemandRules = [NEOnDemandRuleConnect()]
+        manager.isOnDemandEnabled = true
+        return true
+    }
+
     /// Completes on main after the profile save and reload settle.
     func loadAndCreateProviderManager(
         _ complete: @escaping (NETunnelProviderManager?, _ loaded: Bool) -> Void
@@ -328,11 +388,10 @@ class VpnManager {
         let loadStarted = ProcessInfo.processInfo.systemUptime
         Logger.network.noticeAndFile("[operation:\(operation)] Loading VPN configurations")
 
-        NETunnelProviderManager.loadAllFromPreferences {
-            [self] (managers, error) in
+        NETunnelProviderManager.loadAllFromPreferences { [self] managers, error in
             DispatchQueue.main.async {
                 self.logStage("VPN configurations loaded", operation: operation, since: loadStarted, error: error)
-                guard let managers = managers else {
+                guard let managers else {
                     Logger.network.errorAndFile(
                         "loadAllFromPreferences failed: \(error?.localizedDescription ?? "unknown")"
                     )
@@ -344,72 +403,24 @@ class VpnManager {
                 Logger.network.noticeAndFile(
                     "Loaded \(managers.count) VPN configuration(s): \(managers.compactMap { $0.localizedDescription })"
                 )
-                let manager: NETunnelProviderManager
-                if let existing = self.preferredManager(from: managers) {
-                    manager = existing
-                } else {
-                    manager = self.createProviderManager()
-                }
-
-                // Defensive clamp: a port persisted before range validation
-                // existed must not trap UInt16(Int). Repair the stored value too.
-                let port = min(max(self.config.port, 1), 65535)
-                if port != self.config.port {
-                    Logger.network.errorAndFile(
-                        "Persisted port \(self.config.port) out of range, clamping to \(port)"
-                    )
-                    self.config.port = port
-                }
-                let launch: TunnelLaunchConfiguration
-                do {
-                    launch = try TunnelLaunchConfiguration(
-                        draft: self.config.connectionDraft,
-                        id: self.config.id,
-                        clearLogsToken: self.logPreferences.string(forKey: "clearLogsToken")
-                    )
-                } catch {
-                    Logger.network.errorAndFile("Invalid tunnel launch configuration: \(error)")
+                let manager = self.preferredManager(from: managers) ?? self.createProviderManager()
+                guard let launch = self.makeLaunchConfiguration(),
+                      self.configureProviderManager(manager, launch: launch) else {
                     complete(nil, false)
                     return
                 }
-
-                guard let originConf =
-                    manager.protocolConfiguration as? NETunnelProviderProtocol else {
-                    Logger.network.errorAndFile("Invalid protocol configuration type")
-                    complete(nil, false)
-                    return
-                }
-                #if os(macOS)
-                // Configs created by older app-extension builds lack this and
-                // keep launching the stale embedded appex.
-                originConf.providerBundleIdentifier =
-                    SystemExtensionManager.extensionBundleIdentifier
-                #endif
-                originConf.serverAddress = self.config.host
-                originConf.providerConfiguration = launch.providerConfiguration
-                manager.protocolConfiguration = originConf
-                manager.isEnabled = true
-                // Keep the tunnel up across suspends, network switches and
-                // extension crashes: without an on-demand rule the system never
-                // restarts a tunnel that died on its own.
-                manager.onDemandRules = [NEOnDemandRuleConnect()]
-                manager.isOnDemandEnabled = true
 
                 let saveStarted = ProcessInfo.processInfo.systemUptime
                 Logger.network.noticeAndFile("[operation:\(operation)] Saving VPN configuration onDemand=true")
                 manager.saveToPreferences { error in
                     DispatchQueue.main.async {
                         self.logStage("VPN configuration save completed", operation: operation, since: saveStarted, error: error)
-                        if let error = error {
+                        if let error {
                             if let neError = error as? NEVPNError,
                                neError.code == .configurationReadWriteFailed {
-                                Logger.network.errorAndFile(
-                                    "User denied VPN configuration permission."
-                                )
+                                Logger.network.errorAndFile("User denied VPN configuration permission.")
                             } else {
-                                Logger.network.errorAndFile(
-                                    "Failed to save VPN configuration: \(error)"
-                                )
+                                Logger.network.errorAndFile("Failed to save VPN configuration: \(error)")
                             }
                             complete(nil, false)
                             return
@@ -571,8 +582,7 @@ extension VpnManager {
 
     private func completeStopIfPossible() {
         guard connectionLifecycle.isStopping else { return }
-        if let manager = activeVPN { updateVPNStatus(manager) }
-        else if connectionLifecycle.completeStopIfReady(tunnelDown: true) {
+        if let manager = activeVPN { updateVPNStatus(manager) } else if connectionLifecycle.completeStopIfReady(tunnelDown: true) {
             publishIdle()
             finishDisconnect(succeeded: !connectionLifecycle.stopFailed)
         }
@@ -659,8 +669,7 @@ extension VpnManager {
                 }
             } else { finish() }
         }
-        if let manager { stop(manager, nil) }
-        else { loadProviderManager(stop) }
+        if let manager { stop(manager, nil) } else { loadProviderManager(stop) }
     }
 
     /// A connecting session can still be allocating its utun inside nehelper.

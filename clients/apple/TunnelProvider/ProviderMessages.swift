@@ -36,27 +36,15 @@ extension PacketTunnelProvider {
         case .status:
             message.reply(providerStatus.flatMap { try? JSONEncoder().encode($0) })
         case .clearLogs:
-            guard let token = message.command?.token, !token.isEmpty else { message.reply(Data([0]))
-                return
-            }
-            do {
-                try clearLogsIfNeeded(token)
-                message.reply(Data([1]))
-            } catch { message.reply(Data([0])) }
+            handleClearLogsMessage(message)
         case .startupStatus:
             message.reply(Data([providerStarted ? 1 : 0]))
         case .diagnosticContext:
             message.reply(diagnosticContext().flatMap { try? JSONEncoder().encode($0) })
         case .diagnosticProbe:
-            guard let payload = message.command?.payload,
-                  let request = try? JSONDecoder().decode(AppleProbeRequest.self, from: payload)
-            else { message.reply(nil)
-                return
-            }
-            diagnostics.run(request, context: { [weak self] in self?.diagnosticContext() }, completionHandler: message.reply)
+            handleDiagnosticProbeMessage(message)
         case .cancelDiagnostics:
-            if let token = message.command?.token { diagnostics.cancel(run: token) }
-            message.reply(Data())
+            handleCancelDiagnosticsMessage(message)
         case .logs:
             DispatchQueue.global(qos: .utility).async {
                 let log = FileLogger.shared.readLog() ?? ""
@@ -65,5 +53,30 @@ extension PacketTunnelProvider {
         case nil:
             message.reply(nil)
         }
+    }
+
+    private func handleClearLogsMessage(_ message: ProviderMessage) {
+        guard let token = message.command?.token, !token.isEmpty else {
+            message.reply(Data([0]))
+            return
+        }
+        do {
+            try clearLogsIfNeeded(token)
+            message.reply(Data([1]))
+        } catch { message.reply(Data([0])) }
+    }
+
+    private func handleDiagnosticProbeMessage(_ message: ProviderMessage) {
+        guard let payload = message.command?.payload,
+              let request = try? JSONDecoder().decode(AppleProbeRequest.self, from: payload) else {
+            message.reply(nil)
+            return
+        }
+        diagnostics.run(request, context: { [weak self] in self?.diagnosticContext() }, completionHandler: message.reply)
+    }
+
+    private func handleCancelDiagnosticsMessage(_ message: ProviderMessage) {
+        if let token = message.command?.token { diagnostics.cancel(run: token) }
+        message.reply(Data())
     }
 }

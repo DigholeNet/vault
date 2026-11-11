@@ -93,9 +93,6 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 ```bash
 # Run unit tests
 ./gradlew test
-
-# Run instrumentation tests
-./gradlew connectedAndroidTest
 ```
 
 Direct Gradle builds default to version `0.1.1` / code `1`. For versioned

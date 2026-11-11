@@ -2,7 +2,7 @@ import Foundation
 
 /// Main-queue-owned serial operation gate. Preparation always settles before
 /// teardown starts; user actions only change the final connection intent.
-public struct VPNConnectionLifecycle {
+public struct VpnConnectionLifecycle {
     public enum Phase {
         case connecting
         case connected

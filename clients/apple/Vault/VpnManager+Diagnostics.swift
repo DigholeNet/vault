@@ -49,31 +49,10 @@ extension VpnManager {
                         context: context,
                         cancellation: cancellation,
                         execute: { request, remaining in
-                            let native = AppleProbeRequest(
-                                request: request,
-                                context: context,
-                                run: run,
-                                remainingMs: remaining
+                            self.executeDiagnosticRequest(
+                                request, remaining: remaining, context: context,
+                                run: run, cancellation: cancellation
                             )
-                            if request.scope == .application {
-                                return RustDiagnostics.execute(
-                                    native,
-                                    tunnelAddress: nil,
-                                    cancellation: cancellation
-                                ).rust
-                            }
-                            guard let body = try? JSONEncoder().encode(native),
-                                  let reply = self.diagnosticCommand(
-                                      .init(.diagnosticProbe, payload: body),
-                                      timeout: native.replyTimeout,
-                                      cancellation: cancellation
-                                  ),
-                                  let decoded = try? JSONDecoder().decode(
-                                      AppleProbeReply.self,
-                                      from: reply
-                                  ),
-                                  decoded.run == run, decoded.id == request.id else { return nil }
-                            return decoded.response.rust
                         },
                         onProgress: { progress in
                             DispatchQueue.main.async {
@@ -111,6 +90,29 @@ extension VpnManager {
                 }
             }
         }
+    }
+
+    private func executeDiagnosticRequest(
+        _ request: DiagnosticRequest, remaining: UInt64, context: AppleDiagnosticContext,
+        run: String, cancellation: DiagnosticsCancellation
+    ) -> DiagnosticResponse? {
+        let native = AppleProbeRequest(
+            request: request, context: context, run: run, remainingMs: remaining
+        )
+        if request.scope == .application {
+            return RustDiagnostics.execute(
+                native, tunnelAddress: nil, cancellation: cancellation
+            ).rust
+        }
+        guard let body = try? JSONEncoder().encode(native),
+              let reply = diagnosticCommand(
+                  .init(.diagnosticProbe, payload: body),
+                  timeout: native.replyTimeout,
+                  cancellation: cancellation
+              ),
+              let decoded = try? JSONDecoder().decode(AppleProbeReply.self, from: reply),
+              decoded.run == run, decoded.id == request.id else { return nil }
+        return decoded.response.rust
     }
 
     /// Wait only on a worker queue; reply and cancellation remain responsive on

@@ -9,7 +9,6 @@ import Security
 
 // Single-letter names (v/c/b) are deliberate in the byte-level parsing helpers
 // below; readability would suffer from longer names there.
-// swiftlint:disable identifier_name
 
 extension Logger {
     // Hardcoded instead of Bundle.main.bundleIdentifier: reading it performs
@@ -70,6 +69,7 @@ private func signingAppGroup() -> String? {
 public let kAppGroupIdentifier = kConfiguredAppGroup
 #endif
 
+// swiftlint:disable identifier_name
 extension Array where Element == UInt8 {
     public init?(hex: String) {
         self.init(reserveCapacity: hex.unicodeScalars.lazy.underestimatedCount)
@@ -108,3 +108,4 @@ extension Array where Element == UInt8 {
         }
     }
 }
+// swiftlint:enable identifier_name

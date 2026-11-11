@@ -55,12 +55,12 @@ final class DiagnosticsViewModel: ObservableObject {
                 self.progressReceived = ProcessInfo.processInfo.systemUptime
             }
             self.result = progress
-        }) { [weak self] reply in
+        }, completion: { [weak self] reply in
             guard let self, self.generation == token else { return }
             self.result = reply ?? DiagnosticsResult(message: "INCOMPLETE - provider returned no usable response")
             self.running = false
             self.completedAt = Date()
-        }
+        })
     }
 
     func cancel(using manager: VpnManager) {
@@ -107,8 +107,7 @@ final class DiagnosticsViewModel: ObservableObject {
                     setLoadingLogs(false)
                 }
             }
-            do { try await Task.sleep(for: .seconds(2)) }
-            catch { return }
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
         }
     }
 

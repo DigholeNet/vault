@@ -22,8 +22,7 @@ struct MacosStatusView: View {
                 if tab == 0 { MacosDiagnosticsAction(vpnManager: vpnManager, model: model) }
             }.padding(20)
             Divider()
-            if tab == 0 { MacosConnectionDiagnostics(vpnManager: vpnManager, model: model) }
-            else { logs }
+            if tab == 0 { MacosConnectionDiagnostics(vpnManager: vpnManager, model: model) } else { logs }
             Divider()
             HStack {
                 if tab == 1 {
@@ -71,9 +70,13 @@ struct MacosStatusView: View {
                 TextField(languageManager.tr("Search logs"), text: $model.logSearch)
                     .textFieldStyle(.roundedBorder)
             }.padding(16)
-            if model.loadingLogs { ProgressView(languageManager.tr("Loading logs...")).frame(maxWidth: .infinity, maxHeight: .infinity) }
-            else if model.filteredLogText.isEmpty {
-                Text(languageManager.tr("No matching logs.")).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            if model.loadingLogs {
+                ProgressView(languageManager.tr("Loading logs..."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.filteredLogText.isEmpty {
+                Text(languageManager.tr("No matching logs."))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else { LogTextView(text: model.filteredLogText, followsTail: followsTail) }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -202,8 +205,7 @@ private struct MacosConnectionDiagnostics: View {
 
     private var resultHeader: some View {
         HStack(alignment: .top, spacing: 14) {
-            if running { ProgressView().controlSize(.large).padding(8) }
-            else {
+            if running { ProgressView().controlSize(.large).padding(8) } else {
                 Image(systemName: passed ? "checkmark.circle.fill" : (incomplete ? "clock.fill" : "exclamationmark.circle.fill"))
                     .font(.system(size: 28)).foregroundStyle(passed ? Color.green : (incomplete ? .orange : .red))
             }
@@ -211,7 +213,7 @@ private struct MacosConnectionDiagnostics: View {
                 Text(languageManager.tr(DiagnosticsPresentation.resultTitle(result, running: running)))
                     .font(.system(size: 14, weight: .semibold))
                 if running, let startedAt {
-                    TimelineView(.periodic(from: .now, by: 0.1)) { context in
+                    TimelineView(.periodic(from: .now, by: 0.1)) { _ in
                         Text(languageManager
                             .tr("Elapsed") + "  \(max(0, Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))) ms")
                             .font(.body).monospacedDigit().foregroundStyle(.secondary)
@@ -280,8 +282,7 @@ private struct MacosConnectionDiagnostics: View {
             ForEach(DiagnosticsPresentation.visibleChecks(result), id: \.self) { id in
                 let row = DiagnosticsPresentation.checkRow(id, result: result, running: running)
                 HStack(spacing: 8) {
-                    if row.active { ProgressView().controlSize(.mini).frame(width: 14) }
-                    else {
+                    if row.active { ProgressView().controlSize(.mini).frame(width: 14) } else {
                         Image(systemName: row.state == .passed ? "checkmark.circle.fill"
                             : (row.state == .failed ? "xmark.circle.fill" : "minus.circle"))
                             .foregroundStyle(row.state == .passed ? Color.green : (row.state == .failed ? Color.red : .secondary))
@@ -297,7 +298,7 @@ private struct MacosConnectionDiagnostics: View {
                             .help(languageManager.tr(DiagnosticsPresentation.pingCheckIDs.contains(id)
                                     ? "Mean round-trip time of received replies." : "Mean request time, including failures and retries."))
                     } else if row.active {
-                        TimelineView(.periodic(from: .now, by: 0.1)) { context in
+                        TimelineView(.periodic(from: .now, by: 0.1)) { _ in
                             Text("\(max(0, Int((ProcessInfo.processInfo.systemUptime - progressReceived) * 1000))) ms")
                                 .font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)
                         }.frame(width: 100, alignment: .trailing)

@@ -116,7 +116,8 @@ extension SystemExtensionManager: OSSystemExtensionRequestDelegate {
         withExtension ext: OSSystemExtensionProperties
     ) -> OSSystemExtensionRequest.ReplacementAction {
         Logger.network.noticeAndFile(
-            "Replacing system extension \(existing.bundleShortVersion) (\(existing.bundleVersion)) with \(ext.bundleShortVersion) (\(ext.bundleVersion))"
+            "Replacing system extension \(existing.bundleShortVersion) (\(existing.bundleVersion)) "
+                + "with \(ext.bundleShortVersion) (\(ext.bundleVersion))"
         )
         return .replace
     }

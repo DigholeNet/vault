@@ -360,17 +360,16 @@ struct MacosConfigureView: View {
     }
 
     private func activate(_ control: Control) {
+        if togglePreference(for: control) { return }
+        if let value = copyValue(for: control) {
+            copy(value)
+            return
+        }
         switch control {
         case .section(let selected): select(selected)
         case .about: WindowManager.shared.showWindow(withIdentifier: "about")
-        case .launch: preferences.setLaunchAtLogin(!preferences.launchAtLogin)
-        case .autoConnect: preferences.autoConnect.toggle()
-        case .dock: preferences.showInDock.toggle()
         case .language: moveLanguage(by: 1)
         case .reveal: togglePasswordVisibility()
-        case .copyV4: if let ip = appData.assignedIp.parsedIPv4AndIPv6().ipv4 { copy(ip) }
-        case .copyV6: if let ip = appData.assignedIp.parsedIPv4AndIPv6().ipv6 { copy(ip) }
-        case .copyID: copy(config.id)
         case .retryPassword: retryPasswordStorage()
         case .restore: confirmReset = true
         case .save: save()
@@ -423,6 +422,27 @@ struct MacosConfigureView: View {
         draft = draft.normalized
         isError = false
         feedback = "Saved. Changes apply the next time you connect."
+    }
+}
+
+extension MacosConfigureView {
+    private func togglePreference(for control: Control) -> Bool {
+        switch control {
+        case .launch: preferences.setLaunchAtLogin(!preferences.launchAtLogin)
+        case .autoConnect: preferences.autoConnect.toggle()
+        case .dock: preferences.showInDock.toggle()
+        default: return false
+        }
+        return true
+    }
+
+    private func copyValue(for control: Control) -> String? {
+        switch control {
+        case .copyV4: return appData.assignedIp.parsedIPv4AndIPv6().ipv4
+        case .copyV6: return appData.assignedIp.parsedIPv4AndIPv6().ipv6
+        case .copyID: return config.id
+        default: return nil
+        }
     }
 }
 

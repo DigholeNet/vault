@@ -35,9 +35,13 @@ struct IosStatusView: View {
                         Toggle("", isOn: Binding(
                             get: { appData.vpnOn },
                             set: { enabled in
-                                if appData.vpnStatus == .disconnecting { vpnManager.disconnect() }
-                                else if enabled { vpnManager.connect() }
-                                else { vpnManager.disconnect() }
+                                if appData.vpnStatus == .disconnecting {
+                                    vpnManager.disconnect()
+                                } else if enabled {
+                                    vpnManager.connect()
+                                } else {
+                                    vpnManager.disconnect()
+                                }
                             }
                         ))
                         .toggleStyle(CustomToggleStyle())

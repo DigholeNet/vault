@@ -90,8 +90,7 @@ extension VpnManager {
                 reply(nil, reason: "sendError")
             }
         }
-        if let manager = self.activeVPN { send(manager) }
-        else {
+        if let manager = self.activeVPN { send(manager) } else {
             // Loading a saved profile solely to send a message can wake an
             // otherwise idle extension. Offline readers must use cached data.
             reply(nil, reason: "noActiveManager")

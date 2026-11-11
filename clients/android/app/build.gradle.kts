@@ -167,7 +167,6 @@ dependencies {
     testImplementation(libs.junit)
     // The Android JNA AAR omits desktop native libraries needed by JVM tests.
     testRuntimeOnly(libs.jna)
-    androidTestImplementation(libs.androidx.test.junit)
 }
 
 tasks.named("preBuild").configure { dependsOn(licenseAssets) }

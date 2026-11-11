@@ -98,13 +98,13 @@ struct IosConfigureView: View {
                         Button(action: {
                             isSecured.toggle()
 
-                        }) {
+                        }, label: {
                             Image(
                                 systemName: self.isSecured
                                     ? "eye.slash" : "eye"
                             )
                             .accentColor(.gray)
-                        }
+                        })
                     }
                     HStack {
                         Image(systemName: "arrow.up.arrow.down.circle")
@@ -199,12 +199,12 @@ struct IosConfigureView: View {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: {
                         selectedTab = 0
-                    }) {
+                    }, label: {
                         HStack {
                             Image(systemName: "chevron.left")
                         }
                         .foregroundColor(.blue)
-                    }
+                    })
                 }
             }
     }

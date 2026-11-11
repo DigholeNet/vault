@@ -2,7 +2,7 @@ import Testing
 @testable import VaultCore
 
 @Test func rapidToggleWaitsForStopCallbacks() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     for _ in 0 ..< 1000 {
         let connect = try #require({ state.beginConnect() }())
         #expect({ state.beginConnect() == nil }())
@@ -25,7 +25,7 @@ import Testing
 }
 
 @Test func cancellationCleanup() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     let connect = try #require({ state.beginConnect() }())
     let stop = try #require({ state.beginDisconnect() }())
     #expect({ !state.beginTeardown(stop) }())
@@ -48,7 +48,7 @@ import Testing
 }
 
 @Test func unexpectedDisconnect() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     #expect({ !state.observe(.disconnected) }())
     let token = try #require({ state.beginConnect() }())
     #expect({ !state.observe(.disconnected) }())
@@ -62,7 +62,7 @@ import Testing
 }
 
 @Test func connectionFailureRetry() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     let first = try #require({ state.beginConnect() }())
     #expect({ state.failConnect(first) }())
     let second = try #require({ state.beginConnect() }())
@@ -72,7 +72,7 @@ import Testing
 }
 
 @Test func disconnectCleanupRetry() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     let connect = try #require({ state.beginConnect() }())
     let stop = try #require({ state.beginDisconnect() }())
     #expect({ !state.beginTeardown(stop) }())
@@ -98,7 +98,7 @@ import Testing
 }
 
 @Test func idleDisconnectRetry() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     let stop = try #require({ state.beginDisconnect() }())
     #expect({ state.beginTeardown(stop) }())
     state.finishTeardown(stop, succeeded: false)
@@ -109,7 +109,7 @@ import Testing
 }
 
 @Test func latestIntentWaitsForSerialTeardown() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     let start = try #require({ state.beginConnect() }())
     let stop = try #require({ state.beginDisconnect() }())
     #expect(state.phase == .disconnecting)
@@ -128,7 +128,7 @@ import Testing
 }
 
 @Test func disconnectClearsReconnect() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     let stop = try #require({ state.beginDisconnect() }())
     #expect({ state.beginConnect() == nil }())
     #expect({ state.beginDisconnect() == nil }())
@@ -140,7 +140,7 @@ import Testing
 }
 
 @Test func stopTimeoutRelease() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     state.observe(.connected)
     let stop = try #require({ state.beginDisconnect() }())
     #expect({ state.beginTeardown(stop) }())
@@ -155,7 +155,7 @@ import Testing
 }
 
 @Test func onDemandDuringPreparation() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     let token = try #require({ state.beginConnect() }())
     state.observe(.connected)
     #expect(state.phase == .connecting)
@@ -170,7 +170,7 @@ import Testing
 }
 
 @Test func cancelDuringOnDemand() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     let token = try #require({ state.beginConnect() }())
     state.observe(.connected)
     let stop = try #require({ state.beginDisconnect() }())
@@ -185,7 +185,7 @@ import Testing
 }
 
 @Test func systemDisconnectDoesNotOwnTeardown() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     state.observe(.connected)
     state.observe(.disconnecting)
     #expect(state.phase == .disconnecting)
@@ -200,7 +200,7 @@ import Testing
 }
 
 @Test func failedStopObservationKeepsIntentCleared() throws {
-    var state = VPNConnectionLifecycle()
+    var state = VpnConnectionLifecycle()
     state.observe(.connected)
     let stop = try #require({ state.beginDisconnect() }())
     #expect({ state.beginTeardown(stop) }())

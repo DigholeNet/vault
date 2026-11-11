@@ -51,17 +51,7 @@ class VaultVpnService : VpnService() {
         const val ACTION_CONNECT = "net.dighole.vault.ACTION_CONNECT"
         const val ACTION_DISCONNECT = "net.dighole.vault.ACTION_DISCONNECT"
 
-        const val EXTRA_HOST = "host"
-        const val EXTRA_PORT = "port"
-        const val EXTRA_PASSWORD = "password"
         const val EXTRA_ID = "id"
-        const val EXTRA_DNS = "dns"
-        const val EXTRA_ASSIGNED_IPV4 = "assigned_ipv4"
-        const val EXTRA_ASSIGNED_IPV6 = "assigned_ipv6"
-        const val EXTRA_BYTES_SENT = "bytes_sent"
-        const val EXTRA_BYTES_RECEIVED = "bytes_received"
-        const val EXTRA_SEND_SPEED = "send_speed"
-        const val EXTRA_RECEIVE_SPEED = "receive_speed"
         const val PREFS_NAME = "vault_prefs"
 
         /** The service stays active during core reconnects and platform IP updates. */

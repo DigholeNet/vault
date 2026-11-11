@@ -207,7 +207,8 @@ enum TunnelNetworkSettings {
             ipv6Settings.excludedRoutes = excludedRoutesV6
             networkSettings.ipv6Settings = ipv6Settings
             Logger.network.noticeAndFile(
-                "IPv6 settings: interface=\(ipv6)/120 pool=\(ipv6Network)/\(ipv6Prefixlen) included=pool,::/0 excluded=\(excludedRoutesV6.map(\.destinationAddress).joined(separator: ","))"
+                "IPv6 settings: interface=\(ipv6)/120 pool=\(ipv6Network)/\(ipv6Prefixlen) "
+                    + "included=pool,::/0 excluded=\(excludedRoutesV6.map(\.destinationAddress).joined(separator: ","))"
             )
         }
 

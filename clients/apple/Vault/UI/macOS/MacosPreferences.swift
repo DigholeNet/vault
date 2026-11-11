@@ -61,8 +61,7 @@ final class MacosPreferences: ObservableObject {
 
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
-            if enabled { try SMAppService.mainApp.register() }
-            else { try SMAppService.mainApp.unregister() }
+            if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
             refreshLoginStatus()
             if SMAppService.mainApp.status == .requiresApproval {
                 launchError = "Approve Vault in System Settings → General → Login Items."

@@ -11,6 +11,8 @@ excluded:
 included:
   - Vault
   - VaultNetworkExtension
+  - TunnelProvider
+  - VaultSystemExtension
   - VaultCore/Sources
 
 # The UniFFI-generated API surface dictates some shapes we cannot change
@@ -46,3 +48,14 @@ type_body_length:
 
 force_unwrapping:
   severity: warning
+
+identifier_name:
+  excluded:
+    - "^id$"
+    - "^ip$"
+    - "^fd$"
+    - "^v4$"
+    - "^v6$"
+    - "^en$"
+    - "^dx$"
+    - "^dy$"
