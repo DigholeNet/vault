@@ -442,6 +442,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         completion?(NEVPNError(.connectionFailed))
     }
 
+    deinit {
+        pathMonitor?.cancel()
+        Logger.network.noticeAndFile("[session:\(sessionID)] Provider deinit interfaces=\(FileLogger.tunnelInterfaceSummary())")
+    }
+}
+
+extension PacketTunnelProvider {
     /// Logged so sleep/wake cycles (which suspend the process and make the
     /// heartbeat timers jump) are visible in the timeline. Synchronous
     /// writes: the process suspends as soon as sleep's handler returns.
@@ -465,13 +472,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    deinit {
-        pathMonitor?.cancel()
-        Logger.network.noticeAndFile("[session:\(sessionID)] Provider deinit interfaces=\(FileLogger.tunnelInterfaceSummary())")
-    }
-}
-
-extension PacketTunnelProvider {
     /// Keep path events on the main queue, alongside
     /// tunnel configuration completion. Ignore utun changes caused by us.
     private func startNetworkMonitoring() {

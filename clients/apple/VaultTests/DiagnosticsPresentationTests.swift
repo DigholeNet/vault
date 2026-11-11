@@ -66,7 +66,7 @@ final class DiagnosticsPresentationTests: XCTestCase {
         XCTAssertTrue(result.lines.contains { $0.contains("duration=12ms") })
     }
 
-    func testInvalidatedVerdictRetainsRustObservations() {
+    func testInvalidatedVerdict() {
         let native = snapshot()
         var result = DiagnosticsResult(snapshot: native)
         result.message = "INCOMPLETE - tunnel session changed; run diagnostics again"
@@ -78,7 +78,7 @@ final class DiagnosticsPresentationTests: XCTestCase {
         XCTAssertFalse(result.lines.isEmpty)
     }
 
-    func testEngineErrorPresentationWithoutSnapshot() {
+    func testEngineError() {
         let result = DiagnosticsResult(message: "INCOMPLETE - Rust diagnostics: unavailable")
         XCTAssertTrue(DiagnosticsPresentation.incomplete(result))
         XCTAssertNil(result.snapshot)
@@ -86,7 +86,7 @@ final class DiagnosticsPresentationTests: XCTestCase {
         XCTAssertTrue(result.summary.contains("unavailable"))
     }
 
-    func testRunningCancelledAndRouteIssueSummaries() {
+    func testResultSummaries() {
         var native = snapshot()
         native.running = true
         XCTAssertEqual(DiagnosticsResult(snapshot: native).summary, "RUNNING")
@@ -159,7 +159,7 @@ final class DiagnosticsPresentationTests: XCTestCase {
         XCTAssertTrue(DiagnosticsPresentation.filteredLogs(text, source: "app", search: "DNS").isEmpty)
     }
 
-    func testTunnelLogFilterIncludesCoreFailures() {
+    func testTunnelLogFilter() {
         let text = "[app] ready\n[ne] start\n[rust] handshake failed\n[rust] PANIC"
         XCTAssertEqual(
             DiagnosticsPresentation.filteredLogs(text, source: "ne", search: ""),

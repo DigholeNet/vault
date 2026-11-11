@@ -35,7 +35,7 @@ final class ConnectionDraftTests: XCTestCase {
 }
 
 extension ConnectionDraftTests {
-    func testDraftConvertsToSharedLaunchConfiguration() throws {
+    func testLaunchConfiguration() throws {
         var draft = ConnectionDraft()
         draft.host = " vpn.example.com "
         draft.port = "9527"

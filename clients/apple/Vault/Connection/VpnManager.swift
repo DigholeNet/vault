@@ -23,14 +23,10 @@ class VpnManager {
     private var observers: [NSObjectProtocol]
     private var observationGeneration: UInt64 = 0
     private var connectionFailurePending = false
-    private var statsTimer: Timer?
-    private var statsGeneration: UInt64 = 0
-    private var statsQueryInFlight = false
     private var connectionRequestedAt: TimeInterval?
     private var tunnelStartIssuedAt: TimeInterval?
     var logState = VpnLogState()
     var terminationInProgress = false
-    var lastMessageTrace: [ProviderCommand: (signature: String, time: TimeInterval)] = [:]
     var logPreferences = UserDefaults.standard
     private var stopCompletions: [(Bool) -> Void] = []
     var tunnelStopTimeout: TimeInterval = 15
@@ -55,6 +51,38 @@ class VpnManager {
     private var connectInFlight: Bool { connectionLifecycle.isPreparing }
 
     var diagnosticState = VpnDiagnosticState()
+    lazy var providerMessages = ProviderMessageClient(
+        context: { [weak self] in
+            ProviderMessageClient.Context(
+                operation: self?.providerOperation ?? ProviderOperation(id: 0, preparing: false, stopping: false),
+                status: self?.vpnStatus ?? .disconnected,
+                terminating: self?.terminationInProgress ?? false
+            )
+        },
+        canSend: { [weak self] command, manager in
+            self?.canSendProviderCommand(command, manager: manager) ?? false
+        },
+        deliver: { [weak self] message, manager, completion in
+            guard let self else {
+                completion(nil)
+                return
+            }
+            try self.deliverProviderMessage(message, manager: manager, completion: completion)
+        }
+    )
+    private lazy var statusPoller = ProviderStatusPoller(
+        activeConnection: { [weak self] in self?.activeVPN?.connection },
+        sessionGeneration: { [weak self] in self?.diagnosticState.generation ?? 0 },
+        send: { [weak self] request, timeout, completion in
+            guard let self else {
+                completion(nil)
+                return
+            }
+            self.sendProviderCommand(request, timeout: timeout, completion: completion)
+        },
+        apply: { [weak self] status in self?.appData.applyStatus(status) },
+        reset: { [weak self] in self?.appData.resetStats() }
+    )
     /// Lifecycle owns the phase; AppData is its published UI projection.
     var vpnStatus: VpnStatus { connectionLifecycle.phase }
 
@@ -68,7 +96,6 @@ class VpnManager {
     }
 
     deinit {
-        statsTimer?.invalidate()
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -117,8 +144,7 @@ class VpnManager {
     private func preferredManager(
         from managers: [NETunnelProviderManager]
     ) -> NETunnelProviderManager? {
-        return managers.first { $0.localizedDescription == "Vault" }
-            ?? managers.first
+        managers.first { $0.localizedDescription == "Vault" } ?? managers.first
     }
 
     /// Preference callbacks enter the app on main, like provider-message replies.
@@ -217,20 +243,6 @@ class VpnManager {
         }
     }
 
-    fileprivate func createProviderManager() -> NETunnelProviderManager {
-        let manager = NETunnelProviderManager()
-        let conf = NETunnelProviderProtocol()
-        conf.serverAddress = self.config.host
-        #if os(macOS)
-        // On macOS the tunnel provider is a system extension with its own
-        // bundle ID; without this the system looks for an embedded appex.
-        conf.providerBundleIdentifier = SystemExtensionManager.extensionBundleIdentifier
-        #endif
-        manager.protocolConfiguration = conf
-        manager.localizedDescription = "Vault"
-        return manager
-    }
-
     private func removeVpnStatusObservers() {
         observationGeneration &+= 1
         for observer in observers {
@@ -253,67 +265,12 @@ class VpnManager {
         observers.append(observer)
     }
 
-    /// The provider owns live addresses and counters on both platforms.
-    private func queryProviderStatus(completion: @escaping (ProviderStatus?) -> Void) {
-        guard let connection = activeVPN?.connection else { completion(nil)
-            return
-        }
-        let generation = diagnosticState.generation
-        sendProviderCommand(.init(.status), timeout: 3) { data in
-            guard self.diagnosticState.generation == generation,
-                  self.activeVPN?.connection === connection,
-                  connection.status == .connected || connection.status == .reasserting else {
-                completion(nil)
-                return
-            }
-            guard let data, let status = try? JSONDecoder().decode(ProviderStatus.self, from: data) else {
-                self.reportQueryFailure("provider status unavailable or invalid")
-                completion(nil)
-                return
-            }
-            self.reportQueryFailure(nil)
-            completion(status)
-        }
-    }
-
     private func startStatsMonitoring() {
-        guard statsTimer == nil else { return }
-        refreshStats()
-        statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            self?.refreshStats()
-        }
+        statusPoller.start()
     }
 
     func stopStatsMonitoring() {
-        statsGeneration &+= 1
-        statsTimer?.invalidate()
-        statsTimer = nil
-        statsQueryInFlight = false
-        appData.resetStats()
-    }
-
-    private func refreshStats() {
-        guard !statsQueryInFlight else { return }
-        statsQueryInFlight = true
-        let generation = statsGeneration
-        queryProviderStatus { [weak self] status in
-            guard let self, self.statsGeneration == generation else { return }
-            self.statsQueryInFlight = false
-            guard let status else { return }
-            self.appData.applyStatus(status)
-        }
-    }
-
-    /// Log only on state change; the query runs once per second.
-    private var lastQueryFailure: String?
-    private func reportQueryFailure(_ reason: String?) {
-        guard reason != lastQueryFailure else { return }
-        lastQueryFailure = reason
-        if let reason = reason {
-            Logger.network.errorAndFile("Provider status query failed: \(reason)")
-        } else {
-            Logger.network.noticeAndFile("Provider status query succeeded")
-        }
+        statusPoller.stop()
     }
 
     /// Load the existing VPN configuration, start observing status changes
@@ -331,6 +288,20 @@ class VpnManager {
             }
             completion?()
         }
+    }
+
+    private func createProviderManager() -> NETunnelProviderManager {
+        let manager = NETunnelProviderManager()
+        let configuration = NETunnelProviderProtocol()
+        configuration.serverAddress = config.host
+        #if os(macOS)
+        // On macOS the tunnel provider is a system extension with its own
+        // bundle ID; without this the system looks for an embedded appex.
+        configuration.providerBundleIdentifier = SystemExtensionManager.extensionBundleIdentifier
+        #endif
+        manager.protocolConfiguration = configuration
+        manager.localizedDescription = "Vault"
+        return manager
     }
 
     private func makeLaunchConfiguration() -> TunnelLaunchConfiguration? {
@@ -358,18 +329,18 @@ class VpnManager {
     private func configureProviderManager(
         _ manager: NETunnelProviderManager, launch: TunnelLaunchConfiguration
     ) -> Bool {
-        guard let originConf = manager.protocolConfiguration as? NETunnelProviderProtocol else {
+        guard let configuration = manager.protocolConfiguration as? NETunnelProviderProtocol else {
             Logger.network.errorAndFile("Invalid protocol configuration type")
             return false
         }
         #if os(macOS)
         // Configs created by older app-extension builds lack this and
         // keep launching the stale embedded appex.
-        originConf.providerBundleIdentifier = SystemExtensionManager.extensionBundleIdentifier
+        configuration.providerBundleIdentifier = SystemExtensionManager.extensionBundleIdentifier
         #endif
-        originConf.serverAddress = config.host
-        originConf.providerConfiguration = launch.providerConfiguration
-        manager.protocolConfiguration = originConf
+        configuration.serverAddress = config.host
+        configuration.providerConfiguration = launch.providerConfiguration
+        manager.protocolConfiguration = configuration
         manager.isEnabled = true
         // Keep the tunnel up across suspends, network switches and
         // extension crashes: without an on-demand rule the system never
