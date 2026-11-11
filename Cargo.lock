@@ -387,7 +387,6 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "dashmap",
- "hex",
  "pnet",
  "serde",
  "serde_json",

@@ -19,6 +19,7 @@ pub mod metrics;
 pub mod pake;
 mod peer;
 pub mod protocol;
+pub mod settings;
 mod signal;
 #[cfg(feature = "test")]
 pub mod test_utils;

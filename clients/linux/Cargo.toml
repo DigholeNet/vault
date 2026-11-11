@@ -12,7 +12,6 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 dashmap = {version = "6"}
-hex.workspace = true
 pnet = {version = "0.35"}
 serde.workspace = true
 serde_json = {version = "1"}

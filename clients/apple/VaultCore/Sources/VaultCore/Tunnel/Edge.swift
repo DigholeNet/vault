@@ -35,11 +35,11 @@ public final class Edge: @unchecked Sendable {
     /// Callbacks fire on Rust worker threads; the handlers here only forward.
     final class Callbacks: EdgeCallbacks, @unchecked Sendable {
         let onPackets: ([Data]) -> Void
-        let onIpAssigned: (String, String, String, Int32) -> Void
+        let onIpAssigned: (TunnelAssignment) -> Void
 
         init(
             onPackets: @escaping ([Data]) -> Void,
-            onIpAssigned: @escaping (String, String, String, Int32) -> Void
+            onIpAssigned: @escaping (TunnelAssignment) -> Void
         ) {
             self.onPackets = onPackets
             self.onIpAssigned = onIpAssigned
@@ -54,9 +54,9 @@ public final class Edge: @unchecked Sendable {
             }
         }
 
-        func onIpAssigned(ipv4: String, ipv4Mask: String, ipv6: String, ipv6Prefixlen: Int32) {
+        func onIpAssigned(assignment: TunnelAssignment) {
             autoreleasepool {
-                self.onIpAssigned(ipv4, ipv4Mask, ipv6, ipv6Prefixlen)
+                self.onIpAssigned(assignment)
             }
         }
 
@@ -83,7 +83,7 @@ public final class Edge: @unchecked Sendable {
         deviceName: String,
         platform: String,
         onPackets: @escaping (([Data]) -> Void),
-        onIpAssigned: @escaping ((String, String, String, Int32) -> Void)
+        onIpAssigned: @escaping ((TunnelAssignment) -> Void)
     ) throws {
         let callbacks = Callbacks(onPackets: onPackets, onIpAssigned: onIpAssigned)
         self.callbacks = callbacks

@@ -1,50 +1,39 @@
 // SPDX-License-Identifier: MIT
 package net.dighole.vault
 
-import android.util.Log
 import android.os.SystemClock
-import java.util.concurrent.atomic.AtomicLong
+import android.util.Log
+import net.dighole.vaultcore.uniffi.appendSharedLog
+import net.dighole.vaultcore.uniffi.clearSharedLogs
+import net.dighole.vaultcore.uniffi.readSharedLogs
+import net.dighole.vaultcore.uniffi.setLogFilePath
 import java.io.File
 import java.io.FileOutputStream
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Rolling file logger writing into the app's private files directory
- * (`filesDir/logs`, no permissions required), so field issues can be
- * diagnosed after the fact instead of relying on ephemeral logcat.
- *
- * Mirrors the Apple FileLogger design: a single current file (`vault.log`)
- * appended with O_APPEND semantics, rotated to one backup file
- * (`vault.prev.log`) when a Kotlin write observes [MAX_LOG_SIZE] exceeded.
- * Rust writes do not run this check, so this is not a strict file-size limit.
- *
- * Kotlin writes are queued on a background thread. Rust appends separately
- * and synchronously; those writes can block on filesystem I/O.
+ * Shared vault.log writes, rotation, reads and merges are owned by vault-core.
+ * This object only provides Android's background queue and the optional
+ * app-scoped external event log readable with authorized ADB.
  */
 object VaultFileLogger {
     private const val TAG = "VaultFileLogger"
     private const val MAX_LOG_SIZE = 1024 * 1024L
     private const val LOG_FILE_NAME = "vault.log"
-    private const val PREV_LOG_FILE_NAME = "vault.prev.log"
 
     private val writerThread = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "vault-file-logger").apply { isDaemon = true }
     }
-    private val timestampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
     @Volatile
     private var logFile: File? = null
 
-    @Volatile
-    private var prevLogFile: File? = null
-
     private var eventFile: File? = null
     private val eventSequence = AtomicLong()
 
-    @Suppress("TooGenericExceptionCaught") // A logger must never crash the app.
+    @Suppress("TooGenericExceptionCaught")
     @Synchronized
     fun init(context: android.content.Context) {
         if (logFile != null) return
@@ -52,7 +41,13 @@ object VaultFileLogger {
             val logsDir = File(context.filesDir, "logs")
             logsDir.mkdirs()
             logFile = File(logsDir, LOG_FILE_NAME)
-            prevLogFile = File(logsDir, PREV_LOG_FILE_NAME)
+            logFile?.absolutePath?.let { path ->
+                try {
+                    setLogFilePath(path)
+                } catch (error: UnsatisfiedLinkError) {
+                    Log.w(TAG, "vault-bridge native library unavailable", error)
+                }
+            }
             context.getExternalFilesDir(null)?.let { directory ->
                 val events = File(directory, "logs")
                 events.mkdirs()
@@ -64,44 +59,28 @@ object VaultFileLogger {
         }
     }
 
-    /** Absolute path of the current log file, null before [init]. */
     val currentLogPath: String?
         get() = logFile?.absolutePath
 
-    /**
-     * Append a single line to the log file. Safe to call from any thread;
-     * the actual write happens on the writer thread.
-     */
-    @Suppress("TooGenericExceptionCaught") // A logger must never crash the caller.
+    /** Queue Kotlin records; core appends synchronously on this writer thread. */
+    @Suppress("TooGenericExceptionCaught")
     fun log(priority: Int, tag: String, message: String, throwable: Throwable? = null) {
-        val file = logFile ?: return
         val level = when (priority) {
-            Log.VERBOSE -> "V"
-            Log.DEBUG -> "D"
-            Log.INFO -> "I"
-            Log.WARN -> "W"
-            Log.ERROR -> "E"
-            else -> "?"
+            Log.VERBOSE -> "VERBOSE"
+            Log.DEBUG -> "DEBUG"
+            Log.INFO -> "INFO"
+            Log.WARN -> "WARNING"
+            Log.ERROR -> "ERROR"
+            else -> "INFO"
         }
-        // Capture the time at the call site so lines reflect event order,
-        // not writer-queue delay. Formatting happens on the writer thread
-        // because SimpleDateFormat is not thread-safe.
-        val timestamp = System.currentTimeMillis()
         val stackTrace = throwable?.let { Log.getStackTraceString(it) }
         writerThread.execute {
             try {
-                val line = buildString {
-                    append('[').append(timestampFormat.format(Date(timestamp))).append("] [")
-                        .append(level).append('/').append(tag).append("] ")
-                        .append(message).append('\n')
-                    if (stackTrace != null) {
-                        append(stackTrace)
-                    }
+                val text = buildString {
+                    append(message)
+                    stackTrace?.let { append('\n').append(it) }
                 }
-                prevLogFile?.let { rotateIfNeeded(file, it) }
-                // append=true maps to O_APPEND, so appends never overwrite
-                // existing content even after a rotation race.
-                FileOutputStream(file, true).use { it.write(line.toByteArray(Charsets.UTF_8)) }
+                appendSharedLog(level, tag, text)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to write log line", e)
             }
@@ -109,7 +88,7 @@ object VaultFileLogger {
     }
 
     /** Low-volume lifecycle events; app-scoped copy is readable with authorized ADB. */
-    @Suppress("TooGenericExceptionCaught") // A logger must never crash the caller.
+    @Suppress("TooGenericExceptionCaught")
     fun event(tag: String, message: String) {
         val entry = "seq=${eventSequence.incrementAndGet()} elapsedMs=${SystemClock.elapsedRealtime()} " +
             "thread=${Thread.currentThread().name} [$tag] $message"
@@ -125,16 +104,16 @@ object VaultFileLogger {
         }
     }
 
-    /** Queue UI reads/clears behind Kotlin writes; append-only native writes remain safe. */
+    /** Queue UI reads/clears behind Kotlin writes; native writes remain append-safe. */
     suspend fun readLogs(): String = queuedLogs(false)
     suspend fun clearAndRead(): String = queuedLogs(true)
 
+    @Suppress("TooGenericExceptionCaught")
     private suspend fun queuedLogs(clear: Boolean): String = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
         writerThread.execute {
             try {
                 if (clear) {
-                    logFile?.let { FileOutputStream(it, false).use { stream -> stream.flush() } }
-                    prevLogFile?.delete()
+                    clearSharedLogs()
                     eventFile?.let { file ->
                         FileOutputStream(file, false).use { stream -> stream.flush() }
                         val backup = File(file.parentFile, "vpn-events.prev.log")
@@ -143,10 +122,10 @@ object VaultFileLogger {
                         }
                     }
                 }
-                val content = listOfNotNull(prevLogFile, logFile).filter { it.exists() }
-                    .joinToString("\n") { it.readText() }
+                val offsetSeconds = TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000
+                val content = readSharedLogs(offsetSeconds)
                 if (continuation.isActive) continuation.resumeWith(Result.success(content))
-            } catch (error: java.io.IOException) {
+            } catch (error: Exception) {
                 if (continuation.isActive) continuation.resumeWith(Result.failure(error))
             }
         }

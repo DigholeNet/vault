@@ -85,7 +85,7 @@ English interfaces on Android, iOS and macOS. Expand each gallery to see all pag
 `core/` (vault-core) owns all protocol behavior: packet encoding (protobuf), SPAKE2 password-authenticated key exchange (PAKE — no password-derived verifier crosses the wire, so captured handshakes do not enable offline dictionary attacks), X25519 ECDH key agreement with HKDF-derived session keys bound to the PAKE exchange, AEAD encryption (AES-128/256-GCM, ChaCha20-Poly1305 — negotiated by measured speed) with counter nonces and a sliding replay window, heartbeat keepalive (10s interval / 30s timeout), exponential-backoff reconnect (1s→60s), and traffic statistics. The entire client session state machine lives in `ClientSession`, so all platforms share the protocol and core recovery policy. OS lifecycle, routing and network discovery remain platform-specific; see the component READMEs.
 
 **2. Clients are thin platform adapters.**
-Each client only handles: TUN fd I/O, route/DNS configuration, OS VPN API integration, config persistence, and UI. Mobile platforms bridge to the core through UniFFI:
+The core also owns settings validation, peer-ID encoding, server-candidate resolution, typed tunnel assignments, DNS/MTU policy and shared file-log operations. Each client handles: TUN fd I/O, applying routes/DNS through OS APIs, OS VPN lifecycle, config persistence, and UI. Mobile platforms bridge to the core through UniFFI:
 
 | Client | Bridge | Artifact | Platform work |
 |---|---|---|---|

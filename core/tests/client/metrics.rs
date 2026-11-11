@@ -52,7 +52,7 @@ impl ClientCallbacks for DeliveryCallbacks {
         self.delivered.send(packets).unwrap();
     }
 
-    fn on_ip_assigned(&self, _: String, _: String, _: String, _: i32) -> Result<(), String> {
+    fn on_ip_assigned(&self, _: crate::settings::TunnelAssignment) -> Result<(), String> {
         Ok(())
     }
 

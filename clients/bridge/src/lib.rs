@@ -18,8 +18,10 @@ use vault_core::client::{
 use vault_core::logger::shared;
 
 pub mod diagnostics;
+pub mod logging;
 #[cfg(any(target_os = "android", target_vendor = "apple"))]
 mod network;
+pub mod settings;
 
 uniffi::setup_scaffolding!();
 
@@ -44,6 +46,17 @@ pub fn tunnel_parameters() -> TunnelParameters {
         dns_ipv4: vault_core::DEFAULT_DNS_IPV4.map(str::to_owned).into(),
         dns_ipv6: vault_core::DEFAULT_DNS_IPV6.map(str::to_owned).into(),
     }
+}
+
+/// Resolve server candidates before the platform tunnel is enabled. Call on a worker thread.
+#[uniffi::export]
+pub fn resolve_server_candidates(host: String, port: i32) -> Result<Vec<String>, VpnError> {
+    let port = u16::try_from(port).map_err(|_| VpnError::InternalError("invalid port".into()))?;
+    let candidates = vault_core::client::resolve_server_candidates(&host, port)?;
+    Ok(candidates
+        .iter()
+        .map(|address| address.ip().to_string())
+        .collect())
 }
 
 /// Point the Rust file logger at the app's shared vault.log so core/bridge
@@ -205,7 +218,7 @@ pub trait EdgeCallbacks: Send + Sync {
     /// because each FFI callback has a fixed cost.
     fn on_data_batch(&self, packets: Vec<Vec<u8>>);
     /// Configure the TUN initially or when addresses change, never for same-IP reconnects.
-    fn on_ip_assigned(&self, ipv4: String, ipv4_mask: String, ipv6: String, ipv6_prefixlen: i32);
+    fn on_ip_assigned(&self, assignment: settings::TunnelAssignment);
     fn on_error(&self, error: String);
     /// Android `VpnService.protect(fd)` hook, invoked once per (re)connect.
     /// Apple platforms do not need it (traffic from the Network Extension
@@ -250,14 +263,10 @@ impl ClientCallbacks for CallbackAdapter {
 
     fn on_ip_assigned(
         &self,
-        ipv4: String,
-        ipv4_mask: String,
-        ipv6: String,
-        ipv6_prefixlen: i32,
+        assignment: vault_core::settings::TunnelAssignment,
     ) -> Result<(), String> {
         match catch_unwind(AssertUnwindSafe(|| {
-            self.inner
-                .on_ip_assigned(ipv4, ipv4_mask, ipv6, ipv6_prefixlen)
+            self.inner.on_ip_assigned(assignment.into())
         })) {
             Ok(()) => Ok(()),
             Err(payload) => {
@@ -508,7 +517,7 @@ mod tests {
         fn protect_socket(&self, _: i32) -> bool {
             true
         }
-        fn on_ip_assigned(&self, _: String, _: String, _: String, _: i32) {
+        fn on_ip_assigned(&self, _: settings::TunnelAssignment) {
             self.entered.send(()).unwrap();
             // On a failed lock probe, skip re-entry so the test can fail
             // cleanly rather than leaving a permanently deadlocked worker.

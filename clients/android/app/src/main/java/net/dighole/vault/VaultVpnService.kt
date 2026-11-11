@@ -22,13 +22,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import net.dighole.vault.data.parseConfigList
 import net.dighole.vault.data.readVaultConfig
 import net.dighole.vaultcore.Edge
 import net.dighole.vaultcore.EdgeConfig
 import net.dighole.vaultcore.PeerId
+import net.dighole.vaultcore.uniffi.EdgeSettings
 import net.dighole.vaultcore.uniffi.VpnException
+import net.dighole.vaultcore.uniffi.resolveServerCandidates
 import net.dighole.vaultcore.uniffi.setFdBlocking
+import net.dighole.vaultcore.uniffi.validateEdgeSettings
 import java.io.File
 import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
@@ -40,13 +42,6 @@ class VaultVpnService : VpnService() {
     companion object {
         const val TAG = "VaultVpnService"
         val VPN_MTU: Int get() = TunnelPolicy.mtuMax
-
-        // Fixed per-packet tunnel overhead: outer IPv6 header (40) + UDP (8)
-        // + counter (8) + AEAD tag (16) + packet type (1).
-        val TUNNEL_OVERHEAD: Int get() = TunnelPolicy.overhead
-
-        // Lower bound for the tunnel MTU (IPv6 minimum MTU).
-        val MIN_VPN_MTU: Int get() = TunnelPolicy.mtuMin
 
         const val ACTION_CONNECT = "net.dighole.vault.ACTION_CONNECT"
         const val ACTION_DISCONNECT = "net.dighole.vault.ACTION_DISCONNECT"
@@ -86,6 +81,7 @@ class VaultVpnService : VpnService() {
     )
 
     private var tunnelMtu: Int = VPN_MTU
+    private var underlyingLinkMtu: Int? = null
     private var lastUnderlyingTransport: Int? = null
 
     private var connectedEvent: VpnStatusEvent.Connected? = null
@@ -209,29 +205,24 @@ class VaultVpnService : VpnService() {
                     return@launch
                 }
                 Log.d(TAG, "Service config loaded")
-                if (config.host.isEmpty() || config.password.isEmpty()) {
-                    sessionGate.update(sessionToken) {
-                        Log.e(TAG, "Vault config incomplete")
-                        emitVpnEvent(VpnStatusEvent.Error("Configuration incomplete"))
-                        stopSelf()
-                    }
-                    return@launch
-                }
-                val host = config.host
-                val port = config.port
-                val password = config.password
+                val validated = validateEdgeSettings(EdgeSettings(
+                    host = config.host,
+                    port = config.port.toString(),
+                    password = config.password,
+                    dnsIpv4 = config.dnsIpv4,
+                    dnsIpv6 = config.dnsIpv6,
+                    mtu = config.mtu,
+                    probeDomains = config.probeDomains
+                ))
                 if (!sessionGate.update(sessionToken) {
-                    SettingsValidation.mtuValue(config.mtu)?.let { tunnelMtu = it }
+                    tunnelMtu = TunnelPolicy.mtu(underlyingLinkMtu, validated.mtuCap?.toInt())
+                    serverHost = validated.host
+                    dnsIpv4List = validated.dnsIpv4
+                    dnsIpv6List = validated.dnsIpv6
+                    (application as VaultApplication).diagnosticDomains = validated.probeDomains
                 }) return@launch
 
-                if (!sessionGate.update(sessionToken) {
-                    serverHost = host
-                    dnsIpv4List = parseConfigList(config.dnsIpv4)
-                    dnsIpv6List = parseConfigList(config.dnsIpv6)
-                    (application as VaultApplication).diagnosticDomains = parseConfigList(config.probeDomains)
-                }) return@launch
-
-                createAndStartEdge(password, host, port, id, sessionToken)
+                createAndStartEdge(validated.password, validated.host, validated.port.toInt(), id, sessionToken)
 
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -256,27 +247,16 @@ class VaultVpnService : VpnService() {
         // interface is active, system DNS queries may be routed through the VPN
         // and black-holed while the tunnel is reconnecting, causing repeated
         // "DNS resolution failed: timeout".
-        val addrs = try {
-            InetAddress.getAllByName(host)
-        } catch (e: java.net.UnknownHostException) {
-            Log.w(TAG, "DNS resolution failed for excludeRoute: $host", e)
-            emptyArray()
+        val candidates = try {
+            resolveServerCandidates(host, port)
+        } catch (error: VpnException) {
+            Log.w(TAG, "DNS resolution failed for excludeRoute: $host", error)
+            emptyList()
         }
 
         // Prefer literal IPs for the UDP connection so Rust does not need to
         // perform a DNS lookup that could be intercepted by our own VPN interface.
-        // The Rust core races all candidates Happy-Eyeballs style (300 ms
-        // stagger, first completed handshake wins), including family preference.
-        val connectHosts = addrs.asSequence()
-            .map { addr ->
-                val ip = addr.hostAddress
-                if (addr.address.size == 4) ip else "[$ip]"
-            }
-            .distinct()
-            .toList()
-            .ifEmpty { listOf(host) }
-
-        val edgeConfig = EdgeConfig(password, connectHosts, port)
+        val edgeConfig = EdgeConfig(password, candidates.ifEmpty { listOf(host) }, port)
 
         val newEdge = Edge(
             config = edgeConfig,
@@ -287,7 +267,7 @@ class VaultVpnService : VpnService() {
                 }
             },
             onIpAssigned = { ipv4, ipv4Mask, ipv6, ipv6Prefixlen ->
-                handleEdgeIpAssigned(AssignedAddresses(ipv4, ipv4Mask, ipv6, ipv6Prefixlen), addrs, sessionToken)
+                handleEdgeIpAssigned(AssignedAddresses(ipv4, ipv4Mask, ipv6, ipv6Prefixlen), candidates, sessionToken)
             },
             pendingCompletion = { error ->
                 sessionGate.update(sessionToken) {
@@ -321,7 +301,7 @@ class VaultVpnService : VpnService() {
     @Suppress("TooGenericExceptionCaught")
     private fun handleEdgeIpAssigned(
         addresses: AssignedAddresses,
-        addrs: Array<InetAddress>,
+        addrs: List<String>,
         sessionToken: Long
     ) {
         trace("IP_ASSIGNED_CALLBACK")
@@ -569,14 +549,9 @@ class VaultVpnService : VpnService() {
         Log.d(TAG, "Saved VPN state: connected=$connected, ipv4=$ipv4, ipv6=$ipv6, publicIp=$publicIp")
     }
 
-    /**
-     * Probes the MTU of the currently active underlying link and derives the
-     * tunnel MTU by subtracting the fixed tunnel overhead. The result is
-     * clamped to [MIN_VPN_MTU, VPN_MTU]; any failure (no active network,
-     * unreadable sysfs entry) falls back to [VPN_MTU].
-     */
+    /** Probes the physical link; core derives the tunnel MTU and applies the user cap. */
     private fun probeTunnelMtu(): Int {
-        val linkMtu = try {
+        underlyingLinkMtu = try {
             val cm = getSystemService(ConnectivityManager::class.java)
             val ifaceName = cm?.activeNetwork
                 ?.let { cm.getLinkProperties(it) }
@@ -587,13 +562,12 @@ class VaultVpnService : VpnService() {
         } catch (_: Exception) {
             null
         }
-        if (linkMtu == null) {
+        if (underlyingLinkMtu == null) {
             Log.w(TAG, "Could not read underlying link MTU, using default MTU $VPN_MTU")
-            return VPN_MTU
         }
-        val mtu = (linkMtu - TUNNEL_OVERHEAD).coerceIn(MIN_VPN_MTU, VPN_MTU)
-        Log.d(TAG, "Underlying link MTU $linkMtu, tunnel MTU $mtu")
-        return mtu
+        return TunnelPolicy.mtu(underlyingLinkMtu, cap = null).also { mtu ->
+            underlyingLinkMtu?.let { Log.d(TAG, "Underlying link MTU $it, tunnel MTU $mtu") }
+        }
     }
 
     private fun createVpnInterface(
@@ -601,7 +575,7 @@ class VaultVpnService : VpnService() {
         ipv4Mask: String,
         assignedIpv6: String,
         ipv6Prefixlen: Int,
-        addrs: Array<out InetAddress>
+        addrs: List<String>
     ): ParcelFileDescriptor {
         try {
             val addresses = TunnelAddresses.parse(assignedIp, ipv4Mask, assignedIpv6, ipv6Prefixlen)
@@ -626,10 +600,11 @@ class VaultVpnService : VpnService() {
 
             // Exclude server IP from VPN routing (API 33+ only)
             try {
-                for (addr in addrs) {
-                    val len = if (addr.address.size == 4) 32 else 128
-                    builder.excludeRoute(android.net.IpPrefix(addr, len))
-                    Log.d(TAG, "Excluded server IP from VPN: ${addr.hostAddress}")
+                for (candidate in addrs) {
+                    val address = InetAddress.getByName(candidate)
+                    val len = if (address.address.size == 4) 32 else 128
+                    builder.excludeRoute(android.net.IpPrefix(address, len))
+                    Log.d(TAG, "Excluded server IP from VPN: ${address.hostAddress}")
                 }
             } catch (_: Exception) {
                 Log.w(TAG, "Failed to exclude server IP")
