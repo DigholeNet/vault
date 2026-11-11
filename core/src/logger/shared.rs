@@ -41,10 +41,16 @@ pub fn append(line: &str) {
     append_formatted(&format_record(&utc_timestamp(), line));
 }
 
-/// Append a platform record using the same format and rotation as Rust records.
-pub fn append_record(level: &str, source: &str, message: &str) {
+/// Append a platform record using the same format and rotation as Rust
+/// records. `timestamp_ms` is the event time in epoch milliseconds captured
+/// by the platform at its call site; `None` falls back to the write time.
+pub fn append_record(level: &str, source: &str, message: &str, timestamp_ms: Option<u64>) {
     let level = if level == "WARN" { "WARNING" } else { level };
-    let timestamp = utc_timestamp();
+    let timestamp = timestamp_ms.map_or_else(utc_timestamp, |milliseconds| {
+        let seconds = (milliseconds / 1000) as i64;
+        let millis = (milliseconds % 1000) as u32;
+        format!("{}Z", format_timestamp(seconds, millis))
+    });
     let record: String = message
         .lines()
         .map(|message| format!("[{timestamp}] [{level}] [{source}] {message}\n"))
@@ -466,6 +472,24 @@ mod tests {
     }
 
     #[test]
+    fn platform_record_uses_call_site_timestamp() {
+        let _lock = TEST_PATH_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("vault-file-log-ts-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("vault.log");
+        set_path(path.to_str().unwrap());
+        let seconds = days_from_civil(2026, 10, 24) * 86_400 + 11 * 3600 + 7 * 60 + 49;
+        append_record("INFO", "app", "call-site", Some(seconds as u64 * 1000 + 1));
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            content,
+            "[2026-10-24 11:07:49.001Z] [INFO] [app] call-site\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn read_rotate_and_clear() {
         let _lock = TEST_PATH_LOCK.lock().unwrap();
         let dir =
@@ -474,9 +498,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         set_path(path.to_str().unwrap());
-        append_record("INFO", "app", "current");
+        append_record("INFO", "app", "current", None);
         rotate_for_new_session().unwrap();
-        append_record("INFO", "rust", "next");
+        append_record("INFO", "rust", "next", None);
         let content = read(0).unwrap();
         assert!(content.contains("current") && content.contains("next"));
         clear().unwrap();

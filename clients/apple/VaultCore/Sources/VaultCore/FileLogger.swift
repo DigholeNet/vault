@@ -69,23 +69,30 @@ public final class FileLogger: @unchecked Sendable {
     }
 
     public func log(_ message: String, level: String = "INFO") {
+        // Capture the time at the call site so lines reflect event order,
+        // not queue delay.
+        let timestamp = Date()
         let source = processTag
         queue.async { [weak self] in
-            self?.writeLine(message, level: level, source: source)
+            self?.writeLine(message, level: level, source: source, timestamp: timestamp)
         }
     }
 
     /// Synchronous variant for lifecycle callbacks where the process may be suspended.
     public func logSync(_ message: String, level: String = "INFO") {
+        let timestamp = Date()
         let source = processTag
         queue.sync {
-            self.writeLine(message, level: level, source: source)
+            self.writeLine(message, level: level, source: source, timestamp: timestamp)
         }
     }
 
-    private func writeLine(_ message: String, level: String, source: String) {
+    private func writeLine(_ message: String, level: String, source: String, timestamp: Date) {
         guard logFileURL != nil else { return }
-        appendSharedLog(level: level, source: source, message: message)
+        appendSharedLog(
+            level: level, source: source, message: message,
+            timestampMs: UInt64(timestamp.timeIntervalSince1970 * 1000)
+        )
     }
 
     /// Kept for diagnostics and legacy-format regression coverage.

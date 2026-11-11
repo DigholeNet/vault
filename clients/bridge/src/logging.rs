@@ -17,8 +17,13 @@ impl From<std::io::Error> for SharedLogError {
 }
 
 #[uniffi::export]
-pub fn append_shared_log(level: String, source: String, message: String) {
-    shared::append_record(&level, &source, &message);
+pub fn append_shared_log(
+    level: String,
+    source: String,
+    message: String,
+    timestamp_ms: Option<u64>,
+) {
+    shared::append_record(&level, &source, &message, timestamp_ms);
 }
 
 #[uniffi::export]

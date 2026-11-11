@@ -27,7 +27,9 @@ See the [shared diagnostics contract](../../docs/diagnostics-engine.md).
 - `generate_peer_id_hex`, `peer_id_from_hex` — shared installation identity encoding
 - `resolve_server_candidates` — pre-tunnel resolution with the same ordering used by reconnects
 - `set_log_file_path` — point the Rust logger at the app's shared log file
-- `append_shared_log`, `read_shared_logs`, `clear_shared_logs`, `rotate_shared_log_for_new_session`, `merge_shared_logs` — shared file-log operations
+- `append_shared_log` — append a platform record; pass the call-site time in
+  epoch milliseconds so queued writes keep the event order (`None` uses the write time)
+- `read_shared_logs`, `clear_shared_logs`, `rotate_shared_log_for_new_session`, `merge_shared_logs` — shared file-log operations
 - `DiagnosticEngine` — diagnostic requests, completion, snapshots and cancellation
 - `DiagnosticTransport` — synchronous Rust probes with default, Apple interface
   or Android VPN Network binding; execute on a worker and cancel on session changes

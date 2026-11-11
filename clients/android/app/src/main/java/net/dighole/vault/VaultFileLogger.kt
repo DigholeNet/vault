@@ -65,6 +65,9 @@ object VaultFileLogger {
     /** Queue Kotlin records; core appends synchronously on this writer thread. */
     @Suppress("TooGenericExceptionCaught")
     fun log(priority: Int, tag: String, message: String, throwable: Throwable? = null) {
+        // Capture the time at the call site so lines reflect event order,
+        // not writer-queue delay.
+        val timestampMs = System.currentTimeMillis()
         val level = when (priority) {
             Log.VERBOSE -> "VERBOSE"
             Log.DEBUG -> "DEBUG"
@@ -80,7 +83,7 @@ object VaultFileLogger {
                     append(message)
                     stackTrace?.let { append('\n').append(it) }
                 }
-                appendSharedLog(level, tag, text)
+                appendSharedLog(level, tag, text, timestampMs.toULong())
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to write log line", e)
             }

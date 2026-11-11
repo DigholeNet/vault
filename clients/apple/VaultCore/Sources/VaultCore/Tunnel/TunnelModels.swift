@@ -78,6 +78,8 @@ public struct TunnelLaunchConfiguration {
         case .DnsIpv4: .dnsIpv4
         case .DnsIpv6: .dnsIpv6
         case .ProbeDomains: .probeDomains
+        // Unreachable: mtu is always "" here, and Assignment only comes from
+        // the parse helpers, not validateEdgeSettings.
         case .Mtu, .Assignment: .host
         }
     }
