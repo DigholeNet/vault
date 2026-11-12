@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 //! Shared single-file logger for the mobile clients.
 //!
-//! All writers append whole records with O_APPEND. One previous generation is
-//! retained, and every writer participates in rotation so Rust-only traffic
+//! All writers append whole UTC records with O_APPEND. One previous generation
+//! is retained, and every writer participates in rotation so Rust-only traffic
 //! cannot grow the current file without bound.
 
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -35,8 +35,32 @@ fn previous_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{stem}.prev.log"))
 }
 
-/// Append one tracing line synchronously. The path mutex is never waited on:
-/// a busy mutex drops the record rather than blocking a network worker.
+fn lock_path(path: &Path) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("vault");
+    path.with_file_name(format!("{stem}.lock"))
+}
+
+fn lock_file(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path(path))
+}
+
+fn current_path() -> io::Result<Option<PathBuf>> {
+    log_file_path()
+        .lock()
+        .map(|guard| guard.clone())
+        .map_err(|_| io::Error::other("log path lock poisoned"))
+}
+
+/// Append one tracing line synchronously. The path mutex is only held while
+/// copying the path, never during file I/O.
 pub fn append(line: &str) {
     append_formatted(&format_record(&utc_timestamp(), line));
 }
@@ -59,12 +83,10 @@ pub fn append_record(level: &str, source: &str, message: &str, timestamp_ms: Opt
 }
 
 fn append_formatted(record: &str) {
-    let Some(mutex) = LOG_FILE_PATH.get() else {
+    let Ok(Some(path)) = current_path() else {
         return;
     };
-    let Ok(guard) = mutex.try_lock() else { return };
-    let Some(path) = guard.as_ref() else { return };
-    let _ = rotate_if_needed(path);
+    let _ = rotate_if_needed(&path);
     let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
         return;
     };
@@ -73,6 +95,12 @@ fn append_formatted(record: &str) {
 }
 
 fn rotate_if_needed(path: &Path) -> io::Result<()> {
+    let lock = lock_file(path)?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => return Ok(()),
+        Err(std::fs::TryLockError::Error(error)) => return Err(error),
+    }
     if std::fs::metadata(path)
         .map(|metadata| metadata.len() <= MAX_LOG_SIZE)
         .unwrap_or(true)
@@ -84,14 +112,13 @@ fn rotate_if_needed(path: &Path) -> io::Result<()> {
 
 /// Preserve the current file as the single previous generation.
 pub fn rotate_for_new_session() -> io::Result<()> {
-    let guard = log_file_path()
-        .lock()
-        .map_err(|_| io::Error::other("log path lock poisoned"))?;
-    let Some(path) = guard.as_ref() else {
+    let Some(path) = current_path()? else {
         return Ok(());
     };
+    let lock = lock_file(&path)?;
+    lock.lock()?;
     if path.exists() {
-        rotate(path)?;
+        rotate(&path)?;
     }
     Ok(())
 }
@@ -108,16 +135,15 @@ fn rotate(path: &Path) -> io::Result<()> {
 
 /// Truncate both generations in place. O_APPEND writers can continue afterwards.
 pub fn clear() -> io::Result<()> {
-    let guard = log_file_path()
-        .lock()
-        .map_err(|_| io::Error::other("log path lock poisoned"))?;
-    let Some(path) = guard.as_ref() else {
+    let Some(path) = current_path()? else {
         return Ok(());
     };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    for path in [path.clone(), previous_path(path)] {
+    let lock = lock_file(&path)?;
+    lock.lock()?;
+    for path in [path.clone(), previous_path(&path)] {
         OpenOptions::new()
             .write(true)
             .create(true)
@@ -127,26 +153,20 @@ pub fn clear() -> io::Result<()> {
     Ok(())
 }
 
-/// Read previous and current logs in chronological order.
-pub fn read(legacy_timezone_offset_seconds: i32) -> io::Result<String> {
-    let guard = log_file_path()
-        .lock()
-        .map_err(|_| io::Error::other("log path lock poisoned"))?;
-    let Some(path) = guard.as_ref() else {
+/// Read previous and current logs in chronological order without blocking writers.
+pub fn read() -> io::Result<String> {
+    let Some(path) = current_path()? else {
         return Ok(String::new());
     };
     let mut parts = Vec::new();
-    for path in [previous_path(path), path.clone()] {
+    for path in [previous_path(&path), path.clone()] {
         match std::fs::read_to_string(path) {
             Ok(part) => parts.push(part),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
     }
-    Ok(merge_chronologically(
-        &parts,
-        legacy_timezone_offset_seconds,
-    ))
+    Ok(merge_chronologically(&parts))
 }
 
 fn format_record(timestamp: &str, line: &str) -> String {
@@ -165,10 +185,8 @@ fn format_record(timestamp: &str, line: &str) -> String {
         .collect()
 }
 
-/// Merge records by timestamp while retaining input order for equal timestamps.
-/// Legacy local timestamps are converted only for their sort keys; original
-/// record text is preserved apart from the historical Rust severity fixup.
-pub fn merge_chronologically(parts: &[String], legacy_timezone_offset_seconds: i32) -> String {
+/// Merge UTC records by timestamp while retaining input order for equal timestamps.
+pub fn merge_chronologically(parts: &[String]) -> String {
     struct Entry {
         index: usize,
         line: String,
@@ -178,13 +196,17 @@ pub fn merge_chronologically(parts: &[String], legacy_timezone_offset_seconds: i
     let mut index = 0;
     for part in parts {
         for raw in part.lines().filter(|line| !line.is_empty()) {
-            let line = normalize_legacy_record(raw);
-            let key = line
+            let key = raw
                 .strip_prefix('[')
                 .and_then(|line| line.split_once(']').map(|(timestamp, _)| timestamp))
-                .map(|timestamp| timestamp_key(timestamp, legacy_timezone_offset_seconds))
-                .unwrap_or_default();
-            entries.push(Entry { index, line, key });
+                .filter(|timestamp| timestamp.ends_with('Z'))
+                .unwrap_or_default()
+                .to_string();
+            entries.push(Entry {
+                index,
+                line: raw.to_string(),
+                key,
+            });
             index += 1;
         }
     }
@@ -198,80 +220,6 @@ pub fn merge_chronologically(parts: &[String], legacy_timezone_offset_seconds: i
         .map(|entry| entry.line)
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn normalize_legacy_record(raw: &str) -> String {
-    if raw.starts_with("[[") {
-        return normalize_legacy_record(raw.strip_prefix('[').unwrap_or(raw));
-    }
-    let Some(end) = raw.find(']') else {
-        return raw.to_string();
-    };
-    let tail = raw[end + 1..].trim_start();
-    let Some(rest) = tail.strip_prefix("[rust] ") else {
-        return raw.to_string();
-    };
-    let rest = rest.trim_start();
-    let Some((level, message)) = rest.split_once(char::is_whitespace) else {
-        return raw.to_string();
-    };
-    if !matches!(level, "TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR") {
-        return raw.to_string();
-    }
-    let level = if level == "WARN" { "WARNING" } else { level };
-    format!("{} [{level}] [rust] {}", &raw[..=end], message.trim_start())
-}
-
-fn timestamp_key(timestamp: &str, legacy_timezone_offset_seconds: i32) -> String {
-    let (value, offset) = match timestamp.strip_suffix('Z') {
-        Some(value) => (value, 0),
-        None => (timestamp, legacy_timezone_offset_seconds as i64),
-    };
-    parse_timestamp(value)
-        .map(|(seconds, millis)| format_timestamp(seconds - offset, millis))
-        .unwrap_or_else(|| value.to_string())
-}
-
-fn parse_timestamp(value: &str) -> Option<(i64, u32)> {
-    if value.len() != 23
-        || value.as_bytes()[4] != b'-'
-        || value.as_bytes()[7] != b'-'
-        || value.as_bytes()[10] != b' '
-        || value.as_bytes()[13] != b':'
-        || value.as_bytes()[16] != b':'
-        || value.as_bytes()[19] != b'.'
-    {
-        return None;
-    }
-    let number = |range: std::ops::Range<usize>| value.get(range)?.parse::<u32>().ok();
-    let year = number(0..4)? as i32;
-    let month = number(5..7)?;
-    let day = number(8..10)?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let hour = number(11..13)?;
-    let minute = number(14..16)?;
-    let second = number(17..19)?;
-    let millis = number(20..23)?;
-    if hour > 23 || minute > 59 || second > 59 {
-        return None;
-    }
-    let days = days_from_civil(year, month, day);
-    Some((
-        days * 86_400 + (hour * 3600 + minute * 60 + second) as i64,
-        millis,
-    ))
-}
-
-fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
-    let year = year - i32::from(month <= 2);
-    let era = year.div_euclid(400);
-    let year_of_era = year - era * 400;
-    let adjusted_month = month as i32 + if month > 2 { -3 } else { 9 };
-    let day_of_year = (153 * adjusted_month + 2) / 5 + day as i32 - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    (era * 146_097 + day_of_era - 719_468) as i64
 }
 
 fn format_timestamp(seconds: i64, millis: u32) -> String {
@@ -392,7 +340,7 @@ mod tests {
     static TEST_PATH_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn appended_line_is_timestamped() {
+    fn append_records() {
         let _lock = TEST_PATH_LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!("vault-file-log-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -436,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn multiline_log_format() {
+    fn multiline_format() {
         let timestamp = "2026-10-24 11:07:49.001Z";
         assert_eq!(
             format_record(timestamp, " INFO Heartbeat ping sent"),
@@ -452,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn utc_timestamp_shape() {
+    fn utc_shape() {
         let ts = utc_timestamp();
         assert_eq!(ts.len(), 24);
         assert!(ts.ends_with('Z'));
@@ -461,36 +409,57 @@ mod tests {
     }
 
     #[test]
-    fn merge_legacy() {
-        let app = "[2026-10-23 13:00:00.000] [INFO] [app] local\n".to_string();
-        let rust = "[2026-10-23 05:00:00.000Z] [rust]  WARN remote\n".to_string();
-        let merged = merge_chronologically(&[app, rust], 8 * 3600);
+    fn merge_utc() {
+        let later = "[2026-10-24 11:07:50.001Z] [INFO] [app] later".to_string();
+        let earlier = "[2026-10-24 11:07:49.001Z] [INFO] [rust] earlier".to_string();
         assert_eq!(
-            merged,
-            "[2026-10-23 13:00:00.000] [INFO] [app] local\n[2026-10-23 05:00:00.000Z] [WARNING] [rust] remote"
+            merge_chronologically(&[later, earlier]),
+            "[2026-10-24 11:07:49.001Z] [INFO] [rust] earlier\n[2026-10-24 11:07:50.001Z] [INFO] [app] later"
         );
     }
 
     #[test]
-    fn platform_record_uses_call_site_timestamp() {
+    fn call_site_timestamp() {
         let _lock = TEST_PATH_LOCK.lock().unwrap();
-        let dir = std::env::temp_dir().join(format!("vault-file-log-ts-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("vault-file-log-ts-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("vault.log");
         set_path(path.to_str().unwrap());
-        let seconds = days_from_civil(2026, 10, 24) * 86_400 + 11 * 3600 + 7 * 60 + 49;
-        append_record("INFO", "app", "call-site", Some(seconds as u64 * 1000 + 1));
+        append_record("INFO", "app", "call-site", Some(1));
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(
             content,
-            "[2026-10-24 11:07:49.001Z] [INFO] [app] call-site\n"
+            "[1970-01-01 00:00:00.001Z] [INFO] [app] call-site\n"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn read_rotate_and_clear() {
+    fn rotation_lock() {
+        let _lock = TEST_PATH_LOCK.lock().unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("vault-file-log-lock-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("vault.log");
+        File::create(&path)
+            .unwrap()
+            .set_len(MAX_LOG_SIZE + 1)
+            .unwrap();
+        let lock = lock_file(&path).unwrap();
+        lock.lock().unwrap();
+        rotate_if_needed(&path).unwrap();
+        assert!(path.exists() && !previous_path(&path).exists());
+        drop(lock);
+        rotate_if_needed(&path).unwrap();
+        assert!(!path.exists() && previous_path(&path).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_rotate_clear() {
         let _lock = TEST_PATH_LOCK.lock().unwrap();
         let dir =
             std::env::temp_dir().join(format!("vault-file-log-read-test-{}", std::process::id()));
@@ -501,10 +470,10 @@ mod tests {
         append_record("INFO", "app", "current", None);
         rotate_for_new_session().unwrap();
         append_record("INFO", "rust", "next", None);
-        let content = read(0).unwrap();
+        let content = read().unwrap();
         assert!(content.contains("current") && content.contains("next"));
         clear().unwrap();
-        assert_eq!(read(0).unwrap(), "");
+        assert_eq!(read().unwrap(), "");
         assert!(path.exists() && previous_path(&path).exists());
         let _ = std::fs::remove_dir_all(&dir);
     }

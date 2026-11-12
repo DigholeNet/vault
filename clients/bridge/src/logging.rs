@@ -27,8 +27,8 @@ pub fn append_shared_log(
 }
 
 #[uniffi::export]
-pub fn read_shared_logs(legacy_timezone_offset_seconds: i32) -> Result<String, SharedLogError> {
-    shared::read(legacy_timezone_offset_seconds).map_err(Into::into)
+pub fn read_shared_logs() -> Result<String, SharedLogError> {
+    shared::read().map_err(Into::into)
 }
 
 #[uniffi::export]
@@ -42,6 +42,6 @@ pub fn rotate_shared_log_for_new_session() -> Result<(), SharedLogError> {
 }
 
 #[uniffi::export]
-pub fn merge_shared_logs(parts: Vec<String>, legacy_timezone_offset_seconds: i32) -> String {
-    shared::merge_chronologically(&parts, legacy_timezone_offset_seconds)
+pub fn merge_shared_logs(parts: Vec<String>) -> String {
+    shared::merge_chronologically(&parts)
 }

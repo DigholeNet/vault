@@ -95,19 +95,6 @@ public final class FileLogger: @unchecked Sendable {
         )
     }
 
-    /// Kept for diagnostics and legacy-format regression coverage.
-    static func formattedRecord(_ message: String, level: String, source: String, timestamp: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS'Z'"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        let time = formatter.string(from: timestamp)
-        let severity = level == "WARN" ? "WARNING" : level
-        return message.components(separatedBy: "\n").map {
-            "[\(time)] [\(severity)] [\(source)] \($0)\n"
-        }.joined()
-    }
-
     /// Observational snapshot only: does not open a provider-message channel.
     public static func tunnelInterfaceSummary() -> String {
         var list: UnsafeMutablePointer<ifaddrs>?
@@ -127,8 +114,7 @@ public final class FileLogger: @unchecked Sendable {
 
     public func readLog() -> String? {
         guard logFileURL != nil, prevLogFileURL != nil else { return nil }
-        let offset = Int32(TimeZone.current.secondsFromGMT())
-        return try? readSharedLogs(legacyTimezoneOffsetSeconds: offset)
+        return try? readSharedLogs()
     }
 
     public func readLogAsync() async -> String? {
@@ -142,9 +128,8 @@ public final class FileLogger: @unchecked Sendable {
         }
     }
 
-    /// Compare UTC timestamps, converting older platform logs from local time.
-    public static func mergeChronologically(_ parts: [String], legacyTimeZone: TimeZone = .current) -> String {
-        mergeSharedLogs(parts: parts, legacyTimezoneOffsetSeconds: Int32(legacyTimeZone.secondsFromGMT()))
+    public static func mergeChronologically(_ parts: [String]) -> String {
+        mergeSharedLogs(parts: parts)
     }
 }
 
