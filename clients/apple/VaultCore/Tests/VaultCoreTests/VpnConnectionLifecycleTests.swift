@@ -1,7 +1,7 @@
 import Testing
 @testable import VaultCore
 
-@Test func rapidToggleWaitsForStopCallbacks() throws {
+@Test func rapidToggle() throws {
     var state = VpnConnectionLifecycle()
     for _ in 0 ..< 1000 {
         let connect = try #require({ state.beginConnect() }())
@@ -199,7 +199,7 @@ import Testing
     #expect(state.phase == .disconnected)
 }
 
-@Test func failedStopObservationKeepsIntentCleared() throws {
+@Test func failedStopObservation() throws {
     var state = VpnConnectionLifecycle()
     state.observe(.connected)
     let stop = try #require({ state.beginDisconnect() }())

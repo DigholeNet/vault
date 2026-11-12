@@ -9,6 +9,7 @@ import net.dighole.vaultcore.uniffi.ConnectionStatus
 import net.dighole.vaultcore.uniffi.EdgeCallbacks
 import net.dighole.vaultcore.uniffi.RustEdge
 import net.dighole.vaultcore.uniffi.TrafficStats
+import net.dighole.vaultcore.uniffi.TunnelAssignment
 import net.dighole.vaultcore.uniffi.VpnException
 
 /**
@@ -51,13 +52,13 @@ class Edge(
                 this@Edge.onPackets(packets)
             }
 
-            override fun onIpAssigned(
-                ipv4: String,
-                ipv4Mask: String,
-                ipv6: String,
-                ipv6Prefixlen: Int
-            ) {
-                this@Edge.onIpAssigned(ipv4, ipv4Mask, ipv6, ipv6Prefixlen)
+            override fun onIpAssigned(assignment: TunnelAssignment) {
+                this@Edge.onIpAssigned(
+                    assignment.ipv4?.address.orEmpty(),
+                    assignment.ipv4?.netmask.orEmpty(),
+                    assignment.ipv6?.address.orEmpty(),
+                    assignment.ipv6?.prefixLen?.toInt() ?: 0
+                )
             }
 
             override fun onError(error: String) {

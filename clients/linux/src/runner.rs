@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 use std::{
     io,
-    net::{IpAddr, SocketAddr, ToSocketAddrs as _},
+    net::{IpAddr, SocketAddr},
     os::{
         linux::net::SocketAddrExt,
         unix::net::{SocketAddr as UnixSocketAddr, UnixDatagram},
@@ -75,10 +75,8 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     let dns = DnsGuard::setup_for_interface(&tun);
     let server_addr = format!("{}:{}", config.get_host(), config.get_port());
     info!("Resolving server address: {}", server_addr);
-    let hosts: Vec<_> = server_addr.to_socket_addrs()?.collect();
-    if hosts.is_empty() {
-        return Err(anyhow::anyhow!("Could not resolve server address"));
-    }
+    let hosts =
+        vault_core::client::resolve_server_candidates(config.get_host(), config.get_port())?;
     // Probe each address family's physical exit independently: IPv4 and
     // IPv6 default routes may live on different interfaces with different
     // gateways. A family without a default route contributes no exit; its

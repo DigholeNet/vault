@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import VaultCore
 
-@Test func endedStatsSessionRejectsQueuedReadsAndUpdates() throws {
+@Test func endedStatsSession() throws {
     var session = PacketStats.Session()
     #expect(session.status(ip: "") == nil)
     session.begin()
@@ -30,7 +30,7 @@ import Testing
     #expect(live.stats.bytesSent == 100)
 }
 
-@Test func legacyProviderStatusWithoutPublicIpDecodes() throws {
+@Test func legacyProviderStatus() throws {
     let data = try JSONEncoder().encode(ProviderStatus(ip: "10.0.0.2", stats: .zero, session: "legacy"))
     let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     #expect(object["publicIp"] == nil)

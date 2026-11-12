@@ -22,26 +22,33 @@ See the [shared diagnostics contract](../../docs/diagnostics-engine.md).
   connection status, write packets, close)
 - `EdgeCallbacks` — packet delivery, status and error callbacks into the app
 - `ConnectionStatus`, `TrafficStats`, `VpnError` — connection snapshots, statistics and errors
+- `EdgeSettings`, `ValidatedEdgeSettings`, `SettingsError` — shared configuration validation
+- `TunnelAssignment` — validated IPv4/IPv6 assignments, DNS selection, IPv6 network and MTU calculations
+- `generate_peer_id_hex`, `peer_id_from_hex` — shared installation identity encoding
+- `resolve_server_candidates` — pre-tunnel resolution with the same ordering used by reconnects
 - `set_log_file_path` — point the Rust logger at the app's shared log file
+- `append_shared_log` — append a platform record; pass the call-site time in
+  epoch milliseconds so queued writes keep the event order (`None` uses the write time)
+- `read_shared_logs`, `clear_shared_logs`, `rotate_shared_log_for_new_session`, `merge_shared_logs` — shared file-log operations
 - `DiagnosticEngine` — diagnostic requests, completion, snapshots and cancellation
 - `DiagnosticTransport` — synchronous Rust probes with default, Apple interface
   or Android VPN Network binding; execute on a worker and cancel on session changes
 - Typed diagnostic config, requests, responses, snapshots and errors, plus
-  `diagnostic_dns_query` for settings-domain validation
+  `diagnostic_dns_query` for bounded DNS wire construction
 
 ## Client/platform boundary
 
 The core resolves and orders candidates, races IPv4/IPv6 handshakes, detects
-transport failure, coalesces OS network-change events and retries with backoff. `on_ip_assigned` configures the
-platform tunnel after the first successful handshake and only repeats when
+transport failure, coalesces OS network-change events and retries with backoff. `on_ip_assigned` supplies a
+core-validated `TunnelAssignment` after the first successful handshake and only repeats when
 the assigned addresses, mask or prefix actually change. Same-IP reconnects
 keep the existing TUN. Failed configuration may retry.
 
 Android and Apple own UI, settings storage, OS tunnel lifecycle, routes/DNS,
-socket protection, TUN I/O and physical-network notifications. They may resolve
-addresses before enabling the tunnel to install route exclusions and avoid
-routing their own DNS lookups through a disconnected VPN. They pass all
-candidates to the core without choosing a family or host. `is_connected` is the
+socket protection, TUN I/O and physical-network notifications. Before enabling
+the tunnel they call `resolve_server_candidates` on a worker to install route
+exclusions without routing their own DNS lookups through a disconnected VPN.
+They pass all returned candidates to the core without choosing a family or host. `is_connected` is the
 source for recovery presentation. `get_connection_status` also supplies a core-owned
 attempt generation, read atomically with readiness, so diagnostics can reject
 results spanning a same-IP reconnect. Errors are informational and IP assignment

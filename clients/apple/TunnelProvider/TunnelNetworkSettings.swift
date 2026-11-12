@@ -5,16 +5,7 @@ import os.log
 import VaultCore
 
 enum TunnelConstants {
-    /// Worst-case outer headers and protocol overhead, owned by the Rust core.
-    static let tunnelOverhead = Int(tunnelParameters().overhead)
-    /// Upper bound for the tunnel MTU: 1500 (typical Ethernet link MTU)
-    /// minus tunnelOverhead. Jumbo-frame links do not inflate the tunnel
-    /// MTU beyond this. Also the fallback when the underlying link MTU
-    /// cannot be probed.
     static let mtuUpperBound = TunnelLaunchConfiguration.mtuUpperBound
-    /// Lower bound for the tunnel MTU: the IPv6 minimum link MTU. Below
-    /// this the system cannot route IPv6 through the tunnel at all.
-    static let mtuLowerBound = TunnelLaunchConfiguration.mtuLowerBound
     /// Platform startup deadline; transport attempts and backoff remain in Rust.
     static let startTimeout: TimeInterval = 30
 }
@@ -125,10 +116,8 @@ enum TunnelNetworkSettings {
             | 0x69 << 8 /* 'i' */
             | 51
 
-    /// Tunnel MTU: the underlying link MTU minus the tunnel overhead,
-    /// clamped to [mtuLowerBound, mtuUpperBound] so PPPoE-class links
-    /// shrink the tunnel while jumbo frames never inflate it. A failed probe
-    /// leaves the current MTU intact; only initial setup falls back to the cap.
+    /// Core subtracts tunnel overhead and clamps to its shared bounds. A failed
+    /// probe leaves the current MTU intact; only initial setup falls back to the cap.
     /// mtuCap (Configure page, empty = mtuUpperBound) lowers the ceiling:
     /// on links that drop large outer packets, a smaller tunnel MTU keeps
     /// the UDP datagrams under the loss threshold.
@@ -139,10 +128,7 @@ enum TunnelNetworkSettings {
             )
             return nil
         }
-        let mtu = min(
-            max(linkMtu - TunnelConstants.tunnelOverhead, TunnelConstants.mtuLowerBound),
-            cap
-        )
+        let mtu = Int(calculateTunnelMtu(linkMtu: UInt32(linkMtu), cap: UInt16(cap)))
         Logger.network.noticeAndFile(
             "[session:\(sessionID)] Link MTU \(linkMtu) → tunnel MTU \(mtu) (cap \(cap))"
         )
@@ -221,27 +207,9 @@ enum TunnelNetworkSettings {
     }
 
     private static func extractIpv6Network(_ ipv6: String, prefixLen: Int32) -> String {
-        guard let addr = IPv6Address(ipv6) else { return ipv6 }
-        let raw = addr.rawValue // 16 bytes
-
-        let prefix = Int(prefixLen)
-        guard prefix >= 0 && prefix <= 128 else { return ipv6 }
-
-        var networkBytes = [UInt8](raw)
-        let fullBytes = prefix / 8
-        let remainingBits = prefix % 8
-
-        // Zero out bits beyond the prefix length
-        for byteIndex in fullBytes ..< 16 {
-            if byteIndex == fullBytes && remainingBits > 0 {
-                let mask = UInt8(0xFF) << (8 - remainingBits)
-                networkBytes[byteIndex] &= mask
-            } else {
-                networkBytes[byteIndex] = 0
-            }
-        }
-
-        guard let networkAddr = IPv6Address(Data(networkBytes)) else { return ipv6 }
-        return networkAddr.debugDescription
+        guard let assignment = try? parseTunnelAssignment(
+            ipv4: "", ipv4Mask: "", ipv6: ipv6, ipv6Prefixlen: prefixLen
+        ), let network = try? tunnelIpv6Network(assignment: assignment) else { return ipv6 }
+        return network ?? ipv6
     }
 }

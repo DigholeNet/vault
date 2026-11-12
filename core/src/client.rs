@@ -140,13 +140,7 @@ pub trait ClientCallbacks: Send + Sync {
     /// Apply addresses and platform routes on initial assignment or a real
     /// address/mask/prefix change. Reconnects with the same configuration do
     /// not repeat this callback. Failed setup may be retried.
-    fn on_ip_assigned(
-        &self,
-        ipv4: String,
-        ipv4_mask: String,
-        ipv6: String,
-        ipv6_prefixlen: i32,
-    ) -> Result<(), String>;
+    fn on_ip_assigned(&self, assignment: crate::settings::TunnelAssignment) -> Result<(), String>;
     /// Runtime error notification. The session keeps retrying reconnects on
     /// its own; this is informational (e.g. for UI status updates).
     fn on_error(&self, error: String);
@@ -213,10 +207,62 @@ impl UplinkCounters {
     }
 }
 
+/// Resolve and order server candidates before a platform tunnel is enabled.
+/// This blocks the calling thread and must not run inside an async runtime.
+pub fn resolve_server_candidates(host: &str, port: u16) -> Result<Vec<SocketAddr>, ClientError> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ClientError::InternalError(error.to_string()))?;
+    runtime.block_on(resolve_candidates_async(&[host.to_string()], port))
+}
+
+async fn resolve_candidates_async(
+    hosts: &[String],
+    port: u16,
+) -> Result<Vec<SocketAddr>, ClientError> {
+    let mut candidates: Vec<SocketAddr> = Vec::new();
+    let mut last_error = String::new();
+    for host in hosts {
+        let lookup = tokio::time::timeout(
+            Duration::from_secs(DNS_TIMEOUT_SECS),
+            tokio::net::lookup_host((host.trim_start_matches('[').trim_end_matches(']'), port)),
+        )
+        .await;
+        match lookup {
+            Ok(Ok(addrs)) => {
+                for addr in addrs {
+                    if !candidates.contains(&addr) {
+                        candidates.push(addr);
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                warn!("Resolving {host} failed: {e}");
+                last_error = e.to_string();
+            }
+            Err(_) => {
+                warn!("Resolving {host} timed out");
+                last_error = "timeout".to_string();
+            }
+        }
+    }
+    if candidates.is_empty() {
+        return Err(ClientError::DnsFailed(if last_error.is_empty() {
+            "no addresses".to_string()
+        } else {
+            last_error
+        }));
+    }
+    // Address-family preference belongs to the client, not platform glue.
+    candidates.sort_by_key(SocketAddr::is_ipv4);
+    Ok(candidates)
+}
+
 struct ClientState {
     is_active: bool,
     connection_generation: u64,
-    assigned_addresses: Option<(String, String, String, i32)>,
+    assigned_addresses: Option<crate::settings::TunnelAssignment>,
     public_ip: String,
     is_closing: bool,
     last_pong: Instant,
@@ -659,12 +705,13 @@ impl ClientInner {
         let (socket, crypto, remote_addr, response) = self.race_handshakes(candidates).await?;
         info!("Handshake race won by {remote_addr}");
 
-        let addresses = (
-            response.ipv4,
-            response.ipv4_mask,
-            response.ipv6,
+        let addresses = crate::settings::TunnelAssignment::new(
+            &response.ipv4,
+            &response.ipv4_mask,
+            &response.ipv6,
             response.ipv6_prefixlen,
-        );
+        )
+        .map_err(ClientError::HandshakeFailed)?;
         let assigned = self
             .state
             .lock()
@@ -700,12 +747,7 @@ impl ClientInner {
 
         if assigned.as_ref() != Some(&addresses) {
             self.callbacks
-                .on_ip_assigned(
-                    addresses.0.clone(),
-                    addresses.1.clone(),
-                    addresses.2.clone(),
-                    addresses.3,
-                )
+                .on_ip_assigned(addresses.clone())
                 .map_err(|e| {
                     ClientError::InternalError(format!("platform configuration failed: {e}"))
                 })?;
@@ -744,45 +786,7 @@ impl ClientInner {
     /// platform resolves before the tunnel comes up); a lookup failure for
     /// one host does not discard the others.
     async fn resolve_candidates(&self) -> Result<Vec<SocketAddr>, ClientError> {
-        let mut candidates: Vec<SocketAddr> = Vec::new();
-        let mut last_error = String::new();
-        for host in &self.config.hosts {
-            let lookup = tokio::time::timeout(
-                Duration::from_secs(DNS_TIMEOUT_SECS),
-                tokio::net::lookup_host((
-                    host.trim_start_matches('[').trim_end_matches(']'),
-                    self.config.port,
-                )),
-            )
-            .await;
-            match lookup {
-                Ok(Ok(addrs)) => {
-                    for addr in addrs {
-                        if !candidates.contains(&addr) {
-                            candidates.push(addr);
-                        }
-                    }
-                }
-                Ok(Err(e)) => {
-                    warn!("Resolving {host} failed: {e}");
-                    last_error = e.to_string();
-                }
-                Err(_) => {
-                    warn!("Resolving {host} timed out");
-                    last_error = "timeout".to_string();
-                }
-            }
-        }
-        if candidates.is_empty() {
-            return Err(ClientError::DnsFailed(if last_error.is_empty() {
-                "no addresses".to_string()
-            } else {
-                last_error
-            }));
-        }
-        // Address-family preference belongs to the client, not platform glue.
-        candidates.sort_by_key(SocketAddr::is_ipv4);
-        Ok(candidates)
+        resolve_candidates_async(&self.config.hosts, self.config.port).await
     }
 
     /// Race the candidates Happy-Eyeballs style: each attempt starts

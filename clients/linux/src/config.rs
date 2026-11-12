@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 use serde::{Deserialize, Serialize};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
@@ -33,26 +33,12 @@ impl EdgeConfig {
     }
 
     pub fn dns_for(&self, ipv4: bool, ipv6: bool) -> Vec<String> {
-        let v4: Vec<String> = if self.dns_ipv4.is_empty() {
-            vault_core::DEFAULT_DNS_IPV4.map(str::to_owned).into()
-        } else {
-            self.dns_ipv4.iter().map(ToString::to_string).collect()
-        };
-        let v6: Vec<String> = if self.dns_ipv6.is_empty() {
-            vault_core::DEFAULT_DNS_IPV6.map(str::to_owned).into()
-        } else {
-            self.dns_ipv6.iter().map(ToString::to_string).collect()
-        };
-        match (ipv4, ipv6) {
-            (true, true) => v6
-                .into_iter()
-                .take(2)
-                .chain(v4.into_iter().take(1))
-                .collect(),
-            (true, false) => v4.into_iter().take(3).collect(),
-            (false, true) => v6.into_iter().take(3).collect(),
-            (false, false) => vec![],
-        }
+        let v4: Vec<_> = self.dns_ipv4.iter().copied().map(IpAddr::V4).collect();
+        let v6: Vec<_> = self.dns_ipv6.iter().copied().map(IpAddr::V6).collect();
+        vault_core::settings::linux_dns(ipv4, ipv6, &v4, &v6)
+            .iter()
+            .map(ToString::to_string)
+            .collect()
     }
 
     pub fn get_storage(&self) -> &str {

@@ -2,7 +2,7 @@
 use crate::config::EdgeConfig;
 use crate::interface::FamilyExits;
 use crate::storage::SimpleFileStorage;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -48,21 +48,16 @@ impl Edge {
         // is a hard error: silently regenerating the id would lose the IP
         // lease the server assigned to it.
         let storage = SimpleFileStorage::new(config.get_storage())?;
-        let mut id_bytes = match storage.get("id")? {
-            Some(s) => hex::decode(&s).map_err(|e| {
-                anyhow::anyhow!("invalid device id in {}: {}", config.get_storage(), e)
+        let id = match storage.get("id")? {
+            Some(saved) if !saved.is_empty() => saved.parse::<PeerId>().map_err(|error| {
+                anyhow::anyhow!("invalid device id in {}: {}", config.get_storage(), error)
             })?,
-            None => vec![],
+            _ => {
+                let id = PeerId::default();
+                storage.store("id", id.to_string())?;
+                id
+            }
         };
-        if id_bytes.is_empty() {
-            id_bytes = PeerId::default().0.to_vec();
-            storage.store("id", hex::encode(&id_bytes))?;
-        }
-        let id = PeerId(
-            id_bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("Invalid id length"))?,
-        );
 
         let device = Arc::new(device);
 
@@ -212,37 +207,17 @@ where
 
     fn on_ip_assigned(
         &self,
-        ipv4: String,
-        ipv4_mask: String,
-        ipv6: String,
-        ipv6_prefixlen: i32,
+        assignment: vault_core::settings::TunnelAssignment,
     ) -> Result<(), String> {
         let result = (|| -> anyhow::Result<()> {
-            let ipv4 = if ipv4.is_empty() && ipv4_mask.is_empty() {
-                None
-            } else {
-                Some(Ipv4 {
-                    ip: ipv4.parse::<Ipv4Addr>()?,
-                    netmask: ipv4_mask.parse::<Ipv4Addr>()?,
-                })
-            };
-            let ipv6 = if ipv6.is_empty() {
-                None
-            } else {
-                anyhow::ensure!(
-                    (0..=128).contains(&ipv6_prefixlen),
-                    "invalid IPv6 prefix: {}",
-                    ipv6_prefixlen
-                );
-                Some(Ipv6 {
-                    ip: ipv6.parse::<Ipv6Addr>()?,
-                    prefix_len: ipv6_prefixlen as u8,
-                })
-            };
-            anyhow::ensure!(
-                ipv4.is_some() || ipv6.is_some(),
-                "no valid tunnel address assigned"
-            );
+            let ipv4 = assignment.ipv4.as_ref().map(|assigned| Ipv4 {
+                ip: assigned.address,
+                netmask: assigned.netmask,
+            });
+            let ipv6 = assignment.ipv6.as_ref().map(|assigned| Ipv6 {
+                ip: assigned.address,
+                prefix_len: assigned.prefix_len,
+            });
             let exits = self
                 .exits
                 .lock()

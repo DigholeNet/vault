@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SettingsValidationTest {
-    @Test fun hostRejectsUrlsPathsAndWhitespace() {
+    @Test fun invalidHosts() {
         listOf("https://example.com", "example.com/path", "bad host", "-bad.example", "").forEach {
             assertFalse(it, SettingsValidation.server(it))
         }
@@ -45,7 +45,7 @@ class SettingsValidationTest {
         assertTrue(SettingsValidation.domains(List(32) { "d$it.example" }.joinToString(",")))
         assertFalse(SettingsValidation.domains(List(33) { "d$it.example" }.joinToString(",")))
     }
-    @Test fun probeDomainsRejectMalformedLists() {
+    @Test fun invalidProbeDomains() {
         assertTrue(SettingsValidation.domains("github.com, www.google.com"))
         assertTrue(SettingsValidation.domains(""))
         listOf("https://example.com", "a..com", "example.com,", "bad_domain.com").forEach {

@@ -11,7 +11,7 @@ public struct TunnelLaunchConfiguration {
     public static let mtuLowerBound = Int(parameters.mtuMin)
     public static let mtuUpperBound = Int(parameters.mtuMax)
 
-    public enum InvalidField: Error { case host, port, password, peerID, dnsIpv4, dnsIpv6 }
+    public enum InvalidField: Error { case host, port, password, peerID, dnsIpv4, dnsIpv6, probeDomains }
 
     public let host: String
     public let port: UInt16
@@ -25,25 +25,31 @@ public struct TunnelLaunchConfiguration {
 
     public init(providerConfiguration values: [String: Any], clearLogsToken: String? = nil) throws {
         guard let rawHost = values["host"] as? String else { throw InvalidField.host }
-        let trimmed = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        host = trimmed.hasPrefix("[") && trimmed.hasSuffix("]") ? String(trimmed.dropFirst().dropLast()) : trimmed
-        guard !host.isEmpty else { throw InvalidField.host }
         guard let number = values["port"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
-              let port = UInt16(exactly: number.doubleValue), port > 0 else { throw InvalidField.port }
-        guard let password = values["password"] as? String, !password.isEmpty else { throw InvalidField.password }
+              UInt16(exactly: number.doubleValue) != nil, number.doubleValue > 0 else { throw InvalidField.port }
+        guard let password = values["password"] as? String else { throw InvalidField.password }
         guard let peerID = values["id"] as? Data, peerID.count == 16 else { throw InvalidField.peerID }
-        self.port = port
-        self.password = password
-        self.peerID = peerID
         let ipv4 = values["dnsIpv4"] as? String ?? ""
         let ipv6 = values["dnsIpv6"] as? String ?? ""
-        guard SettingsValidation.isValidDNSList(ipv4, ipv6: false) else { throw InvalidField.dnsIpv4 }
-        guard SettingsValidation.isValidDNSList(ipv6, ipv6: true) else { throw InvalidField.dnsIpv6 }
-        dnsIpv4 = Self.list(ipv4)
-        dnsIpv6 = Self.list(ipv6)
-        probeDomains = Self.list(values["probeDomains"] as? String)
+        let probes = values["probeDomains"] as? String ?? ""
+        let validated: ValidatedEdgeSettings
+        do {
+            validated = try validateEdgeSettings(settings: EdgeSettings(
+                host: rawHost, port: number.stringValue, password: password,
+                dnsIpv4: ipv4, dnsIpv6: ipv6, mtu: "", probeDomains: probes
+            ))
+        } catch let error as SettingsError {
+            throw Self.invalidField(error)
+        }
+        host = validated.host
+        port = validated.port
+        self.password = validated.password
+        self.peerID = peerID
+        dnsIpv4 = validated.dnsIpv4
+        dnsIpv6 = validated.dnsIpv6
+        probeDomains = validated.probeDomains
         let mtu = (values["mtu"] as? String).flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        mtuCap = min(max(mtu ?? Self.mtuUpperBound, Self.mtuLowerBound), Self.mtuUpperBound)
+        mtuCap = mtu.map { min(max($0, Self.mtuLowerBound), Self.mtuUpperBound) } ?? Self.mtuUpperBound
         self.clearLogsToken = clearLogsToken ?? values["clearLogsToken"] as? String
     }
 
@@ -58,14 +64,24 @@ public struct TunnelLaunchConfiguration {
     }
 
     public func effectiveDNS(ipv4: Bool, ipv6: Bool) -> [String] {
-        var servers: [String] = []
-        if ipv4 { servers += dnsIpv4.isEmpty ? Self.parameters.dnsIpv4 : dnsIpv4 }
-        if ipv6 { servers += dnsIpv6.isEmpty ? Self.parameters.dnsIpv6 : dnsIpv6 }
-        return servers
+        (try? effectiveDnsServers(
+            ipv4: ipv4, ipv6: ipv6, configuredIpv4: dnsIpv4, configuredIpv6: dnsIpv6
+        )) ?? []
     }
 
-    private static func list(_ value: String?) -> [String] {
-        (value ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    private static func invalidField(_ error: SettingsError) -> InvalidField {
+        switch error {
+        case .Host: .host
+        case .Port: .port
+        case .Password: .password
+        case .PeerId: .peerID
+        case .DnsIpv4: .dnsIpv4
+        case .DnsIpv6: .dnsIpv6
+        case .ProbeDomains: .probeDomains
+        // Unreachable: mtu is always "" here, and Assignment only comes from
+        // the parse helpers, not validateEdgeSettings.
+        case .Mtu, .Assignment: .host
+        }
     }
 }
 
@@ -79,6 +95,7 @@ public struct TunnelConfiguration: Equatable, Sendable {
     public let prefix: Int32
     public let mtu: Int
     public let dns: [String]
+    public let assignment: TunnelAssignment?
 
     public init(ipv4: String, mask: String, ipv6: String, prefix: Int32, mtu: Int, dns: [String] = []) {
         self.ipv4 = ipv4
@@ -87,6 +104,17 @@ public struct TunnelConfiguration: Equatable, Sendable {
         self.prefix = prefix
         self.mtu = mtu
         self.dns = dns
+        assignment = try? parseTunnelAssignment(ipv4: ipv4, ipv4Mask: mask, ipv6: ipv6, ipv6Prefixlen: prefix)
+    }
+
+    public init(assignment: TunnelAssignment, mtu: Int, dns: [String]) {
+        ipv4 = assignment.ipv4?.address ?? ""
+        mask = assignment.ipv4?.netmask ?? ""
+        ipv6 = assignment.ipv6?.address ?? ""
+        prefix = Int32(assignment.ipv6?.prefixLen ?? 0)
+        self.mtu = mtu
+        self.dns = dns
+        self.assignment = assignment
     }
 
     public var addresses: String { ipv6.isEmpty ? ipv4 : "\(ipv4)/\(ipv6)" }

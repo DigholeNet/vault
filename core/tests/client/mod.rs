@@ -7,7 +7,7 @@ use super::*;
 struct NoCallbacks;
 impl ClientCallbacks for NoCallbacks {
     fn on_packets(&self, _: Vec<Vec<u8>>) {}
-    fn on_ip_assigned(&self, _: String, _: String, _: String, _: i32) -> Result<(), String> {
+    fn on_ip_assigned(&self, _: crate::settings::TunnelAssignment) -> Result<(), String> {
         Ok(())
     }
     fn on_error(&self, _: String) {}
@@ -32,6 +32,14 @@ fn idle_session() -> ClientSession {
             state: Arc::new(Mutex::new(ClientState::new())),
         }),
     }
+}
+
+#[test]
+fn resolve_literals() {
+    let ipv4 = resolve_server_candidates("127.0.0.1", 9527).unwrap();
+    assert_eq!(ipv4, vec!["127.0.0.1:9527".parse().unwrap()]);
+    let ipv6 = resolve_server_candidates("::1", 9527).unwrap();
+    assert_eq!(ipv6, vec!["[::1]:9527".parse().unwrap()]);
 }
 
 #[tokio::test]

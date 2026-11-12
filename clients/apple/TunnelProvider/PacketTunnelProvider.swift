@@ -208,7 +208,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             let resolveStarted = ProcessInfo.processInfo.systemUptime
             Logger.network.noticeAndFile("[session:\(self.sessionID)] Resolving supernode hostname")
-            let candidates = self.resolveAllAddresses(launch.host)
+            let candidates = self.resolveAllAddresses(launch.host, port: launch.port)
             let resolveMs = Int(((ProcessInfo.processInfo.systemUptime - resolveStarted) * 1000).rounded())
             Logger.network.noticeAndFile(
                 "[session:\(self.sessionID)] Hostname resolution completed "
@@ -327,15 +327,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 onPackets: { [weak self] packets in
                     self?.writePacketsToTunnel(packets, metrics: writeMetrics)
                 },
-                onIpAssigned: { [weak self] ipv4, mask, ipv6, prefix in
+                onIpAssigned: { [weak self] assignment in
                     DispatchQueue.main.async {
                         guard let self, !self.stopRequested, self.sessionToken == token else { return }
-                        self.applyAssignedIp(
-                            ipv4: ipv4,
-                            ipv4Mask: mask,
-                            ipv6: ipv6,
-                            ipv6PrefixLen: prefix
-                        )
+                        self.applyAssignedIp(assignment)
                     }
                 }
             )
@@ -520,21 +515,23 @@ extension PacketTunnelProvider {
         }
     }
 
-    private func applyAssignedIp(ipv4: String, ipv4Mask: String, ipv6: String, ipv6PrefixLen: Int32) {
+    private func applyAssignedIp(_ assignment: TunnelAssignment) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard !stopRequested else { return }
         diagnostics.cancel()
+        let dns = launchConfiguration.flatMap { launch in
+            try? tunnelDnsServers(
+                assignment: assignment, configuredIpv4: launch.dnsIpv4, configuredIpv6: launch.dnsIpv6
+            )
+        } ?? []
         let configuration = TunnelConfiguration(
-            ipv4: ipv4,
-            mask: ipv4Mask,
-            ipv6: ipv6,
-            prefix: ipv6PrefixLen,
+            assignment: assignment,
             mtu: TunnelNetworkSettings.mtu(
                 cap: mtuCap,
                 sessionID: sessionID,
                 path: pathMonitor?.currentPath
             ) ?? tunnelSettings.latestMTU ?? mtuCap,
-            dns: launchConfiguration?.effectiveDNS(ipv4: !ipv4.isEmpty, ipv6: !ipv6.isEmpty) ?? []
+            dns: dns
         )
         if let update = tunnelSettings.enqueue(configuration) { applySettings(update) }
     }
@@ -733,7 +730,6 @@ extension PacketTunnelProvider {
             Logger.network.error("Write data to remote server error. \(error)")
         }
     }
-
 }
 
 extension PacketTunnelProvider {

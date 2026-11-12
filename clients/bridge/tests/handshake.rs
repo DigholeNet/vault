@@ -27,10 +27,15 @@ impl EdgeCallbacks for TestCallbacks {
         }
     }
 
-    fn on_ip_assigned(&self, ipv4: String, ipv4_mask: String, ipv6: String, ipv6_prefixlen: i32) {
-        let _ = self
-            .events
-            .send(Event::IpAssigned(ipv4, ipv4_mask, ipv6, ipv6_prefixlen));
+    fn on_ip_assigned(&self, assignment: vault_bridge::settings::TunnelAssignment) {
+        let ipv4 = assignment.ipv4.expect("IPv4 assignment");
+        let ipv6 = assignment.ipv6.expect("IPv6 assignment");
+        let _ = self.events.send(Event::IpAssigned(
+            ipv4.address,
+            ipv4.netmask,
+            ipv6.address,
+            ipv6.prefix_len.into(),
+        ));
     }
 
     fn on_error(&self, error: String) {

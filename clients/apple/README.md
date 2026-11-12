@@ -77,7 +77,7 @@ These checks do not activate a real tunnel; real tunnel tests need signed target
 - `Host`: Vault server hostname or IP address; required
 - `Port`: Server UDP port; defaults to 9527
 - `Password`: Authentication password; required
-- `MTU`: 1280–1427; empty uses automatic link-based sizing
+- `MTU`: 1280–1427; empty uses automatic link-based sizing; a value caps the automatic result
 - `IPv4 DNS`: Comma-separated IPv4 resolvers; empty uses `1.1.1.1,8.8.8.8`
 - `IPv6 DNS`: Comma-separated IPv6 resolvers; empty uses
   `2001:4860:4860::8888,2001:4860:4860::8844`
