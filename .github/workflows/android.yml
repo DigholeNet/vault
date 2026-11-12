@@ -27,7 +27,7 @@ on:
 
 jobs:
   detekt:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: clients/android
@@ -52,7 +52,7 @@ jobs:
         run: ./gradlew detekt --no-daemon
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: clients/android
