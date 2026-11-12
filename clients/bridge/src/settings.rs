@@ -246,17 +246,7 @@ fn parse_addresses(
     addresses
         .iter()
         .map(|value| {
-            value
-                .parse::<std::net::IpAddr>()
-                .ok()
-                .filter(|address| {
-                    matches!(
-                        (family, address),
-                        (AddressFamily::Ipv4, std::net::IpAddr::V4(_))
-                            | (AddressFamily::Ipv6, std::net::IpAddr::V6(_))
-                    )
-                })
-                .ok_or_else(|| SettingsError::from(field))
+            settings::parse_dns_address(value, family).ok_or_else(|| SettingsError::from(field))
         })
         .collect()
 }
@@ -305,6 +295,36 @@ mod tests {
         );
         let dns = tunnel_dns_servers(assignment, vec![], vec![]).unwrap();
         assert_eq!(dns.len(), 4);
+    }
+
+    #[test]
+    fn dns_mapped() {
+        let assignment =
+            parse_tunnel_assignment("".into(), "".into(), "fd00::2".into(), 96).unwrap();
+        for dns in ["::ffff:1.1.1.1", "::ffff:101:101"] {
+            assert!(!is_valid_dns_list(dns.into(), Some(true)), "{dns}");
+            let settings = EdgeSettings {
+                host: "vpn.example.com".into(),
+                port: "9527".into(),
+                password: "secret".into(),
+                dns_ipv4: "".into(),
+                dns_ipv6: dns.into(),
+                mtu: "".into(),
+                probe_domains: "".into(),
+            };
+            assert!(matches!(
+                validate_edge_settings(settings),
+                Err(SettingsError::DnsIpv6)
+            ));
+            assert!(matches!(
+                tunnel_dns_servers(assignment.clone(), vec![], vec![dns.into()]),
+                Err(SettingsError::DnsIpv6)
+            ));
+            assert!(matches!(
+                effective_dns_servers(false, true, vec![], vec![dns.into()]),
+                Err(SettingsError::DnsIpv6)
+            ));
+        }
     }
 
     #[test]

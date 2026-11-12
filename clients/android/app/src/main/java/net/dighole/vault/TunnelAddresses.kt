@@ -2,7 +2,7 @@
 package net.dighole.vault
 
 import net.dighole.vaultcore.uniffi.SettingsException
-import net.dighole.vaultcore.uniffi.parseTunnelAssignment
+import net.dighole.vaultcore.uniffi.TunnelAssignment
 import net.dighole.vaultcore.uniffi.tunnelDnsServers
 import java.net.Inet4Address
 import java.net.Inet6Address
@@ -14,7 +14,7 @@ internal data class TunnelAddresses(
     val ipv4Prefix: Int?,
     val ipv6: Inet6Address?,
     val ipv6Prefix: Int?,
-    private val coreAssignment: net.dighole.vaultcore.uniffi.TunnelAssignment
+    private val coreAssignment: TunnelAssignment
 ) {
     fun dns(configuredIpv4: List<String>, configuredIpv6: List<String>): List<InetAddress> = try {
         tunnelDnsServers(coreAssignment, configuredIpv4, configuredIpv6)
@@ -25,18 +25,13 @@ internal data class TunnelAddresses(
     }
 
     companion object {
-        fun parse(ipv4: String, mask: String, ipv6: String, prefix: Int): TunnelAddresses = try {
-            val assignment = parseTunnelAssignment(ipv4, mask, ipv6, prefix)
-            TunnelAddresses(
-                assignment.ipv4?.let { numericAddress(it.address) as Inet4Address },
-                assignment.ipv4?.prefixLen?.toInt(),
-                assignment.ipv6?.let { numericAddress(it.address) as Inet6Address },
-                assignment.ipv6?.prefixLen?.toInt(),
-                assignment
-            )
-        } catch (error: SettingsException) {
-            throw IllegalArgumentException(error.message, error)
-        }
+        fun from(assignment: TunnelAssignment): TunnelAddresses = TunnelAddresses(
+            assignment.ipv4?.let { numericAddress(it.address) as Inet4Address },
+            assignment.ipv4?.prefixLen?.toInt(),
+            assignment.ipv6?.let { numericAddress(it.address) as Inet6Address },
+            assignment.ipv6?.prefixLen?.toInt(),
+            assignment
+        )
 
         private fun numericAddress(value: String): InetAddress = InetAddress.getByName(value)
     }

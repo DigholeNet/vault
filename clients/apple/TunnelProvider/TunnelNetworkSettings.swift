@@ -210,6 +210,6 @@ enum TunnelNetworkSettings {
         guard let assignment = try? parseTunnelAssignment(
             ipv4: "", ipv4Mask: "", ipv6: ipv6, ipv6Prefixlen: prefixLen
         ), let network = try? tunnelIpv6Network(assignment: assignment) else { return ipv6 }
-        return network ?? ipv6
+        return network
     }
 }

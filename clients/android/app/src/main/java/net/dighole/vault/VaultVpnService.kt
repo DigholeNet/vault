@@ -27,6 +27,7 @@ import net.dighole.vaultcore.Edge
 import net.dighole.vaultcore.EdgeConfig
 import net.dighole.vaultcore.PeerId
 import net.dighole.vaultcore.uniffi.EdgeSettings
+import net.dighole.vaultcore.uniffi.TunnelAssignment
 import net.dighole.vaultcore.uniffi.VpnException
 import net.dighole.vaultcore.uniffi.resolveServerCandidates
 import net.dighole.vaultcore.uniffi.setFdBlocking
@@ -73,12 +74,6 @@ class VaultVpnService : VpnService() {
     private var serverHost: String = ""
     private var dnsIpv4List: List<String> = emptyList()
     private var dnsIpv6List: List<String> = emptyList()
-    private data class AssignedAddresses(
-        val ipv4: String,
-        val ipv4Mask: String,
-        val ipv6: String,
-        val ipv6PrefixLen: Int
-    )
 
     private var tunnelMtu: Int = VPN_MTU
     private var underlyingLinkMtu: Int? = null
@@ -266,8 +261,8 @@ class VaultVpnService : VpnService() {
                     vpnIoHandler?.enqueueDownlink(packets)
                 }
             },
-            onIpAssigned = { ipv4, ipv4Mask, ipv6, ipv6Prefixlen ->
-                handleEdgeIpAssigned(AssignedAddresses(ipv4, ipv4Mask, ipv6, ipv6Prefixlen), candidates, sessionToken)
+            onIpAssigned = { assignment ->
+                handleEdgeIpAssigned(assignment, candidates, sessionToken)
             },
             pendingCompletion = { error ->
                 sessionGate.update(sessionToken) {
@@ -300,7 +295,7 @@ class VaultVpnService : VpnService() {
     // Native/Android setup failures must be reported only to the current session.
     @Suppress("TooGenericExceptionCaught")
     private fun handleEdgeIpAssigned(
-        addresses: AssignedAddresses,
+        assignment: TunnelAssignment,
         addrs: List<String>,
         sessionToken: Long
     ) {
@@ -315,11 +310,10 @@ class VaultVpnService : VpnService() {
                 if (!sessionGate.updateIf(sessionToken, { sequence == tunnelConfigurationSequence }) {}) {
                     return@configure
                 }
-                val (ipv4, ipv4Mask, ipv6, ipv6Prefixlen) = addresses
                 try {
                     // Rust only notifies initial or changed IP configuration.
                     // Same-IP transport reconnects keep this TUN and its I/O.
-                    val newInterface = createVpnInterface(ipv4, ipv4Mask, ipv6, ipv6Prefixlen, addrs)
+                    val newInterface = createVpnInterface(assignment, addrs)
                     sessionGate.commit(
                         sessionToken,
                         newInterface,
@@ -331,6 +325,8 @@ class VaultVpnService : VpnService() {
                         }
                     ) { iface ->
                         vpnIoHandler = createTunnelIo(iface)
+                        val ipv4 = assignment.ipv4?.address.orEmpty()
+                        val ipv6 = assignment.ipv6?.address.orEmpty()
                         val publicIp = edge?.getConnectionStatus()?.publicIp.orEmpty()
                         connectedEvent = VpnStatusEvent.Connected(ipv4, ipv6, publicIp)
                         saveVpnState(true, ipv4, ipv6, publicIp)
@@ -571,14 +567,11 @@ class VaultVpnService : VpnService() {
     }
 
     private fun createVpnInterface(
-        assignedIp: String,
-        ipv4Mask: String,
-        assignedIpv6: String,
-        ipv6Prefixlen: Int,
+        assignment: TunnelAssignment,
         addrs: List<String>
     ): ParcelFileDescriptor {
         try {
-            val addresses = TunnelAddresses.parse(assignedIp, ipv4Mask, assignedIpv6, ipv6Prefixlen)
+            val addresses = TunnelAddresses.from(assignment)
             val resolvers = addresses.dns(dnsIpv4List, dnsIpv6List)
             val builder = Builder()
                 .setMtu(tunnelMtu)

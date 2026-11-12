@@ -153,19 +153,27 @@ pub fn clear() -> io::Result<()> {
     Ok(())
 }
 
-/// Read previous and current logs in chronological order without blocking writers.
+/// Read both generations in chronological order, replacing damaged UTF-8 bytes.
 pub fn read() -> io::Result<String> {
     let Some(path) = current_path()? else {
         return Ok(String::new());
     };
+    let lock = match lock_file(&path) {
+        Ok(lock) => lock,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(error) => return Err(error),
+    };
+    // Keep rotation and clear from changing generations between the two reads.
+    lock.lock()?;
     let mut parts = Vec::new();
     for path in [previous_path(&path), path.clone()] {
-        match std::fs::read_to_string(path) {
-            Ok(part) => parts.push(part),
+        match std::fs::read(path) {
+            Ok(bytes) => parts.push(String::from_utf8_lossy(&bytes).into_owned()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
     }
+    drop(lock);
     Ok(merge_chronologically(&parts))
 }
 
@@ -465,8 +473,10 @@ mod tests {
             std::env::temp_dir().join(format!("vault-file-log-read-test-{}", std::process::id()));
         let path = dir.join("vault.log");
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
         set_path(path.to_str().unwrap());
+        assert_eq!(read().unwrap(), "");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(read().unwrap(), "");
         append_record("INFO", "app", "current", None);
         rotate_for_new_session().unwrap();
         append_record("INFO", "rust", "next", None);
@@ -475,6 +485,89 @@ mod tests {
         clear().unwrap();
         assert_eq!(read().unwrap(), "");
         assert!(path.exists() && previous_path(&path).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_rotation() {
+        use std::io::Write;
+
+        let _lock = TEST_PATH_LOCK.lock().unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("vault-log-rotation-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("vault.log");
+        let previous = previous_path(&path);
+        let fifo = std::ffi::CString::new(previous.to_str().unwrap()).unwrap();
+        // SAFETY: fifo is a valid NUL-terminated path in this test's directory.
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        std::fs::write(
+            &path,
+            format!("current\n{}\n", "x".repeat(MAX_LOG_SIZE as usize)),
+        )
+        .unwrap();
+        set_path(path.to_str().unwrap());
+
+        let reader = std::thread::spawn(read);
+        // Opening the writer waits for read() to open prev. Keep it open to
+        // pause that read while append() attempts a size-triggered rotation.
+        let mut writer = OpenOptions::new().write(true).open(&previous).unwrap();
+        writer.write_all(b"previous\n").unwrap();
+        append("INFO appended");
+        drop(writer);
+        let content = reader.join().unwrap().unwrap();
+        assert!(content.contains("previous") && content.contains("appended"));
+        assert!(content.contains("current"));
+
+        // A later append can rotate after the reader has released the lock.
+        append("INFO after read");
+        assert!(
+            std::fs::read_to_string(previous)
+                .unwrap()
+                .contains("current")
+        );
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("current"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_utf8() {
+        let _lock = TEST_PATH_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("vault-log-utf8-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("vault.log");
+        set_path(path.to_str().unwrap());
+        let previous = "[2026-10-24 11:07:49.001Z] [INFO] [app] previous 旧日志";
+        let current = "[2026-10-24 11:07:50.001Z] [INFO] [app] current 当前日志";
+        for damage_previous in [true, false] {
+            let mut old = previous.as_bytes().to_vec();
+            let mut new = current.as_bytes().to_vec();
+            let damaged = if damage_previous { &mut old } else { &mut new };
+            damaged.extend_from_slice(b" \xe4\xb8");
+            std::fs::write(previous_path(&path), old).unwrap();
+            std::fs::write(&path, new).unwrap();
+            let expected = if damage_previous {
+                format!("{previous} \u{fffd}\n{current}")
+            } else {
+                format!("{previous}\n{current} \u{fffd}")
+            };
+            assert_eq!(read().unwrap(), expected);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_error() {
+        let _lock = TEST_PATH_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("vault-log-error-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("vault.log");
+        std::fs::create_dir_all(&path).unwrap();
+        set_path(path.to_str().unwrap());
+        assert_eq!(read().unwrap_err().kind(), io::ErrorKind::IsADirectory);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

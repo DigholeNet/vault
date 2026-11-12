@@ -208,13 +208,66 @@ impl UplinkCounters {
 }
 
 /// Resolve and order server candidates before a platform tunnel is enabled.
-/// This blocks the calling thread and must not run inside an async runtime.
+/// Uses the blocking OS resolver; platform callers must use a worker thread.
+/// Does not create a runtime, so Linux's synchronous startup callback can also
+/// call this while entered into its application runtime.
 pub fn resolve_server_candidates(host: &str, port: u16) -> Result<Vec<SocketAddr>, ClientError> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| ClientError::InternalError(error.to_string()))?;
-    runtime.block_on(resolve_candidates_async(&[host.to_string()], port))
+    use socket2::{SockAddr, SockAddrStorage};
+    use std::ffi::{CStr, CString};
+
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let host = CString::new(host).map_err(|error| ClientError::DnsFailed(error.to_string()))?;
+    let service = CString::new(port.to_string()).expect("numeric port has no NUL");
+    // Let the OS handle literals too, including NAT64 synthesis where supported.
+    // Explicit flags also avoid Darwin's implicit AI_ADDRCONFIG for zero flags.
+    let hints = libc::addrinfo {
+        ai_flags: libc::AI_NUMERICSERV,
+        ai_family: libc::AF_UNSPEC,
+        ai_socktype: libc::SOCK_DGRAM,
+        // SAFETY: remaining addrinfo fields accept zero/null for lookup hints.
+        ..unsafe { std::mem::zeroed() }
+    };
+    let mut result = std::ptr::null_mut();
+    // SAFETY: strings and hints stay live; getaddrinfo initializes result on success.
+    let status = unsafe { libc::getaddrinfo(host.as_ptr(), service.as_ptr(), &hints, &mut result) };
+    if status != 0 {
+        // SAFETY: gai_strerror returns a static NUL-terminated error description.
+        let error = unsafe { CStr::from_ptr(libc::gai_strerror(status)) };
+        return Err(ClientError::DnsFailed(error.to_string_lossy().into_owned()));
+    }
+
+    let mut candidates = Vec::new();
+    let mut cursor = result;
+    while !cursor.is_null() {
+        // SAFETY: the list and its sockaddr allocations remain live until freeaddrinfo.
+        let info = unsafe { &*cursor };
+        let mut storage = SockAddrStorage::zeroed();
+        if !info.ai_addr.is_null() && info.ai_addrlen <= storage.size_of() {
+            // SAFETY: getaddrinfo supplies a valid sockaddr and its matching length;
+            // the separate, zeroed destination is large enough for the copy.
+            let address = unsafe {
+                std::ptr::copy_nonoverlapping(
+                    info.ai_addr.cast::<u8>(),
+                    (&raw mut storage).cast::<u8>(),
+                    info.ai_addrlen as usize,
+                );
+                SockAddr::new(storage, info.ai_addrlen)
+            };
+            if let Some(address) = address.as_socket()
+                && !candidates.contains(&address)
+            {
+                candidates.push(address);
+            }
+        }
+        cursor = info.ai_next;
+    }
+    // SAFETY: result is the successful getaddrinfo allocation and is freed once.
+    unsafe { libc::freeaddrinfo(result) };
+    if candidates.is_empty() {
+        return Err(ClientError::DnsFailed("no addresses".to_string()));
+    }
+    candidates.sort_by_key(SocketAddr::is_ipv4);
+    Ok(candidates)
 }
 
 async fn resolve_candidates_async(
@@ -222,12 +275,14 @@ async fn resolve_candidates_async(
     port: u16,
 ) -> Result<Vec<SocketAddr>, ClientError> {
     let mut candidates: Vec<SocketAddr> = Vec::new();
-    let mut last_error = String::new();
+    let mut last_error = ClientError::DnsFailed("no addresses".to_string());
     for host in hosts {
-        let lookup = tokio::time::timeout(
-            Duration::from_secs(DNS_TIMEOUT_SECS),
-            tokio::net::lookup_host((host.trim_start_matches('[').trim_end_matches(']'), port)),
-        )
+        let lookup = tokio::time::timeout(Duration::from_secs(DNS_TIMEOUT_SECS), async {
+            let host = host.clone();
+            tokio::task::spawn_blocking(move || resolve_server_candidates(&host, port))
+                .await
+                .unwrap_or_else(|error| Err(ClientError::InternalError(error.to_string())))
+        })
         .await;
         match lookup {
             Ok(Ok(addrs)) => {
@@ -239,20 +294,16 @@ async fn resolve_candidates_async(
             }
             Ok(Err(e)) => {
                 warn!("Resolving {host} failed: {e}");
-                last_error = e.to_string();
+                last_error = e;
             }
             Err(_) => {
                 warn!("Resolving {host} timed out");
-                last_error = "timeout".to_string();
+                last_error = ClientError::DnsFailed("timeout".to_string());
             }
         }
     }
     if candidates.is_empty() {
-        return Err(ClientError::DnsFailed(if last_error.is_empty() {
-            "no addresses".to_string()
-        } else {
-            last_error
-        }));
+        return Err(last_error);
     }
     // Address-family preference belongs to the client, not platform glue.
     candidates.sort_by_key(SocketAddr::is_ipv4);

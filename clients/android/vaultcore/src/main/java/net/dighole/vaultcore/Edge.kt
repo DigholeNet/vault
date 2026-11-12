@@ -40,7 +40,7 @@ class Edge(
     val config: EdgeConfig,
     private val id: PeerId,
     private val onPackets: (List<ByteArray>) -> Unit,
-    private val onIpAssigned: (String, String, String, Int) -> Unit,
+    private val onIpAssigned: (TunnelAssignment) -> Unit,
     private val pendingCompletion: (Throwable?) -> Unit,
     private val protectSocket: ((Int) -> Boolean)? = null
 ) {
@@ -53,12 +53,7 @@ class Edge(
             }
 
             override fun onIpAssigned(assignment: TunnelAssignment) {
-                this@Edge.onIpAssigned(
-                    assignment.ipv4?.address.orEmpty(),
-                    assignment.ipv4?.netmask.orEmpty(),
-                    assignment.ipv6?.address.orEmpty(),
-                    assignment.ipv6?.prefixLen?.toInt() ?: 0
-                )
+                this@Edge.onIpAssigned(assignment)
             }
 
             override fun onError(error: String) {

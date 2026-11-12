@@ -42,6 +42,63 @@ fn resolve_literals() {
     assert_eq!(ipv6, vec!["[::1]:9527".parse().unwrap()]);
 }
 
+#[test]
+fn resolve_host() {
+    let addresses = resolve_server_candidates("localhost", 9527).unwrap();
+    assert!(!addresses.is_empty());
+    assert!(
+        addresses
+            .iter()
+            .all(|address| address.ip().is_loopback() && address.port() == 9527)
+    );
+    assert!(
+        addresses
+            .windows(2)
+            .all(|pair| !pair[0].is_ipv4() || pair[1].is_ipv4())
+    );
+    assert!(resolve_server_candidates("bad\0host", 9527).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn resolve_in_runtime() {
+    // Linux's synchronous startup callback runs inside app_main's block_on.
+    for (host, expected) in [
+        ("127.0.0.1", "127.0.0.1:9527"),
+        ("::1", "[::1]:9527"),
+        ("[::1]", "[::1]:9527"),
+    ] {
+        assert_eq!(
+            resolve_server_candidates(host, 9527).unwrap(),
+            vec![expected.parse::<SocketAddr>().unwrap()]
+        );
+    }
+}
+
+#[tokio::test]
+async fn resolve_candidates() {
+    let invalid = "bad\0host".to_string();
+    let hosts = [
+        invalid.clone(),
+        "127.0.0.1".to_string(),
+        "::1".to_string(),
+        "127.0.0.1".to_string(),
+        "[::1]".to_string(),
+    ];
+    assert_eq!(
+        resolve_candidates_async(&hosts, 9527).await.unwrap(),
+        vec![
+            "[::1]:9527".parse::<SocketAddr>().unwrap(),
+            "127.0.0.1:9527".parse().unwrap(),
+        ]
+    );
+    for hosts in [vec![], vec![invalid]] {
+        assert!(matches!(
+            resolve_candidates_async(&hosts, 9527).await,
+            Err(ClientError::DnsFailed(_))
+        ));
+    }
+}
+
 #[tokio::test]
 async fn receive_buffer() {
     for address in ["127.0.0.1:0", "[::1]:0"] {

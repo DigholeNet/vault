@@ -107,19 +107,22 @@ pub fn is_valid_domain(value: &str) -> bool {
     value.len() <= 253 && valid_domain(host)
 }
 
-pub fn parse_dns_list(value: &str, family: AddressFamily) -> Option<Vec<IpAddr>> {
-    let entries = parse_list(value, MAX_DNS_SERVERS)?;
-    entries
-        .into_iter()
-        .map(|entry| {
-            entry.parse::<IpAddr>().ok().filter(|address| {
-                matches!(family, AddressFamily::Any)
-                    || matches!(
-                        (family, address),
-                        (AddressFamily::Ipv4, IpAddr::V4(_)) | (AddressFamily::Ipv6, IpAddr::V6(_))
-                    )
-            })
+pub fn parse_dns_address(value: &str, family: AddressFamily) -> Option<IpAddr> {
+    value
+        .parse::<IpAddr>()
+        .ok()
+        .filter(|address| match (family, address) {
+            (AddressFamily::Any, _) | (AddressFamily::Ipv4, IpAddr::V4(_)) => true,
+            // Mapped addresses require IPv4 transport despite their IPv6 syntax.
+            (AddressFamily::Ipv6, IpAddr::V6(address)) => address.to_ipv4_mapped().is_none(),
+            _ => false,
         })
+}
+
+pub fn parse_dns_list(value: &str, family: AddressFamily) -> Option<Vec<IpAddr>> {
+    parse_list(value, MAX_DNS_SERVERS)?
+        .into_iter()
+        .map(|entry| parse_dns_address(entry, family))
         .collect()
 }
 
@@ -371,6 +374,30 @@ mod tests {
         assert_eq!(parse_mtu("1279"), None);
         assert_eq!(parse_mtu("1428"), None);
         assert_eq!(parse_mtu(""), Some(None));
+    }
+
+    #[test]
+    fn dns_family() {
+        for (dns, ipv4, ipv6) in [
+            ("1.1.1.1", true, false),
+            ("2001:4860:4860::8888", false, true),
+            ("::1", false, true),
+            ("64:ff9b::101:101", false, true),
+            ("::ffff:1.1.1.1", false, false),
+            ("::ffff:101:101", false, false),
+        ] {
+            assert_eq!(
+                parse_dns_list(dns, AddressFamily::Ipv4).is_some(),
+                ipv4,
+                "IPv4 DNS: {dns}"
+            );
+            assert_eq!(
+                parse_dns_list(dns, AddressFamily::Ipv6).is_some(),
+                ipv6,
+                "IPv6 DNS: {dns}"
+            );
+            assert!(parse_dns_list(dns, AddressFamily::Any).is_some(), "{dns}");
+        }
     }
 
     #[test]

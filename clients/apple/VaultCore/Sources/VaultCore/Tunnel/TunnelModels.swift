@@ -95,7 +95,6 @@ public struct TunnelConfiguration: Equatable, Sendable {
     public let prefix: Int32
     public let mtu: Int
     public let dns: [String]
-    public let assignment: TunnelAssignment?
 
     public init(ipv4: String, mask: String, ipv6: String, prefix: Int32, mtu: Int, dns: [String] = []) {
         self.ipv4 = ipv4
@@ -104,7 +103,6 @@ public struct TunnelConfiguration: Equatable, Sendable {
         self.prefix = prefix
         self.mtu = mtu
         self.dns = dns
-        assignment = try? parseTunnelAssignment(ipv4: ipv4, ipv4Mask: mask, ipv6: ipv6, ipv6Prefixlen: prefix)
     }
 
     public init(assignment: TunnelAssignment, mtu: Int, dns: [String]) {
@@ -114,7 +112,6 @@ public struct TunnelConfiguration: Equatable, Sendable {
         prefix = Int32(assignment.ipv6?.prefixLen ?? 0)
         self.mtu = mtu
         self.dns = dns
-        self.assignment = assignment
     }
 
     public var addresses: String { ipv6.isEmpty ? ipv4 : "\(ipv4)/\(ipv6)" }
