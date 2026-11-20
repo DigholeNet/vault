@@ -7,10 +7,8 @@ on:
     branches: [main, develop]
   pull_request:
 
-# rustsec/audit-check creates check runs with the GITHUB_TOKEN.
 permissions:
   contents: read
-  checks: write
 
 jobs:
   linux:
@@ -58,9 +56,9 @@ jobs:
         run: scripts/test-network-namespace.sh
 
       - name: Security audit
-        uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit --file Cargo.lock
 
   macos:
     runs-on: macos-latest
