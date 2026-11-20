@@ -7,8 +7,8 @@ use super::*;
 struct NoCallbacks;
 impl ClientCallbacks for NoCallbacks {
     fn on_packets(&self, _: Vec<Vec<u8>>) {}
-    fn on_ip_assigned(&self, _: crate::settings::TunnelAssignment) -> Result<(), String> {
-        Ok(())
+    fn on_ip_assigned(&self, _: crate::settings::TunnelAssignment, setup: Arc<TunnelSetup>) {
+        setup.complete(Ok(()));
     }
     fn on_error(&self, _: String) {}
 }

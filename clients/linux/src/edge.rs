@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: MIT
 use crate::config::EdgeConfig;
-use crate::interface::FamilyExits;
 use crate::storage::SimpleFileStorage;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, mpsc::Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tracing::{debug, info, warn};
-use vault_core::client::{ClientCallbacks, ClientConfig, ClientSession, TrafficStats};
-use vault_core::device::{Ipv4, Ipv6, TunTapDevice};
+use vault_core::client::{ClientCallbacks, ClientConfig, ClientSession, TrafficStats, TunnelSetup};
+use vault_core::device::TunTapDevice;
+use vault_core::settings::TunnelAssignment;
 use vault_core::{Buffer, PeerId};
+
+pub type Assignment = (TunnelAssignment, Arc<TunnelSetup>);
 
 /// Thin platform adapter over `vault_core::client::ClientSession`.
 ///
@@ -19,31 +21,17 @@ use vault_core::{Buffer, PeerId};
 /// device and the platform callbacks (route/DNS setup and rollback).
 pub struct Edge {
     session: Arc<ClientSession>,
-    configuration_error: Arc<Mutex<Option<String>>>,
     stop: Arc<AtomicBool>,
     reader: Option<JoinHandle<()>>,
 }
 
 impl Edge {
-    pub fn new<F>(
-        config: EdgeConfig,
-        device: TunTapDevice,
-        exits: Arc<Mutex<FamilyExits>>,
-        hosts: Vec<SocketAddr>,
-        on_ip_assigned: F,
-    ) -> anyhow::Result<Self>
-    where
-        F: Fn(
-                &FamilyExits,
-                &TunTapDevice,
-                &[SocketAddr],
-                Option<&Ipv4>,
-                Option<&Ipv6>,
-            ) -> anyhow::Result<()>
-            + Send
-            + Sync
-            + 'static,
-    {
+    pub fn new(
+        config: &EdgeConfig,
+        device: Arc<TunTapDevice>,
+        hosts: &[SocketAddr],
+        assignments: Sender<Assignment>,
+    ) -> anyhow::Result<Self> {
         // Load or generate the persistent device id. A corrupt storage file
         // is a hard error: silently regenerating the id would lose the IP
         // lease the server assigned to it.
@@ -58,8 +46,6 @@ impl Edge {
                 id
             }
         };
-
-        let device = Arc::new(device);
 
         // The TUN fd stays in blocking mode: the reader thread sleeps in the
         // kernel until a packet arrives instead of polling a non-blocking fd.
@@ -80,14 +66,9 @@ impl Edge {
             socket_protect: None,
         };
 
-        let configuration_error = Arc::new(Mutex::new(None));
         let callbacks = Arc::new(EdgeCallbacks {
-            configured: AtomicBool::new(false),
-            configuration_error: configuration_error.clone(),
             device: device.clone(),
-            exits,
-            hosts,
-            on_ip_assigned,
+            assignments,
         });
 
         let session = Arc::new(ClientSession::start(client_config, callbacks)?);
@@ -123,17 +104,9 @@ impl Edge {
 
         Ok(Self {
             session,
-            configuration_error,
             stop,
             reader: Some(reader),
         })
-    }
-
-    pub fn configuration_error(&self) -> Option<String> {
-        self.configuration_error
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
     }
 
     pub fn traffic_stats(&self) -> TrafficStats {
@@ -171,29 +144,13 @@ impl Drop for Edge {
     }
 }
 
-/// Bridges session events to the TUN device and the platform route/DNS setup.
-/// Fires on the session's worker threads: must stay cheap and non-blocking.
-struct EdgeCallbacks<F> {
-    configured: AtomicBool,
-    configuration_error: Arc<Mutex<Option<String>>>,
+/// Bridges session events to the TUN and forwards setup requests to the runner.
+struct EdgeCallbacks {
     device: Arc<TunTapDevice>,
-    exits: Arc<Mutex<FamilyExits>>,
-    hosts: Vec<SocketAddr>,
-    on_ip_assigned: F,
+    assignments: Sender<Assignment>,
 }
 
-impl<F> ClientCallbacks for EdgeCallbacks<F>
-where
-    F: Fn(
-            &FamilyExits,
-            &TunTapDevice,
-            &[SocketAddr],
-            Option<&Ipv4>,
-            Option<&Ipv6>,
-        ) -> anyhow::Result<()>
-        + Send
-        + Sync,
-{
+impl ClientCallbacks for EdgeCallbacks {
     fn on_packets(&self, packets: Vec<Vec<u8>>) {
         for packet in packets {
             if let Err(e) = self.device.write(&packet) {
@@ -205,49 +162,8 @@ where
         }
     }
 
-    fn on_ip_assigned(
-        &self,
-        assignment: vault_core::settings::TunnelAssignment,
-    ) -> Result<(), String> {
-        let result = (|| -> anyhow::Result<()> {
-            let ipv4 = assignment.ipv4.as_ref().map(|assigned| Ipv4 {
-                ip: assigned.address,
-                netmask: assigned.netmask,
-            });
-            let ipv6 = assignment.ipv6.as_ref().map(|assigned| Ipv6 {
-                ip: assigned.address,
-                prefix_len: assigned.prefix_len,
-            });
-            let exits = self
-                .exits
-                .lock()
-                .map_err(|_| anyhow::anyhow!("exits lock poisoned"))?;
-            (self.on_ip_assigned)(
-                &exits,
-                &self.device,
-                &self.hosts,
-                ipv4.as_ref(),
-                ipv6.as_ref(),
-            )
-        })();
-        match result {
-            Ok(()) => {
-                self.configured.store(true, Ordering::Relaxed);
-                Ok(())
-            }
-            Err(e) => {
-                let error = format!("{e:#}");
-                // Startup configuration failures remain fatal. Once running,
-                // a disappearing interface during a switch is retryable.
-                if !self.configured.load(Ordering::Relaxed) {
-                    *self
-                        .configuration_error
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner()) = Some(error.clone());
-                }
-                Err(error)
-            }
-        }
+    fn on_ip_assigned(&self, assignment: TunnelAssignment, setup: Arc<TunnelSetup>) {
+        let _ = self.assignments.send((assignment, setup));
     }
 
     fn on_error(&self, error: String) {

@@ -40,9 +40,11 @@ See the [shared diagnostics contract](../../docs/diagnostics-engine.md).
 
 The core resolves and orders candidates, races IPv4/IPv6 handshakes, detects
 transport failure, coalesces OS network-change events and retries with backoff. `on_ip_assigned` supplies a
-core-validated `TunnelAssignment` after the first successful handshake and only repeats when
-the assigned addresses, mask or prefix actually change. Same-IP reconnects
-keep the existing TUN. Failed configuration may retry.
+core-validated `TunnelAssignment` and a one-shot `RustTunnelSetup` after a
+successful handshake. The platform completes setup after applying the TUN,
+routes and DNS. Connection status and packet delivery wait for that
+acknowledgment. A completion from a cancelled attempt is ignored. Reconnects
+with the same confirmed address, mask and prefix keep the existing TUN.
 
 Android and Apple own UI, settings storage, OS tunnel lifecycle, routes/DNS,
 socket protection, TUN I/O and physical-network notifications. Before enabling

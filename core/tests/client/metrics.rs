@@ -52,8 +52,8 @@ impl ClientCallbacks for DeliveryCallbacks {
         self.delivered.send(packets).unwrap();
     }
 
-    fn on_ip_assigned(&self, _: crate::settings::TunnelAssignment) -> Result<(), String> {
-        Ok(())
+    fn on_ip_assigned(&self, _: crate::settings::TunnelAssignment, setup: Arc<TunnelSetup>) {
+        setup.complete(Ok(()));
     }
 
     fn on_error(&self, error: String) {

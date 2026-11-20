@@ -43,7 +43,7 @@ struct TunnelPacketWriterTests {
                     return true
                 }
             },
-            onIpAssigned: { _ in }
+            onIpAssigned: { _, _ in }
         )
 
         callbacks.onDataBatch(packets: packets)
@@ -67,7 +67,7 @@ struct TunnelPacketWriterTests {
                     return true
                 }
             },
-            onIpAssigned: { _ in }
+            onIpAssigned: { _, _ in }
         )
 
         callbacks.onDataBatch(packets: [])

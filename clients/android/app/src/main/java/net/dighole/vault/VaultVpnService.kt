@@ -27,6 +27,7 @@ import net.dighole.vaultcore.Edge
 import net.dighole.vaultcore.EdgeConfig
 import net.dighole.vaultcore.PeerId
 import net.dighole.vaultcore.uniffi.EdgeSettings
+import net.dighole.vaultcore.uniffi.RustTunnelSetup
 import net.dighole.vaultcore.uniffi.TunnelAssignment
 import net.dighole.vaultcore.uniffi.VpnException
 import net.dighole.vaultcore.uniffi.resolveServerCandidates
@@ -261,8 +262,8 @@ class VaultVpnService : VpnService() {
                     vpnIoHandler?.enqueueDownlink(packets)
                 }
             },
-            onIpAssigned = { assignment ->
-                handleEdgeIpAssigned(assignment, candidates, sessionToken)
+            onIpAssigned = { assignment, setup ->
+                handleEdgeIpAssigned(assignment, setup, candidates, sessionToken)
             },
             pendingCompletion = { error ->
                 sessionGate.update(sessionToken) {
@@ -296,18 +297,23 @@ class VaultVpnService : VpnService() {
     @Suppress("TooGenericExceptionCaught")
     private fun handleEdgeIpAssigned(
         assignment: TunnelAssignment,
+        setup: RustTunnelSetup,
         addrs: List<String>,
         sessionToken: Long
     ) {
         trace("IP_ASSIGNED_CALLBACK")
         var sequence = 0L
-        if (!sessionGate.update(sessionToken) {
+        if (!sessionGate.updateIf(sessionToken, setup::isPending) {
             tunnelConfigurationSequence++
             sequence = tunnelConfigurationSequence
-        }) return
+        }) {
+            setup.complete("VPN session ended")
+            return
+        }
+        val currentSetup = { sequence == tunnelConfigurationSequence && setup.isPending() }
         scope.launch {
             sessionGate.configure {
-                if (!sessionGate.updateIf(sessionToken, { sequence == tunnelConfigurationSequence }) {}) {
+                if (!sessionGate.updateIf(sessionToken, currentSetup) {}) {
                     return@configure
                 }
                 try {
@@ -317,7 +323,7 @@ class VaultVpnService : VpnService() {
                     sessionGate.commit(
                         sessionToken,
                         newInterface,
-                        condition = { sequence == tunnelConfigurationSequence },
+                        condition = currentSetup,
                         onCreated = {
                             // establish() supersedes the old Android TUN even
                             // when a newer IP update has already arrived.
@@ -325,11 +331,13 @@ class VaultVpnService : VpnService() {
                         }
                     ) { iface ->
                         vpnIoHandler = createTunnelIo(iface)
+                        if (!setup.complete(null)) {
+                            closeTunnelIo()
+                            return@commit
+                        }
                         val ipv4 = assignment.ipv4?.address.orEmpty()
                         val ipv6 = assignment.ipv6?.address.orEmpty()
-                        val publicIp = edge?.getConnectionStatus()?.publicIp.orEmpty()
-                        connectedEvent = VpnStatusEvent.Connected(ipv4, ipv6, publicIp)
-                        saveVpnState(true, ipv4, ipv6, publicIp)
+                        connectedEvent = VpnStatusEvent.Connected(ipv4, ipv6, "")
                         serviceRunning.set(true)
                         connectJob = null
                         vpnIoHandler?.startReadingAndWriting()
@@ -339,6 +347,9 @@ class VaultVpnService : VpnService() {
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
+                    if (!setup.complete(error.message ?: "VPN interface configuration failed")) {
+                        return@configure
+                    }
                     sessionGate.updateIf(sessionToken, { sequence == tunnelConfigurationSequence }) {
                         Log.e(TAG, "Failed to configure VPN interface", error)
                         connectJob = null
@@ -348,6 +359,8 @@ class VaultVpnService : VpnService() {
                     }
                 }
             }
+        }.invokeOnCompletion {
+            setup.complete("VPN interface configuration cancelled")
         }
     }
 
@@ -639,11 +652,12 @@ class VaultVpnService : VpnService() {
             while (serviceRunning.get() && isActive) {
                 try {
                     edge?.let { e ->
-                        val status = e.getConnectionStatus()
                         val stats = e.getTrafficStats()
                         // Native calls may finish after disconnect cancelled us.
                         coroutineContext.ensureActive()
                         sessionGate.update(sessionToken) {
+                            // Read status alongside the addresses committed by this session.
+                            val status = e.getConnectionStatus()
                             val connected = status.connected
                             val publicIpChanged = connected && connectedEvent?.publicIp != status.publicIp
                             if (lastCoreConnected != connected || publicIpChanged) {
@@ -652,9 +666,7 @@ class VaultVpnService : VpnService() {
                                     connectedEvent?.let { cached ->
                                         val event = cached.copy(publicIp = status.publicIp)
                                         connectedEvent = event
-                                        if (publicIpChanged) {
-                                            saveVpnState(true, event.ipv4, event.ipv6, event.publicIp)
-                                        }
+                                        saveVpnState(true, event.ipv4, event.ipv6, event.publicIp)
                                         showConnected(event)
                                     }
                                 } else {

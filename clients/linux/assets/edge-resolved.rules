@@ -1,11 +1,10 @@
-// Grant only the DNS actions used by edge's resolved and NetworkManager backends.
+// Grant only the systemd-resolved actions used by edge.
 polkit.addRule(function(action, subject) {
     if (subject.user == "vault" &&
         (action.id == "org.freedesktop.resolve1.set-dns-servers" ||
          action.id == "org.freedesktop.resolve1.set-domains" ||
          action.id == "org.freedesktop.resolve1.flush-caches" ||
-         action.id == "org.freedesktop.resolve1.revert" ||
-         action.id == "org.freedesktop.NetworkManager.reload")) {
+         action.id == "org.freedesktop.resolve1.revert")) {
         return polkit.Result.YES;
     }
 });

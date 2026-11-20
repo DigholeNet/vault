@@ -52,6 +52,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var mtuCap: Int = TunnelConstants.mtuUpperBound
     private var serverCandidates: [String] = []
     private var tunnelSettings = TunnelSettingsState()
+    private var pendingSetup: (configuration: TunnelConfiguration, setup: RustTunnelSetup)?
     private var assignedIp: String { tunnelSettings.applied?.addresses ?? "" }
     private var pathMonitor: NWPathMonitor?
     private var lastNetworkPath: String?
@@ -327,10 +328,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 onPackets: { [weak self] packets in
                     self?.writePacketsToTunnel(packets, metrics: writeMetrics)
                 },
-                onIpAssigned: { [weak self] assignment in
+                onIpAssigned: { [weak self] assignment, setup in
                     DispatchQueue.main.async {
-                        guard let self, !self.stopRequested, self.sessionToken == token else { return }
-                        self.applyAssignedIp(assignment)
+                        guard let self, !self.stopRequested, self.sessionToken == token else {
+                            _ = setup.complete(error: "Tunnel session ended")
+                            return
+                        }
+                        self.applyAssignedIp(assignment, setup: setup)
                     }
                 }
             )
@@ -425,6 +429,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         settingsTimeoutWorkItem?.cancel()
         settingsTimeoutWorkItem = nil
         tunnelSettings.reset()
+        pendingSetup = nil
         launchConfiguration = nil
         let completion = pendingStart?.takeCompletion()
         pendingStart = nil
@@ -515,15 +520,25 @@ extension PacketTunnelProvider {
         }
     }
 
-    private func applyAssignedIp(_ assignment: TunnelAssignment) {
+    private func applyAssignedIp(_ assignment: TunnelAssignment, setup: RustTunnelSetup) {
         dispatchPrecondition(condition: .onQueue(.main))
-        guard !stopRequested else { return }
+        guard setup.isPending() else { return }
         diagnostics.cancel()
-        let dns = launchConfiguration.flatMap { launch in
-            try? tunnelDnsServers(
-                assignment: assignment, configuredIpv4: launch.dnsIpv4, configuredIpv6: launch.dnsIpv6
+        guard let launchConfiguration else {
+            _ = setup.complete(error: "Missing tunnel configuration")
+            return
+        }
+        let dns: [String]
+        do {
+            dns = try tunnelDnsServers(
+                assignment: assignment,
+                configuredIpv4: launchConfiguration.dnsIpv4,
+                configuredIpv6: launchConfiguration.dnsIpv6
             )
-        } ?? []
+        } catch {
+            _ = setup.complete(error: error.localizedDescription)
+            return
+        }
         let configuration = TunnelConfiguration(
             assignment: assignment,
             mtu: TunnelNetworkSettings.mtu(
@@ -533,7 +548,20 @@ extension PacketTunnelProvider {
             ) ?? tunnelSettings.latestMTU ?? mtuCap,
             dns: dns
         )
-        if let update = tunnelSettings.enqueue(configuration) { applySettings(update) }
+        pendingSetup = (configuration, setup)
+        let update = tunnelSettings.enqueue(configuration)
+        confirmSetup(applied: tunnelSettings.readyNetwork)
+        if let update { applySettings(update) }
+    }
+
+    private func confirmSetup(applied: TunnelConfiguration?) {
+        guard let pending = pendingSetup, let applied,
+              pending.configuration.hasSameNetwork(as: applied) else { return }
+        pendingSetup = nil
+        guard pending.setup.complete(error: nil), pendingStart?.isPending == true else { return }
+        finishStart(with: nil)
+        startStatsPolling()
+        readPacketFromTunnel()
     }
 
     private func applySettings(_ update: TunnelSettingsState.Update) {
@@ -561,6 +589,7 @@ extension PacketTunnelProvider {
         DispatchWorkItem { [weak self] in
             guard let self, !self.stopRequested, self.sessionToken == token,
                   self.tunnelSettings.outstanding == update else { return }
+            _ = self.pendingSetup?.setup.complete(error: "Network settings timed out")
             Logger.network.errorAndFile("[session:\(self.sessionID)] OS settings request timed out; recycling provider process")
             Self.settingsRestartRequired = true
             let error = NEVPNError(.connectionFailed)
@@ -588,6 +617,18 @@ extension PacketTunnelProvider {
             return
         }
         if let error {
+            if let pending = pendingSetup {
+                if let next = tunnelSettings.next() {
+                    applySettings(next)
+                    return
+                }
+                if !pending.configuration.hasSameNetwork(as: update.configuration) {
+                    confirmSetup(applied: tunnelSettings.applied)
+                    return
+                }
+                pendingSetup = nil
+                guard pending.setup.complete(error: error.localizedDescription) else { return }
+            }
             Logger.network.errorAndFile("Failed to set network settings: \(error)")
             if pendingStart?.isPending == true {
                 finishStart(with: error)
@@ -599,13 +640,8 @@ extension PacketTunnelProvider {
         Logger.network.noticeAndFile(
             "[session:\(sessionID)] Tunnel settings applied revision=\(update.revision) mtu=\(update.configuration.mtu)"
         )
-        if let next = tunnelSettings.next() {
-            applySettings(next)
-        } else if pendingStart?.isPending == true {
-            finishStart(with: nil)
-            startStatsPolling()
-            readPacketFromTunnel()
-        }
+        confirmSetup(applied: update.configuration)
+        if let next = tunnelSettings.next() { applySettings(next) }
     }
 
     func diagnosticContext() -> AppleDiagnosticContext? {

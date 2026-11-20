@@ -54,7 +54,7 @@ jobs:
           sudo sysctl -w "net.ipv4.ping_group_range=$ping_test_gid $ping_test_gid"
           cargo test --locked -p vault-core --features test diagnostics::transport::tests::ping_loopback -- --exact --ignored
 
-      - name: Verify server network setup in an isolated Linux namespace
+      - name: Verify Linux network and resolver mount namespaces
         run: scripts/test-network-namespace.sh
 
       - name: Security audit

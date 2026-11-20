@@ -28,6 +28,7 @@ private func configuration(_ ip: String, mtu: Int = 1427, dns: [String] = []) ->
     #expect(state.complete(first, succeeded: true) == true)
     let changedRequest = state.enqueue(configuration("10.0.0.3"))
     let changed = try #require(changedRequest)
+    #expect(state.readyNetwork == nil)
     #expect(state.complete(changed, succeeded: false) == true)
     #expect(state.applied == initial)
     #expect(state.generation == first.revision)
@@ -154,6 +155,7 @@ private func configuration(_ ip: String, mtu: Int = 1427, dns: [String] = []) ->
     var state = TunnelSettingsState()
     let first = TunnelConfiguration(ipv4: "10.0.0.2", mask: "255.255.255.0", ipv6: "", prefix: 0, mtu: 1427, dns: ["1.1.1.1"])
     let second = TunnelConfiguration(ipv4: first.ipv4, mask: first.mask, ipv6: "", prefix: 0, mtu: first.mtu, dns: ["8.8.8.8"])
+    #expect(!first.hasSameNetwork(as: second))
     let initialRequest = state.enqueue(first)
     let initial = try #require(initialRequest)
     let committed = state.complete(initial, succeeded: true)
@@ -179,6 +181,7 @@ private func configuration(_ ip: String, mtu: Int = 1427, dns: [String] = []) ->
     let updateRequest = state.updateMTU(1280)
     let update = try #require(updateRequest)
     #expect(state.applied?.mtu == 1427)
+    #expect(state.readyNetwork == initial.configuration)
     #expect(update.configuration == configuration("10.0.0.2", mtu: 1280))
     #expect(state.complete(update, succeeded: true) == true)
     #expect(state.applied?.mtu == 1280)
@@ -201,6 +204,7 @@ private func configuration(_ ip: String, mtu: Int = 1427, dns: [String] = []) ->
         let nextRequest = state.next()
         let next = try #require(nextRequest)
         #expect(next.configuration == configuration(latestIP, mtu: 1280, dns: ["1.1.1.1"]))
+        #expect(applying.configuration.hasSameNetwork(as: next.configuration) == !hasPending)
     }
 }
 

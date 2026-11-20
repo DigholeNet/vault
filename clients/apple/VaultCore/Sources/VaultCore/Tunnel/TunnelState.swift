@@ -20,6 +20,12 @@ public struct TunnelSettingsState {
     public var isApplying: Bool { applying != nil || pending != nil }
     /// The OS call still in progress, including one invalidated by cleanup.
     public var outstanding: Update? { applying }
+    /// An applied network remains ready while only its MTU is being updated.
+    public var readyNetwork: TunnelConfiguration? {
+        guard let applied,
+              applying?.configuration.hasSameNetwork(as: applied) ?? true else { return nil }
+        return applied
+    }
     public var latestMTU: Int? {
         if let pending { return pending.mtu }
         if let applying, applying.revision > invalidatedThrough { return applying.configuration.mtu }

@@ -19,7 +19,9 @@ ProtectHome=yes
 ProtectSystem=strict
 StateDirectory=vault
 LogsDirectory=vault
-ReadWritePaths=/var/log/vault /run
+ReadWritePaths=/var/log/vault /run -/etc/resolv.conf
+BindReadOnlyPaths=/etc:/run/vault-resolver-view:norbind
+Environment=VAULT_RESOLVER_HOST_VIEW=/run/vault-resolver-view/resolv.conf
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE
 DeviceAllow=/dev/net/tun rw

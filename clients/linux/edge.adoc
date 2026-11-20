@@ -61,18 +61,17 @@ The process retains CAP_NET_ADMIN, CAP_NET_RAW and CAP_DAC_OVERRIDE for network 
 SIGINT and SIGTERM use the same graceful shutdown and network cleanup path as *-s quit*.
 
 == DNS
-Automatic DNS supports systemd-resolved and NetworkManager with Polkit
-authorization. With resolved's local stub, Edge configures DNS and the *~.*
+With systemd-resolved's local stub and Polkit authorization,
+Edge configures DNS and the *~.*
 routing domain on its own TUN and reverts the link settings on exit.
 
-When NetworkManager generates */etc/resolv.conf*, Edge replaces its active
-nameservers after address assignment and checks them every 2 seconds after
-NetworkManager rewrites the file. Startup and exit use
-*nmcli general reload dns-rc*, so NetworkManager regenerates DNS from its current
-connections; Edge does not save or restore a historical DNS snapshot.
-
-Other resolver setups, including */run/systemd/resolve/resolv.conf* uplink mode,
-require manual DNS configuration. Each resolver command has a 2s timeout.
+Otherwise, Edge checks the nameservers in */etc/resolv.conf* every two seconds,
+including when NetworkManager generates the file. It needs write access only
+when the nameserver list differs from the selected servers. Edge journals edits
+before writing. Normal shutdown or the next startup restores an Edge-owned edit
+while preserving replacement files and unrelated changes. With the file backend,
+replacement of the resolver file causes Edge to exit and systemd to restart it
+with a fresh writable mount. Each resolver command has a two-second timeout.
 
 == Route recovery
 Reserve route protocol *242* for Edge within its network namespace. On restart,

@@ -2,17 +2,17 @@
 //! Integration test for the UniFFI-facing RustEdge API against the shared
 //! mock server (vault_core::test_utils).
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::timeout;
-use vault_bridge::{EdgeCallbacks, RustEdge};
+use vault_bridge::{EdgeCallbacks, RustEdge, RustTunnelSetup, VpnError};
 use vault_core::test_utils::run_mock_server;
 
 #[derive(Debug)]
 enum Event {
     Data,
-    IpAssigned(String, String, String, i32),
+    IpAssigned(String, String, String, i32, Arc<RustTunnelSetup>),
     Error(String),
 }
 
@@ -27,7 +27,11 @@ impl EdgeCallbacks for TestCallbacks {
         }
     }
 
-    fn on_ip_assigned(&self, assignment: vault_bridge::settings::TunnelAssignment) {
+    fn on_ip_assigned(
+        &self,
+        assignment: vault_bridge::settings::TunnelAssignment,
+        setup: Arc<RustTunnelSetup>,
+    ) {
         let ipv4 = assignment.ipv4.expect("IPv4 assignment");
         let ipv6 = assignment.ipv6.expect("IPv6 assignment");
         let _ = self.events.send(Event::IpAssigned(
@@ -35,6 +39,7 @@ impl EdgeCallbacks for TestCallbacks {
             ipv4.netmask,
             ipv6.address,
             ipv6.prefix_len.into(),
+            setup,
         ));
     }
 
@@ -75,16 +80,24 @@ async fn full_handshake_heartbeat_and_data() {
         .expect("timeout waiting for IP assignment")
         .expect("callback channel closed");
 
-    match event {
-        Event::IpAssigned(ipv4, mask, ipv6, prefixlen) => {
+    let setup = match event {
+        Event::IpAssigned(ipv4, mask, ipv6, prefixlen, setup) => {
             assert_eq!(ipv4, "10.0.0.2");
             assert_eq!(mask, "255.255.255.0");
             assert_eq!(ipv6, "fd00::2");
             assert_eq!(prefixlen, 64);
+            setup
         }
         Event::Error(e) => panic!("unexpected error: {}", e),
         other => panic!("unexpected event: {:?}", other),
-    }
+    };
+    assert!(!edge.is_connected());
+    assert!(matches!(
+        edge.write_data(vec![1]),
+        Err(VpnError::NotConnected)
+    ));
+    assert!(setup.complete(None));
+    assert!(!setup.complete(None));
 
     timeout(Duration::from_secs(1), async {
         while !edge.is_connected() {

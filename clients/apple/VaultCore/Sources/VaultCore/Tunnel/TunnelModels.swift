@@ -115,6 +115,12 @@ public struct TunnelConfiguration: Equatable, Sendable {
     }
 
     public var addresses: String { ipv6.isEmpty ? ipv4 : "\(ipv4)/\(ipv6)" }
+
+    /// Addresses, routes and DNS that must be applied for tunnel readiness.
+    public func hasSameNetwork(as other: TunnelConfiguration) -> Bool {
+        ipv4 == other.ipv4 && mask == other.mask && ipv6 == other.ipv6
+            && prefix == other.prefix && dns == other.dns
+    }
 }
 
 // MARK: - Traffic snapshot

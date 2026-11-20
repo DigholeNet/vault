@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{interval, sleep};
 use tracing::{debug, info, warn};
@@ -137,13 +137,38 @@ impl From<anyhow::Error> for ClientError {
 pub trait ClientCallbacks: Send + Sync {
     /// A batch of decrypted IP packets from the tunnel.
     fn on_packets(&self, packets: Vec<Vec<u8>>);
-    /// Apply addresses and platform routes on initial assignment or a real
-    /// address/mask/prefix change. Reconnects with the same configuration do
-    /// not repeat this callback. Failed setup may be retried.
-    fn on_ip_assigned(&self, assignment: crate::settings::TunnelAssignment) -> Result<(), String>;
+    /// Apply the platform tunnel, routes and DNS, then complete `setup`.
+    /// Reconnects reuse a previously confirmed address, mask and prefix.
+    fn on_ip_assigned(
+        &self,
+        assignment: crate::settings::TunnelAssignment,
+        setup: Arc<TunnelSetup>,
+    );
     /// Runtime error notification. The session keeps retrying reconnects on
     /// its own; this is informational (e.g. for UI status updates).
     fn on_error(&self, error: String);
+}
+
+/// One completion for the connection attempt that requested OS configuration.
+#[derive(Debug)]
+pub struct TunnelSetup(Mutex<Option<oneshot::Sender<Result<(), String>>>>);
+
+impl TunnelSetup {
+    pub fn is_pending(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|sender| !sender.is_closed())
+    }
+
+    pub fn complete(&self, result: Result<(), String>) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+            .is_some_and(|sender| sender.send(result).is_ok())
+    }
 }
 
 pub struct ClientConfig {
@@ -763,14 +788,34 @@ impl ClientInner {
             response.ipv6_prefixlen,
         )
         .map_err(ClientError::HandshakeFailed)?;
-        let assigned = self
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .assigned_addresses
-            .clone();
-        // Start the uplink sender BEFORE notifying the platform, so that
-        // write_packet works as soon as on_ip_assigned fires.
+        let needs_setup = {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let changed = state.assigned_addresses.as_ref() != Some(&addresses);
+            if changed {
+                // The OS may have replaced the previous tunnel even if the
+                // new configuration fails or the attempt is cancelled.
+                state.assigned_addresses = None;
+            }
+            changed
+        };
+        if needs_setup {
+            let (complete, ready) = oneshot::channel();
+            self.callbacks.on_ip_assigned(
+                addresses.clone(),
+                Arc::new(TunnelSetup(Mutex::new(Some(complete)))),
+            );
+            // The server holds the unconfirmed handshake for 15 seconds.
+            tokio::time::timeout(Duration::from_secs(10), ready)
+                .await
+                .map_err(|_| ClientError::InternalError("platform configuration timed out".into()))?
+                .map_err(|_| {
+                    ClientError::InternalError("platform configuration was abandoned".into())
+                })?
+                .map_err(|error| {
+                    ClientError::InternalError(format!("platform configuration failed: {error}"))
+                })?;
+        }
+
         let (uplink_tx, uplink_rx) = mpsc::channel::<Vec<u8>>(UPLINK_QUEUE_CAPACITY);
         let queue_metrics = Arc::new(UplinkQueueMetrics::new(&uplink_tx));
         {
@@ -794,24 +839,7 @@ impl ClientInner {
             state.uplink_tx = Some(uplink_tx);
             state.uplink_queue_metrics = Some(queue_metrics);
             state.uplink_handle = Some(uplink_handle);
-        }
-
-        if assigned.as_ref() != Some(&addresses) {
-            self.callbacks
-                .on_ip_assigned(addresses.clone())
-                .map_err(|e| {
-                    ClientError::InternalError(format!("platform configuration failed: {e}"))
-                })?;
-            self.state
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .assigned_addresses = Some(addresses);
-        }
-        {
-            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            if state.is_closing {
-                return Err(ClientError::NotConnected);
-            }
+            state.assigned_addresses = Some(addresses);
             state.public_ip = response.public_ip;
             state.is_active = true;
         }

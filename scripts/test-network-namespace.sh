@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Real TUN lifecycle, sysctl/netfilter and client route checks in fresh netns.
-# Requires Linux, sudo, unshare, iproute2, iptables, procps and Python 3.
+# Requires Linux with systemd, sudo, unshare, iproute2, iptables, procps and Python 3.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [[ "$(uname -s)" != Linux ]]; then
@@ -39,5 +39,6 @@ else
         --exact runner::tests::rpf_policy --ignored --nocapture
     sudo unshare --net -- env VAULT_EDGE_LOCK_TEST_NAMESPACE=1 "$test_binary" \
         --exact runner::tests::netns_lock --ignored --nocapture
+    sudo python3 scripts/test-edge-resolver-view.py "$test_binary"
 fi
 done

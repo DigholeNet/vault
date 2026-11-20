@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::timeout;
 use vault_core::PeerId;
-use vault_core::client::{ClientCallbacks, ClientConfig, ClientSession};
+use vault_core::client::{ClientCallbacks, ClientConfig, ClientSession, TunnelSetup};
 use vault_core::test_utils::run_mock_server;
 
 #[derive(Debug)]
@@ -32,7 +32,8 @@ impl ClientCallbacks for TestCallbacks {
     fn on_ip_assigned(
         &self,
         assignment: vault_core::settings::TunnelAssignment,
-    ) -> Result<(), String> {
+        setup: Arc<TunnelSetup>,
+    ) {
         let ipv4 = assignment.ipv4.expect("IPv4 assignment");
         let ipv6 = assignment.ipv6.expect("IPv6 assignment");
         let _ = self.events.send(Event::IpAssigned(
@@ -41,7 +42,7 @@ impl ClientCallbacks for TestCallbacks {
             ipv6.address.to_string(),
             ipv6.prefix_len.into(),
         ));
-        Ok(())
+        setup.complete(Ok(()));
     }
 
     fn on_error(&self, error: String) {
@@ -117,12 +118,63 @@ struct RejectConfiguration {
     errors: UnboundedSender<String>,
 }
 
+struct HoldSetup(UnboundedSender<Arc<TunnelSetup>>);
+
+impl ClientCallbacks for HoldSetup {
+    fn on_packets(&self, _: Vec<Vec<u8>>) {
+        panic!("data delivered before configuration");
+    }
+
+    fn on_ip_assigned(&self, _: vault_core::settings::TunnelAssignment, setup: Arc<TunnelSetup>) {
+        self.0.send(setup).unwrap();
+    }
+
+    fn on_error(&self, _: String) {}
+}
+
+#[tokio::test]
+async fn late_setup() {
+    let (server, handle) = run_mock_server("password").await;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = ClientSession::start(
+        ClientConfig {
+            password: "password".into(),
+            hosts: vec!["127.0.0.1".into()],
+            port: server.port(),
+            id: PeerId([6; 16]),
+            device_name: String::new(),
+            platform: "test".into(),
+            socket_protect: None,
+        },
+        Arc::new(HoldSetup(tx)),
+    )
+    .unwrap();
+    let setup = timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(setup.is_pending());
+    assert!(!session.is_active());
+    session.reconnect().unwrap();
+    timeout(Duration::from_secs(2), async {
+        while setup.is_pending() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!setup.complete(Ok(())));
+    assert!(!session.is_active());
+    session.shutdown().unwrap();
+    handle.abort();
+}
+
 impl ClientCallbacks for RejectConfiguration {
     fn on_packets(&self, _: Vec<Vec<u8>>) {
         panic!("data delivered after rejected configuration");
     }
-    fn on_ip_assigned(&self, _: vault_core::settings::TunnelAssignment) -> Result<(), String> {
-        Err("injected route configuration failure".into())
+    fn on_ip_assigned(&self, _: vault_core::settings::TunnelAssignment, setup: Arc<TunnelSetup>) {
+        setup.complete(Err("injected route configuration failure".into()));
     }
     fn on_error(&self, error: String) {
         let _ = self.errors.send(error);
@@ -184,6 +236,13 @@ async fn reconnect_session() {
         timeout(Duration::from_secs(5), rx.recv()).await.unwrap(),
         Some(Event::IpAssigned(..))
     ));
+    timeout(Duration::from_secs(1), async {
+        while !session.is_active() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     session.write_packet(b"before recovery".to_vec()).unwrap();
     timeout(Duration::from_secs(2), async {
         while session.traffic_stats().bytes_sent == 0 {

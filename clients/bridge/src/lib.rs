@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, Once};
 use vault_core::PeerId;
 use vault_core::client::{
     ClientCallbacks, ClientConfig, ClientError, ClientSession, TrafficStats as CoreTrafficStats,
+    TunnelSetup,
 };
 use vault_core::logger::shared;
 
@@ -218,12 +219,27 @@ pub trait EdgeCallbacks: Send + Sync {
     /// because each FFI callback has a fixed cost.
     fn on_data_batch(&self, packets: Vec<Vec<u8>>);
     /// Configure the TUN initially or when addresses change, never for same-IP reconnects.
-    fn on_ip_assigned(&self, assignment: settings::TunnelAssignment);
+    fn on_ip_assigned(&self, assignment: settings::TunnelAssignment, setup: Arc<RustTunnelSetup>);
     fn on_error(&self, error: String);
     /// Android `VpnService.protect(fd)` hook, invoked once per (re)connect.
     /// Apple platforms do not need it (traffic from the Network Extension
     /// process bypasses the tunnel by default) and should just return true.
     fn protect_socket(&self, fd: i32) -> bool;
+}
+
+#[derive(Debug, uniffi::Object)]
+pub struct RustTunnelSetup(Arc<TunnelSetup>);
+
+#[uniffi::export]
+impl RustTunnelSetup {
+    pub fn is_pending(&self) -> bool {
+        self.0.is_pending()
+    }
+
+    /// Returns false if this attempt has already been completed or cancelled.
+    pub fn complete(&self, error: Option<String>) -> bool {
+        self.0.complete(error.map_or(Ok(()), Err))
+    }
 }
 
 /// Adapts the UniFFI `EdgeCallbacks` to vault-core's `ClientCallbacks`.
@@ -264,16 +280,15 @@ impl ClientCallbacks for CallbackAdapter {
     fn on_ip_assigned(
         &self,
         assignment: vault_core::settings::TunnelAssignment,
-    ) -> Result<(), String> {
-        match catch_unwind(AssertUnwindSafe(|| {
-            self.inner.on_ip_assigned(assignment.into())
+        setup: Arc<TunnelSetup>,
+    ) {
+        let setup = Arc::new(RustTunnelSetup(setup));
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
+            self.inner.on_ip_assigned(assignment.into(), setup.clone())
         })) {
-            Ok(()) => Ok(()),
-            Err(payload) => {
-                let message = panic_payload_message(&payload);
-                tracing::error!("EdgeCallbacks::on_ip_assigned panicked: {message}");
-                Err(format!("on_ip_assigned callback panicked: {message}"))
-            }
+            let message = panic_payload_message(&payload);
+            tracing::error!("EdgeCallbacks::on_ip_assigned panicked: {message}");
+            setup.complete(Some(format!("on_ip_assigned callback panicked: {message}")));
         }
     }
 
@@ -517,7 +532,7 @@ mod tests {
         fn protect_socket(&self, _: i32) -> bool {
             true
         }
-        fn on_ip_assigned(&self, _: settings::TunnelAssignment) {
+        fn on_ip_assigned(&self, _: settings::TunnelAssignment, _: Arc<RustTunnelSetup>) {
             self.entered.send(()).unwrap();
             // On a failed lock probe, skip re-entry so the test can fail
             // cleanly rather than leaving a permanently deadlocked worker.
