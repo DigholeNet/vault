@@ -15,6 +15,7 @@ Features:
 - Encrypted client-to-server tunnels (SPAKE2 PAKE handshake, X25519 key exchange, AEAD ciphers); the supernode decrypts and relays traffic
 - Automatic reconnection on network changes
 - IPv4 and IPv6 support
+- Displays tunnel addresses and the server-observed public/egress IP on the status screen
 - Excludes server addresses from VPN routing to avoid routing loops
 
 ## Project structure
@@ -92,12 +93,9 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 ```bash
 # Run unit tests
 ./gradlew test
-
-# Run instrumentation tests
-./gradlew connectedAndroidTest
 ```
 
-Direct Gradle builds default to version `0.1.0` / code `1`. For versioned
+Direct Gradle builds default to version `0.1.1` / code `1`. For versioned
 release artifacts, run `scripts/package-android.sh` from the repository root;
 it injects the workspace version and derived Android version code.
 The script writes `dist/vault-android.apk`, retaining all three supported ABIs
@@ -125,7 +123,7 @@ For example, set `CARGO=/opt/rust/bin/cargo` for a custom installation.
 - `Host`: Vault server hostname or IP address; required
 - `Port`: Server UDP port; defaults to 9527
 - `Password`: Authentication password; required
-- `MTU`: 1280–1427; empty uses link-based automatic sizing
+- `MTU`: 1280–1427; empty uses link-based automatic sizing; a value caps the automatic result
 - `IPv4 DNS`: Comma-separated IPv4 resolvers; empty uses `1.1.1.1,8.8.8.8`
 - `IPv6 DNS`: Comma-separated IPv6 resolvers; empty uses
   `2001:4860:4860::8888,2001:4860:4860::8844`

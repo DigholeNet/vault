@@ -14,12 +14,15 @@ use std::sync::{Arc, Mutex, Once};
 use vault_core::PeerId;
 use vault_core::client::{
     ClientCallbacks, ClientConfig, ClientError, ClientSession, TrafficStats as CoreTrafficStats,
+    TunnelSetup,
 };
 use vault_core::logger::shared;
 
 pub mod diagnostics;
+pub mod logging;
 #[cfg(any(target_os = "android", target_vendor = "apple"))]
 mod network;
+pub mod settings;
 
 uniffi::setup_scaffolding!();
 
@@ -44,6 +47,17 @@ pub fn tunnel_parameters() -> TunnelParameters {
         dns_ipv4: vault_core::DEFAULT_DNS_IPV4.map(str::to_owned).into(),
         dns_ipv6: vault_core::DEFAULT_DNS_IPV6.map(str::to_owned).into(),
     }
+}
+
+/// Resolve server candidates before the platform tunnel is enabled. Call on a worker thread.
+#[uniffi::export]
+pub fn resolve_server_candidates(host: String, port: i32) -> Result<Vec<String>, VpnError> {
+    let port = u16::try_from(port).map_err(|_| VpnError::InternalError("invalid port".into()))?;
+    let candidates = vault_core::client::resolve_server_candidates(&host, port)?;
+    Ok(candidates
+        .iter()
+        .map(|address| address.ip().to_string())
+        .collect())
 }
 
 /// Point the Rust file logger at the app's shared vault.log so core/bridge
@@ -205,12 +219,27 @@ pub trait EdgeCallbacks: Send + Sync {
     /// because each FFI callback has a fixed cost.
     fn on_data_batch(&self, packets: Vec<Vec<u8>>);
     /// Configure the TUN initially or when addresses change, never for same-IP reconnects.
-    fn on_ip_assigned(&self, ipv4: String, ipv4_mask: String, ipv6: String, ipv6_prefixlen: i32);
+    fn on_ip_assigned(&self, assignment: settings::TunnelAssignment, setup: Arc<RustTunnelSetup>);
     fn on_error(&self, error: String);
     /// Android `VpnService.protect(fd)` hook, invoked once per (re)connect.
     /// Apple platforms do not need it (traffic from the Network Extension
     /// process bypasses the tunnel by default) and should just return true.
     fn protect_socket(&self, fd: i32) -> bool;
+}
+
+#[derive(Debug, uniffi::Object)]
+pub struct RustTunnelSetup(Arc<TunnelSetup>);
+
+#[uniffi::export]
+impl RustTunnelSetup {
+    pub fn is_pending(&self) -> bool {
+        self.0.is_pending()
+    }
+
+    /// Returns false if this attempt has already been completed or cancelled.
+    pub fn complete(&self, error: Option<String>) -> bool {
+        self.0.complete(error.map_or(Ok(()), Err))
+    }
 }
 
 /// Adapts the UniFFI `EdgeCallbacks` to vault-core's `ClientCallbacks`.
@@ -250,21 +279,16 @@ impl ClientCallbacks for CallbackAdapter {
 
     fn on_ip_assigned(
         &self,
-        ipv4: String,
-        ipv4_mask: String,
-        ipv6: String,
-        ipv6_prefixlen: i32,
-    ) -> Result<(), String> {
-        match catch_unwind(AssertUnwindSafe(|| {
-            self.inner
-                .on_ip_assigned(ipv4, ipv4_mask, ipv6, ipv6_prefixlen)
+        assignment: vault_core::settings::TunnelAssignment,
+        setup: Arc<TunnelSetup>,
+    ) {
+        let setup = Arc::new(RustTunnelSetup(setup));
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
+            self.inner.on_ip_assigned(assignment.into(), setup.clone())
         })) {
-            Ok(()) => Ok(()),
-            Err(payload) => {
-                let message = panic_payload_message(&payload);
-                tracing::error!("EdgeCallbacks::on_ip_assigned panicked: {message}");
-                Err(format!("on_ip_assigned callback panicked: {message}"))
-            }
+            let message = panic_payload_message(&payload);
+            tracing::error!("EdgeCallbacks::on_ip_assigned panicked: {message}");
+            setup.complete(Some(format!("on_ip_assigned callback panicked: {message}")));
         }
     }
 
@@ -282,6 +306,7 @@ impl ClientCallbacks for CallbackAdapter {
 pub struct ConnectionStatus {
     pub connected: bool,
     pub generation: u64,
+    pub public_ip: String,
 }
 
 #[derive(uniffi::Record, Clone, Default)]
@@ -396,7 +421,7 @@ impl RustEdge {
         Ok(())
     }
 
-    /// Read readiness and transport generation in one core snapshot.
+    /// Read readiness, transport generation and observed public IP in one core snapshot.
     pub fn get_connection_status(&self) -> ConnectionStatus {
         self.session
             .lock()
@@ -407,6 +432,7 @@ impl RustEdge {
                     ConnectionStatus {
                         connected: status.connected,
                         generation: status.generation,
+                        public_ip: status.public_ip,
                     }
                 })
             })
@@ -506,7 +532,7 @@ mod tests {
         fn protect_socket(&self, _: i32) -> bool {
             true
         }
-        fn on_ip_assigned(&self, _: String, _: String, _: String, _: i32) {
+        fn on_ip_assigned(&self, _: settings::TunnelAssignment, _: Arc<RustTunnelSetup>) {
             self.entered.send(()).unwrap();
             // On a failed lock probe, skip re-entry so the test can fail
             // cleanly rather than leaving a permanently deadlocked worker.

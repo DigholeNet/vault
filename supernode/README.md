@@ -12,15 +12,15 @@ System requirements:
 
 - Linux with TUN/TAP support (`/dev/net/tun`)
 - `iptables` (including `ip6tables` for IPv6) for NAT/masquerade rules
-- `procps` (`sysctl`) for forwarding configuration
-- Installing the Debian package with APT also installs missing runtime dependencies
+- `procps` (`sysctl`; `procps-ng` on RPM-based distributions) for forwarding configuration
+- Installing a Debian or RPM package with APT or DNF also installs missing runtime dependencies
 - Root privileges (or `CAP_NET_ADMIN`) to create TUN devices and modify iptables
 
 ## Project structure
 
 ```text
 supernode/
-├── Cargo.toml              # Package manifest with debian metadata
+├── Cargo.toml              # Package manifest with Debian and RPM metadata
 ├── supernode.adoc          # Manpage source (AsciiDoc format)
 ├── src/
 │   ├── main.rs             # Application entry point
@@ -38,16 +38,15 @@ supernode/
     ├── supernode.toml.example    # Example configuration file
     ├── supernode.service         # systemd service unit
     ├── supernode.target          # systemd target unit
-    └── deb-scripts/
-        ├── postinst              # Debian post-install script
-        ├── prerm                 # Stop and disable before removal
-        └── postrm                # Reload systemd after removal
+    ├── deb-scripts/              # Debian lifecycle scripts
+    └── rpm-scripts/              # RPM lifecycle scripts
 ```
 
 ## Build and test
 
-Prerequisites: the stable Rust toolchain (Rust 1.98 or newer) and
-`asciidoctor` for Debian packaging (not needed for plain binary builds). The server runs only on
+Prerequisites: the stable Rust toolchain (Rust 1.98 or newer). System packaging
+also requires `asciidoctor`, `cargo-deb` and `cargo-generate-rpm`; none of these
+packaging tools is needed for plain binary builds. The server runs only on
 Linux (TUN/TAP); on other platforms the crate still compiles as a stub, so
 `cargo check -p supernode` works everywhere.
 
@@ -61,9 +60,10 @@ cargo build -p supernode --release
 # Run tests
 cargo test -p supernode
 
-# Create Debian package (requires cargo-deb and asciidoctor)
+# Create Debian and RPM packages
 scripts/package-linux.sh --manpages-only
 cargo deb -p supernode
+cargo generate-rpm -p supernode
 ```
 
 Build artifacts:
@@ -113,6 +113,18 @@ The server needs working IPv6 egress for clients to reach IPv6 internet targets.
 
 ## Usage and deployment
 
+Release archives named `supernode-v<version>-<arch>.tar.gz` contain only the
+static musl executable, LICENSE and NOTICE. They do not install configuration,
+user accounts or service units. Install `iptables` and `procps` (or the
+corresponding packages for your distribution), extract the matching archive,
+and create `/etc/vault/supernode.toml` as described above. For example on amd64:
+
+```bash
+tar -xzf supernode-v0.1.1-amd64.tar.gz
+./supernode-v0.1.1-amd64/supernode --help
+sudo ./supernode-v0.1.1-amd64/supernode --config /etc/vault/supernode.toml
+```
+
 Command line usage:
 
 ```bash
@@ -139,16 +151,19 @@ not supported. The project includes systemd unit files:
   - Device access: `/dev/net/tun` (read-write)
 - **supernode.target**: target unit for grouping
 
-### Debian package installation
+### System package installation
 
-The package creates the shared `vault` system account and migrates ownership of
-logs created as root by earlier versions. Upgrades restart only an
-already-running service; removal stops and disables it. The account is not
-deleted on package removal.
+Debian packages depend on `iptables`, `procps` and `adduser`; RPM packages
+depend on `iptables`, `procps-ng` and `shadow-utils`. Both create the shared
+`vault` system account and migrate ownership of logs created as root by earlier
+versions. Upgrades restart only an already-running service; removal stops and
+disables it. The account is not deleted on package removal.
 
 ```bash
-# Install a locally built package (choose amd64 or arm64 to match the host)
-sudo apt install ./target/debian/supernode_0.1.0-1_amd64.deb
+# Install a package from scripts/package-linux.sh (choose amd64 or arm64)
+sudo apt install ./dist/supernode_0.1.1-1_amd64.deb
+# Or, on Fedora and other DNF-based distributions:
+sudo dnf install ./dist/supernode-v0.1.1-amd64.rpm
 
 # Create the configuration on a fresh installation. Set a strong password
 # and review the address pools before starting the service.
@@ -159,19 +174,17 @@ sudoedit /etc/vault/supernode.toml
 sudo systemctl enable --now supernode
 ```
 
-File locations (Debian):
+File locations (Debian and RPM):
 
 - Binary: `/usr/bin/supernode`
 - Config example: `/etc/vault/supernode.toml.example`
-- systemd units: `/lib/systemd/system/`
+- systemd units: `/lib/systemd/system/` (Debian) or `/usr/lib/systemd/system/` (RPM)
 - Manpage: `/usr/share/man/man1/supernode.1.gz`
 
 ## Network configuration
 
-The supernode automatically enables host-wide forwarding for each configured
-address family when needed (below). It never disables forwarding on shutdown.
-On startup it sets redirect switches to zero on its own new TUN interface.
-If global IPv4 redirect sending remains enabled, it warns and continues startup. For both IPv4 and IPv6 it installs:
+The server configures [host forwarding](#automatic-host-forwarding) and installs
+the following rules for each configured address family:
 
 - MASQUERADE rules restricted to the VPN source CIDR and routed exit interface
 - FORWARD rules restricted to the TUN interface and VPN CIDR, including outbound
@@ -185,12 +198,11 @@ Exits are taken from usable routes exposed by Linux for the configured address
 families, including default, connected and static routes over physical or virtual
 interfaces. Loopback, the server's TUN, rejected routes and IPv6 local/multicast
 routes are excluded. LAN-only deployments do not require a default route.
-Routes must be present when the server starts; restart after changing exit interfaces. A missing egress interface or a failed sysctl/firewall
-command aborts startup.
+Routes must be present when the server starts; restart after changing exit
+interfaces. A missing egress interface or a failed firewall command aborts startup.
 Partial startup failures and normal shutdown remove only rules added by this
 instance and restore its TUN-local tunables if they still have the applied values.
-Enabled forwarding and adjusted upstream RA settings remain in place on
-success, failure, and shutdown. After SIGKILL/OOM, inspect firewall rules manually.
+After SIGKILL/OOM, inspect firewall rules manually.
 
 The server exclusively creates a new, non-persistent TUN. An existing interface,
 including a pre-created persistent TUN, is rejected; configure an unused `iface`
@@ -199,8 +211,7 @@ after SIGKILL. For IPv4, the server sets only this TUN's `rp_filter=1`; global
 `all`/`default` and physical-interface values remain unchanged. Linux uses
 `max(all, interface)`, so an administrator's global `all=2` retains effective loose
 validation. Authenticated client packets still undergo the server's explicit
-source-IP check against their assigned addresses. IPv6-only setups do not change
-IPv4 reverse-path settings.
+source-IP check against their assigned addresses.
 
 ## Automatic host forwarding
 
@@ -209,11 +220,19 @@ At startup, the server enables `net.ipv4.ip_forward=1` for an IPv4 pool and
 configuration is required, including after reboot. Startup fails if a required
 sysctl cannot be read or written.
 
+For IPv4, it then sets `net.ipv4.conf.all.send_redirects=0` and disables redirect
+sending on its TUN. Both switches must be zero to prevent ICMP Redirect messages
+during client-to-client relay; `default` and other interfaces keep their own
+redirect settings. IPv6-only setups leave IPv4 settings unchanged.
+
 Before enabling IPv6 forwarding, the server changes `accept_ra=1` to
 `accept_ra=2` on detected exit interfaces to preserve Router Advertisement
-reception in router mode. Explicitly disabled RA (`0`) stays disabled.
-Forwarding and uplink RA changes are not rolled back, even if startup later
-fails, because other services may depend on them.
+reception in router mode. Explicitly disabled RA (`0`) stays disabled. It also
+disables IPv6 redirect acceptance on its TUN.
+
+Forwarding, global IPv4 redirect, and uplink RA changes are not rolled back,
+even if startup later fails, because other services or server instances may
+depend on them.
 
 Changing IPv4 `ip_forward` resets other IPv4 settings to host/router defaults.
 Hosts with custom IPv4 tunables can still provision forwarding before applying
@@ -221,6 +240,7 @@ those tunables using `/etc/sysctl.d/90-vault-forwarding.conf`:
 
 ```ini
 net.ipv4.ip_forward = 1
+net.ipv4.conf.all.send_redirects = 0
 # For an RA-dependent IPv6 uplink, replace eth0 with the actual interface:
 net.ipv6.conf.eth0.accept_ra = 2
 net.ipv6.conf.all.forwarding = 1
@@ -229,7 +249,8 @@ net.ipv6.conf.all.forwarding = 1
 Apply optional persistent configuration with
 `sudo sysctl -p /etc/sysctl.d/90-vault-forwarding.conf`.
 If a network manager owns these settings, configure it consistently so it does
-not disable forwarding while the server is running.
+not disable forwarding or re-enable the global IPv4 redirect switch while the
+server is running.
 
 ## Security considerations
 
@@ -256,7 +277,8 @@ Common issues:
 2. **TUN device error**: check `/dev/net/tun` exists and is accessible
 3. **Address already in use**: another process is using the configured UDP port
 4. **Missing manpage when packaging**: install `asciidoctor` and run
-   `scripts/package-linux.sh --manpages-only` before `cargo deb`
+   `scripts/package-linux.sh --manpages-only` before `cargo deb` or
+   `cargo generate-rpm`
 
 Run with `--verbose` to enable debug-level logging for troubleshooting
 connection issues.

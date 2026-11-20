@@ -32,11 +32,17 @@ internal data class VpnUiState(
     val isConnected: Boolean = false,
     val isConnecting: Boolean = false,
     val ipv4: String = "",
-    val ipv6: String = ""
+    val ipv6: String = "",
+    val publicIp: String = ""
 ) {
     fun applying(event: VpnStatusEvent): VpnUiState = when (event) {
         is VpnStatusEvent.Connecting -> VpnUiState(isConnecting = true)
-        is VpnStatusEvent.Connected -> VpnUiState(isConnected = true, ipv4 = event.ipv4, ipv6 = event.ipv6)
+        is VpnStatusEvent.Connected -> VpnUiState(
+            isConnected = true,
+            ipv4 = event.ipv4,
+            ipv6 = event.ipv6,
+            publicIp = event.publicIp
+        )
         // A reconnecting service remains available to disconnect, and keeps its assigned addresses.
         is VpnStatusEvent.Reconnecting -> copy(isConnected = true, isConnecting = true)
         is VpnStatusEvent.Disconnected, is VpnStatusEvent.Error -> VpnUiState()

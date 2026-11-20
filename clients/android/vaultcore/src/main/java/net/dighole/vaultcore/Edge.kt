@@ -5,9 +5,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import android.os.Build
 import android.util.Log
+import net.dighole.vaultcore.uniffi.ConnectionStatus
 import net.dighole.vaultcore.uniffi.EdgeCallbacks
 import net.dighole.vaultcore.uniffi.RustEdge
+import net.dighole.vaultcore.uniffi.RustTunnelSetup
 import net.dighole.vaultcore.uniffi.TrafficStats
+import net.dighole.vaultcore.uniffi.TunnelAssignment
 import net.dighole.vaultcore.uniffi.VpnException
 
 /**
@@ -38,7 +41,7 @@ class Edge(
     val config: EdgeConfig,
     private val id: PeerId,
     private val onPackets: (List<ByteArray>) -> Unit,
-    private val onIpAssigned: (String, String, String, Int) -> Unit,
+    private val onIpAssigned: (TunnelAssignment, RustTunnelSetup) -> Unit,
     private val pendingCompletion: (Throwable?) -> Unit,
     private val protectSocket: ((Int) -> Boolean)? = null
 ) {
@@ -50,13 +53,8 @@ class Edge(
                 this@Edge.onPackets(packets)
             }
 
-            override fun onIpAssigned(
-                ipv4: String,
-                ipv4Mask: String,
-                ipv6: String,
-                ipv6Prefixlen: Int
-            ) {
-                this@Edge.onIpAssigned(ipv4, ipv4Mask, ipv6, ipv6Prefixlen)
+            override fun onIpAssigned(assignment: TunnelAssignment, setup: RustTunnelSetup) {
+                this@Edge.onIpAssigned(assignment, setup)
             }
 
             override fun onError(error: String) {
@@ -133,7 +131,13 @@ class Edge(
     }
 
     @Synchronized
-    fun isConnected(): Boolean = rustEdge?.isConnected() ?: false
+    fun getConnectionStatus(): ConnectionStatus {
+        return rustEdge?.getConnectionStatus()
+            ?: ConnectionStatus(connected = false, generation = 0u, publicIp = "")
+    }
+
+    @Synchronized
+    fun isConnected(): Boolean = getConnectionStatus().connected
 
     @Synchronized
     fun getTrafficStats(): TrafficStats {

@@ -11,6 +11,7 @@ class AppData: ObservableObject {
     @Published var showConfigureGuide: Bool = false
 
     @Published var assignedIp = ""
+    @Published var publicIp = ""
     @Published var connectedSince: Date?
 
     @Published var connectionError: String?
@@ -44,6 +45,7 @@ class AppData: ObservableObject {
     /// Reset the visible connection period; the provider owns raw counters.
     func resetStats() {
         assignedIp = ""
+        publicIp = ""
         providerSession = nil
         statsBase = (0, 0, 0, 0)
         previousStats = .zero
@@ -59,6 +61,8 @@ class AppData: ObservableObject {
 
     func applyStatus(_ status: ProviderStatus) {
         if assignedIp != status.ip { assignedIp = status.ip }
+        let publicIp = status.publicIp ?? ""
+        if self.publicIp != publicIp { self.publicIp = publicIp }
         let stats = status.stats
         let restarted = providerSession != nil && status.session != nil && providerSession != status.session
         providerSession = status.session

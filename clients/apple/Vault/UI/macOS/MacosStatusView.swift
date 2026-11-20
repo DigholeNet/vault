@@ -22,8 +22,7 @@ struct MacosStatusView: View {
                 if tab == 0 { MacosDiagnosticsAction(vpnManager: vpnManager, model: model) }
             }.padding(20)
             Divider()
-            if tab == 0 { MacosConnectionDiagnostics(vpnManager: vpnManager, model: model) }
-            else { logs }
+            if tab == 0 { MacosConnectionDiagnostics(vpnManager: vpnManager, model: model) } else { logs }
             Divider()
             HStack {
                 if tab == 1 {
@@ -71,9 +70,13 @@ struct MacosStatusView: View {
                 TextField(languageManager.tr("Search logs"), text: $model.logSearch)
                     .textFieldStyle(.roundedBorder)
             }.padding(16)
-            if model.loadingLogs { ProgressView(languageManager.tr("Loading logs...")).frame(maxWidth: .infinity, maxHeight: .infinity) }
-            else if model.filteredLogText.isEmpty {
-                Text(languageManager.tr("No matching logs.")).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            if model.loadingLogs {
+                ProgressView(languageManager.tr("Loading logs..."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.filteredLogText.isEmpty {
+                Text(languageManager.tr("No matching logs."))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else { LogTextView(text: model.filteredLogText, followsTail: followsTail) }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -202,8 +205,7 @@ private struct MacosConnectionDiagnostics: View {
 
     private var resultHeader: some View {
         HStack(alignment: .top, spacing: 14) {
-            if running { ProgressView().controlSize(.large).padding(8) }
-            else {
+            if running { ProgressView().controlSize(.large).padding(8) } else {
                 Image(systemName: passed ? "checkmark.circle.fill" : (incomplete ? "clock.fill" : "exclamationmark.circle.fill"))
                     .font(.system(size: 28)).foregroundStyle(passed ? Color.green : (incomplete ? .orange : .red))
             }
@@ -211,7 +213,7 @@ private struct MacosConnectionDiagnostics: View {
                 Text(languageManager.tr(DiagnosticsPresentation.resultTitle(result, running: running)))
                     .font(.system(size: 14, weight: .semibold))
                 if running, let startedAt {
-                    TimelineView(.periodic(from: .now, by: 0.1)) { context in
+                    TimelineView(.periodic(from: .now, by: 0.1)) { _ in
                         Text(languageManager
                             .tr("Elapsed") + "  \(max(0, Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))) ms")
                             .font(.body).monospacedDigit().foregroundStyle(.secondary)
@@ -233,19 +235,38 @@ private struct MacosConnectionDiagnostics: View {
     }
 
     private var sessionAddresses: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "network").foregroundStyle(.secondary)
-            Text(appData.vpnStatus == .connected || appData.isRecovering
-                ?
-                (appData.assignedIp.isEmpty ? languageManager.tr("Waiting for server-assigned addresses…") : appData.assignedIp
-                    .replacingOccurrences(
-                        of: "/",
-                        with: "  ·  "
-                    ))
-                : languageManager.tr("Disconnected"))
-                .font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
+        let active = appData.vpnStatus == .connected || appData.isRecovering
+        let addresses = appData.assignedIp.parsedIPv4AndIPv6()
+        let hasTunnelAddresses = addresses.ipv4 != nil || addresses.ipv6 != nil
+        return VStack(alignment: .leading, spacing: 10) {
+            if active, !appData.publicIp.isEmpty {
+                MacosStatusAddressRow(
+                    title: "WAN", address: appData.publicIp, symbol: "network", color: .accentColor
+                )
+                Divider()
+            }
+            if active, hasTunnelAddresses {
+                VStack(spacing: 8) {
+                    if let ipv4 = addresses.ipv4 {
+                        MacosStatusAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: .blue)
+                    }
+                    if let ipv6 = addresses.ipv6 {
+                        MacosStatusAddressRow(title: "IPv6", address: ipv6, symbol: "server.rack", color: .green)
+                    }
+                }
+            } else {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "server.rack")
+                        .font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 16)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(languageManager.tr("Tunnel")).font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(languageManager.tr(active ? "Waiting for server-assigned addresses…" : "Disconnected"))
+                            .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
         }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
     }
@@ -261,8 +282,7 @@ private struct MacosConnectionDiagnostics: View {
             ForEach(DiagnosticsPresentation.visibleChecks(result), id: \.self) { id in
                 let row = DiagnosticsPresentation.checkRow(id, result: result, running: running)
                 HStack(spacing: 8) {
-                    if row.active { ProgressView().controlSize(.mini).frame(width: 14) }
-                    else {
+                    if row.active { ProgressView().controlSize(.mini).frame(width: 14) } else {
                         Image(systemName: row.state == .passed ? "checkmark.circle.fill"
                             : (row.state == .failed ? "xmark.circle.fill" : "minus.circle"))
                             .foregroundStyle(row.state == .passed ? Color.green : (row.state == .failed ? Color.red : .secondary))
@@ -278,7 +298,7 @@ private struct MacosConnectionDiagnostics: View {
                             .help(languageManager.tr(DiagnosticsPresentation.pingCheckIDs.contains(id)
                                     ? "Mean round-trip time of received replies." : "Mean request time, including failures and retries."))
                     } else if row.active {
-                        TimelineView(.periodic(from: .now, by: 0.1)) { context in
+                        TimelineView(.periodic(from: .now, by: 0.1)) { _ in
                             Text("\(max(0, Int((ProcessInfo.processInfo.systemUptime - progressReceived) * 1000))) ms")
                                 .font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)
                         }.frame(width: 100, alignment: .trailing)

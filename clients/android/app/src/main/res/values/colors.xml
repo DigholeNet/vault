@@ -8,7 +8,6 @@
     <color name="connection_disconnected">#FF3B30</color>
 <color name="status_uplink">#007AFF</color>
 <color name="status_downlink">#34C759</color>
-<color name="status_background">#FFFFFF</color>
     <color name="configure_body">#111827</color>
     <color name="configure_label">@color/configure_body</color>
     <color name="configure_supporting">#6B7280</color>

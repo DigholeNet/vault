@@ -3,7 +3,8 @@ package net.dighole.vault.data
 
 import android.content.Context
 import net.dighole.vault.VaultVpnService
-import java.util.UUID
+import net.dighole.vaultcore.uniffi.generatePeerIdHex
+import net.dighole.vaultcore.uniffi.peerIdFromHex
 
 internal class DeviceId(val hex: String, val bytes: ByteArray)
 
@@ -13,17 +14,12 @@ internal object DeviceIdStore {
     fun getOrCreate(read: () -> String?, write: (String) -> Unit): DeviceId {
         val saved = read()
         if (saved != null) decode(saved)?.let { return DeviceId(saved, it) }
-        val generated = UUID.randomUUID().toString().replace("-", "")
+        val generated = generatePeerIdHex()
         write(generated)
         return DeviceId(generated, requireNotNull(decode(generated)))
     }
 
-    private fun decode(value: String): ByteArray? {
-        if (value.length != 32 || value.any { it.digitToIntOrNull(16) == null }) return null
-        return ByteArray(16) { index ->
-            ((value[index * 2].digitToInt(16) shl 4) + value[index * 2 + 1].digitToInt(16)).toByte()
-        }
-    }
+    private fun decode(value: String): ByteArray? = runCatching { peerIdFromHex(value) }.getOrNull()
 }
 
 internal fun Context.deviceId(): DeviceId {

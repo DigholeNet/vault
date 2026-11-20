@@ -16,8 +16,12 @@ private struct MacosKeyboardAction<ID: Hashable>: ViewModifier {
             .overlay {
                 if focus == id {
                     Group {
-                        if circular { Circle().strokeBorder(Color.accentColor, lineWidth: 2) }
-                        else { RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor, lineWidth: 2) }
+                        if circular {
+                            Circle().strokeBorder(Color.accentColor, lineWidth: 2)
+                        } else {
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(Color.accentColor, lineWidth: 2)
+                        }
                     }.padding(-3).allowsHitTesting(false)
                 }
             }

@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+if ! getent group vault >/dev/null; then
+    groupadd --system vault
+fi
+if ! getent passwd vault >/dev/null; then
+    useradd --system --gid vault --no-create-home --home-dir /var/lib/vault --shell /sbin/nologin vault
+fi
+
+install -d -o vault -g vault -m 750 /var/log/vault /var/lib/vault
+for path in /var/log/vault/* /var/log/vault/.[!.]* /var/log/vault/..?* \
+    /var/lib/vault/storage.dat /var/lib/vault/storage.tmp; do
+    if [ -f "$path" ] || [ -L "$path" ]; then
+        chown -h vault:vault "$path"
+    fi
+done
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    if [ "${1:-0}" -ge 2 ]; then
+        systemctl try-restart edge.service
+    fi
+fi
+chmod 700 /etc/vault

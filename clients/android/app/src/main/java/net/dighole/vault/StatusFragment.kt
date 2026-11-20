@@ -31,6 +31,9 @@ class StatusFragment : Fragment() {
     private lateinit var tvStatusDetail: TextView
     private lateinit var tvIpv4Address: TextView
     private lateinit var tvIpv6Address: TextView
+    private lateinit var networkCard: View
+    private lateinit var publicIpSection: View
+    private lateinit var tvPublicIpAddress: TextView
     private lateinit var duration: TextView
     private var durationUpdates: Job? = null
     private lateinit var sentPackets: TextView
@@ -84,6 +87,9 @@ class StatusFragment : Fragment() {
         tvStatusDetail = view.findViewById(R.id.tvStatusDetail)
         tvIpv4Address = view.findViewById(R.id.tvIpv4Address)
         tvIpv6Address = view.findViewById(R.id.tvIpv6Address)
+        networkCard = view.findViewById(R.id.networkCard)
+        publicIpSection = view.findViewById(R.id.publicIpSection)
+        tvPublicIpAddress = view.findViewById(R.id.tvPublicIpAddress)
         duration = view.findViewById(R.id.connectionDuration)
         sentPackets = view.findViewById(R.id.tvSentPackets)
         receivedPackets = view.findViewById(R.id.tvReceivedPackets)
@@ -131,7 +137,8 @@ class StatusFragment : Fragment() {
             VpnUiState(
                 isConnected = connected,
                 ipv4 = if (connected) prefs.getString("vpn_assigned_ipv4", "").orEmpty() else "",
-                ipv6 = if (connected) prefs.getString("vpn_assigned_ipv6", "").orEmpty() else ""
+                ipv6 = if (connected) prefs.getString("vpn_assigned_ipv6", "").orEmpty() else "",
+                publicIp = if (connected) prefs.getString("vpn_public_ip", "").orEmpty() else ""
             )
         }
 
@@ -253,24 +260,41 @@ class StatusFragment : Fragment() {
             renderDuration(app.ensureConnectionStarted())
             if (!isHidden && isResumed) startDurationUpdates(app.ensureConnectionStarted())
         } else stopDurationUpdates()
-        root.findViewById<View>(R.id.connectionInfo).visibility = if (connected) View.VISIBLE else View.GONE
+        renderConnectionInfo(root, connected)
+        renderTrafficStats(app.latestTrafficStats)
+    }
+
+    private fun renderConnectionInfo(root: View, connected: Boolean) {
+        val showPublicIp = connected && vpnState.publicIp.isNotEmpty()
+        val hasTunnelIps = vpnState.ipv4.isNotEmpty() || vpnState.ipv6.isNotEmpty()
+        val showNetworkCard = connected && (showPublicIp || hasTunnelIps)
+        val connectionInfo = root.findViewById<View>(R.id.connectionInfo)
+        connectionInfo.visibility = if (connected) View.VISIBLE else View.GONE
+        val topMargin = ((if (showNetworkCard) 24 else 50) * root.resources.displayMetrics.density).toInt()
+        val layoutParams = connectionInfo.layoutParams as ViewGroup.MarginLayoutParams
+        if (layoutParams.topMargin != topMargin) {
+            layoutParams.topMargin = topMargin
+            connectionInfo.layoutParams = layoutParams
+        }
+        networkCard.visibility = if (showNetworkCard) View.VISIBLE else View.GONE
+        publicIpSection.visibility = if (showPublicIp) View.VISIBLE else View.GONE
+        root.findViewById<View>(R.id.networkDivider).visibility =
+            if (showPublicIp && hasTunnelIps) View.VISIBLE else View.GONE
         root.findViewById<View>(R.id.rowIpv4).visibility = if (vpnState.ipv4.isNotEmpty()) View.VISIBLE else View.GONE
         root.findViewById<View>(R.id.rowIpv6).visibility = if (vpnState.ipv6.isNotEmpty()) View.VISIBLE else View.GONE
-        root.findViewById<View>(R.id.ipDivider).visibility =
-            if (vpnState.ipv4.isNotEmpty() || vpnState.ipv6.isNotEmpty()) View.VISIBLE else View.GONE
         tvIpv4Address.text = vpnState.ipv4
         tvIpv6Address.text = vpnState.ipv6
-        renderTrafficStats(app.latestTrafficStats)
+        tvPublicIpAddress.text = vpnState.publicIp
     }
 
     private fun renderTrafficStats(stats: VpnStatusEvent.TrafficStats?) {
         if (isHidden || !isResumed) return
-        sentPackets.setIfChanged((stats?.packetsSent ?: 0).coerceAtLeast(0).toString())
-        receivedPackets.setIfChanged((stats?.packetsReceived ?: 0).coerceAtLeast(0).toString())
+        sentPackets.setIfChanged(getString(R.string.packets, (stats?.packetsSent ?: 0).coerceAtLeast(0)))
+        receivedPackets.setIfChanged(getString(R.string.packets, (stats?.packetsReceived ?: 0).coerceAtLeast(0)))
         sentBytes.setIfChanged(StatusPresentation.bytes(stats?.bytesSent ?: 0))
         receivedBytes.setIfChanged(StatusPresentation.bytes(stats?.bytesReceived ?: 0))
-        sentSpeed.setIfChanged("+ " + StatusPresentation.bytes(stats?.sendSpeed ?: 0) + "/s")
-        receivedSpeed.setIfChanged("+ " + StatusPresentation.bytes(stats?.receiveSpeed ?: 0) + "/s")
+        sentSpeed.setIfChanged(StatusPresentation.bytes(stats?.sendSpeed ?: 0) + "/s")
+        receivedSpeed.setIfChanged(StatusPresentation.bytes(stats?.receiveSpeed ?: 0) + "/s")
     }
 
     private fun TextView.setIfChanged(value: String) {

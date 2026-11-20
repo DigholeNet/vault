@@ -24,7 +24,7 @@ class VaultApplication : Application() {
         VaultFileLogger.currentLogPath?.let { path ->
             try {
                 setLogFilePath(path)
-            } catch (e: UnsatisfiedLinkError) {
+            } catch (e: LinkageError) {
                 Log.w(TAG, "vault-bridge native library unavailable", e)
             }
         }

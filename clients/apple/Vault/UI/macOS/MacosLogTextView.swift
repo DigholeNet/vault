@@ -36,8 +36,7 @@ struct LogTextView: NSViewRepresentable {
                 }
                 view.scrollToEndOfDocument(nil)
             }
-        }
-        else { scroll.contentView.scroll(to: origin)
+        } else { scroll.contentView.scroll(to: origin)
             scroll.reflectScrolledClipView(scroll.contentView)
         }
     }

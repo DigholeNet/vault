@@ -85,13 +85,13 @@ English interfaces on Android, iOS and macOS. Expand each gallery to see all pag
 `core/` (vault-core) owns all protocol behavior: packet encoding (protobuf), SPAKE2 password-authenticated key exchange (PAKE — no password-derived verifier crosses the wire, so captured handshakes do not enable offline dictionary attacks), X25519 ECDH key agreement with HKDF-derived session keys bound to the PAKE exchange, AEAD encryption (AES-128/256-GCM, ChaCha20-Poly1305 — negotiated by measured speed) with counter nonces and a sliding replay window, heartbeat keepalive (10s interval / 30s timeout), exponential-backoff reconnect (1s→60s), and traffic statistics. The entire client session state machine lives in `ClientSession`, so all platforms share the protocol and core recovery policy. OS lifecycle, routing and network discovery remain platform-specific; see the component READMEs.
 
 **2. Clients are thin platform adapters.**
-Each client only handles: TUN fd I/O, route/DNS configuration, OS VPN API integration, config persistence, and UI. Mobile platforms bridge to the core through UniFFI:
+The core also owns settings validation, peer-ID encoding, server-candidate resolution, typed tunnel assignments, DNS/MTU policy and shared file-log operations. Each client handles: TUN fd I/O, applying routes/DNS through OS APIs, OS VPN lifecycle, config persistence, and UI. Mobile platforms bridge to the core through UniFFI:
 
 | Client | Bridge | Artifact | Platform work |
 |---|---|---|---|
 | Apple | `vault-bridge` (staticlib, UniFFI) | XCFramework + Swift bindings | NetworkExtension / PacketTunnelProvider |
 | Android | `vault-bridge` (cdylib, UniFFI) | jniLibs + Kotlin bindings | VpnService / network-change listening |
-| Linux | none (links core directly) | binary + deb/systemd | TUN / route / DNS setup and rollback |
+| Linux | none (links core directly) | binary + deb/rpm + systemd | TUN / route / DNS setup and rollback |
 
 Both mobile platforms share a single bridge crate (`clients/bridge/`): one UniFFI interface definition generates both the Kotlin and Swift bindings.
 
@@ -132,9 +132,9 @@ diagnostic probes use the app process's default routing; see
 ### For users — prebuilt artifacts
 
 Download packages from [GitHub Releases](https://github.com/DigholeNet/vault/releases).
-The `0.1.0` release includes:
+The `0.1.1` release includes:
 
-- Linux client (`edge`) and server (`supernode`): Debian packages for amd64 and arm64.
+- Linux client (`edge`) and server (`supernode`): Debian and RPM packages plus minimal static musl binary tar.gz archives for amd64 and arm64.
 - Android: signed APK for API 36 or newer.
 - macOS: notarized app ZIP for Intel and Apple Silicon, requiring macOS 15.5 or newer.
 
@@ -145,7 +145,7 @@ Its Ad Hoc IPA is built in CI for validation but is not publicly distributed.
 The setup below applies to release packages and locally packaged builds.
 Minimal setup: one Linux server as the supernode, one client.
 
-**1. Server (Linux)** — install the supernode deb and write
+**1. Server (Linux)** — install the supernode DEB or RPM package and write
 `/etc/vault/supernode.toml`:
 
 ```toml
@@ -156,13 +156,10 @@ ipv4 = "192.168.10.0/24"
 # ipv6 = "fd00::/96"  # optional IPv6 pool
 ```
 
-The daemon automatically enables host forwarding for each configured address
-family. Before enabling IPv6 forwarding, it changes detected exit interfaces
-from `accept_ra=1` to `accept_ra=2` to preserve Router Advertisement reception.
-These global changes remain after shutdown or a later startup failure. Hosts
-with custom sysctl settings should review
+The daemon configures forwarding and VPN networking automatically. Some host-wide
+settings remain changed after shutdown or a later startup failure; see
 [automatic host forwarding](supernode/README.md#automatic-host-forwarding)
-before starting the service.
+for details and custom sysctl configuration.
 
 ```bash
 sudo systemctl enable --now supernode
@@ -171,7 +168,7 @@ sudo systemctl enable --now supernode
 Open UDP port 9527 on the firewall. The server takes the first pool address
 (`192.168.10.1`) for its own TUN device.
 
-**2. Linux client** — install the edge deb and write `/etc/vault/edge.toml`:
+**2. Linux client** — install the edge DEB or RPM package and write `/etc/vault/edge.toml`:
 
 ```toml
 password = "a-long-random-password"  # must match the server
@@ -190,8 +187,10 @@ sudo systemctl enable --now edge
 The client is assigned an address from the pool (e.g. `192.168.10.2`);
 `ping 192.168.10.1` verifies the tunnel.
 
-Automatic DNS requires systemd-resolved's local stub and Polkit authorization;
-other resolver setups require manual DNS configuration. See the
+Automatic DNS supports systemd-resolved's local stub and NetworkManager-managed
+`/etc/resolv.conf`, with Polkit authorization. NetworkManager restores DNS from
+its current connections on exit; other resolver setups require manual DNS
+configuration. See the
 [Linux client setup](clients/linux/README.md#configuration-options).
 
 **3. Android** — install the APK, enter the same host, port and password,
@@ -216,11 +215,12 @@ their binaries are stubs.
 ```bash
 cargo build --workspace                    # Linux: everything (macOS: plain `cargo build`)
 cargo test -p vault-core --features test   # protocol integration test (mock server)
-# Debian packaging additionally requires cargo-deb and asciidoctor:
+# System packaging additionally requires cargo-deb, cargo-generate-rpm and asciidoctor:
 # Debian/Ubuntu: sudo apt-get install asciidoctor
-cargo install cargo-deb --locked
+cargo install cargo-deb cargo-generate-rpm --locked
 scripts/package-linux.sh --manpages-only
 cargo deb -p edge                          # Linux: deb package (also: -p supernode)
+cargo generate-rpm -p clients/linux         # Linux: RPM package (also: -p supernode)
 ```
 
 **Android** — requires a device running API 36 or newer. Building needs the
@@ -280,9 +280,14 @@ One-command local packaging (artifacts land in `dist/`):
 ```bash
 TEAM_ID=ABCDE12345 scripts/package-all.sh     # all platforms
 scripts/package-android.sh    # signed Android APK only
-scripts/package-linux.sh      # Linux debs only (cross-built via cargo-zigbuild; requires Zig and asciidoctor)
+scripts/package-linux.sh      # Linux DEB+RPM+tar.gz (requires Zig, cargo-deb, cargo-generate-rpm and asciidoctor)
+scripts/package-linux.sh --binaries-only   # Linux tar.gz only; skips system packages
 TEAM_ID=ABCDE12345 scripts/package-apple.sh   # Apple only (iOS IPA + macOS app)
 ```
+
+Linux packages are cross-built with cargo-zigbuild. Local RPMs use public names
+such as `dist/edge-v0.1.1-amd64.rpm`; filenames use amd64/arm64, while the RPM
+metadata uses x86_64/aarch64.
 
 Apple packaging requires an Apple Developer team; tagging `v*.*.*` triggers the
 release workflow. Release mechanics, signing keys, and provisioning profiles:
@@ -305,5 +310,5 @@ release workflow. Release mechanics, signing keys, and provisioning profiles:
 ## License
 
 MIT — see [LICENSE](LICENSE). Application bundles include LICENSE and NOTICE.
-Debian packages include the project license
-in their copyright file and NOTICE under `/usr/share/doc/<package>/`.
+Debian and RPM packages include the project license and NOTICE under
+`/usr/share/doc/<package>/`.

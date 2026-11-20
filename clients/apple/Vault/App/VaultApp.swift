@@ -24,7 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Self.disconnectBeforeTermination(manager) { succeeded in
             self.terminating = false
             FileLogger.shared.logSync(
-                "App termination reply allowed=\(succeeded) vpnStatus=\(manager.vpnStatus) interfaces=\(FileLogger.tunnelInterfaceSummary())",
+                "App termination reply allowed=\(succeeded) vpnStatus=\(manager.vpnStatus) "
+                    + "interfaces=\(FileLogger.tunnelInterfaceSummary())",
                 level: "NOTICE"
             )
             NSApp.reply(toApplicationShouldTerminate: succeeded)

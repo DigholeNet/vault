@@ -3,7 +3,18 @@
 Notable changes to Vault are recorded here using the
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) structure.
 
-## [Unreleased]
+## [0.1.1] - Unreleased
+
+### Added
+
+- Minimal statically linked musl binary archives for Linux edge and supernode on amd64 and arm64
+- RPM packages for Linux edge and supernode on amd64 and arm64, built with cargo-generate-rpm
+- Automatic Linux DNS through NetworkManager-managed resolv.conf, with current-state regeneration on network changes and exit
+- Server-observed client public/egress IP in compatible handshake responses, with status display on Android, iOS and macOS and handshake-success logging on Linux
+
+### Fixed
+
+- Repeated ICMP Redirect messages during IPv4 client-to-client relay
 
 ## [0.1.0] - 2026-11-10
 
@@ -40,5 +51,5 @@ Initial public release.
 - Website version, download links and Android QR code synchronized with stable releases
 - Contributor, security, privacy, protocol, diagnostics and release documentation
 
-[Unreleased]: https://github.com/DigholeNet/vault/compare/v0.1.0...HEAD
+[0.1.1]: https://github.com/DigholeNet/vault/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/DigholeNet/vault/releases/tag/v0.1.0

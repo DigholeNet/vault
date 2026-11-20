@@ -7,8 +7,8 @@ use super::*;
 struct NoCallbacks;
 impl ClientCallbacks for NoCallbacks {
     fn on_packets(&self, _: Vec<Vec<u8>>) {}
-    fn on_ip_assigned(&self, _: String, _: String, _: String, _: i32) -> Result<(), String> {
-        Ok(())
+    fn on_ip_assigned(&self, _: crate::settings::TunnelAssignment, setup: Arc<TunnelSetup>) {
+        setup.complete(Ok(()));
     }
     fn on_error(&self, _: String) {}
 }
@@ -31,6 +31,71 @@ fn idle_session() -> ClientSession {
             algorithms: Vec::new(),
             state: Arc::new(Mutex::new(ClientState::new())),
         }),
+    }
+}
+
+#[test]
+fn resolve_literals() {
+    let ipv4 = resolve_server_candidates("127.0.0.1", 9527).unwrap();
+    assert_eq!(ipv4, vec!["127.0.0.1:9527".parse().unwrap()]);
+    let ipv6 = resolve_server_candidates("::1", 9527).unwrap();
+    assert_eq!(ipv6, vec!["[::1]:9527".parse().unwrap()]);
+}
+
+#[test]
+fn resolve_host() {
+    let addresses = resolve_server_candidates("localhost", 9527).unwrap();
+    assert!(!addresses.is_empty());
+    assert!(
+        addresses
+            .iter()
+            .all(|address| address.ip().is_loopback() && address.port() == 9527)
+    );
+    assert!(
+        addresses
+            .windows(2)
+            .all(|pair| !pair[0].is_ipv4() || pair[1].is_ipv4())
+    );
+    assert!(resolve_server_candidates("bad\0host", 9527).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn resolve_in_runtime() {
+    // Linux's synchronous startup callback runs inside app_main's block_on.
+    for (host, expected) in [
+        ("127.0.0.1", "127.0.0.1:9527"),
+        ("::1", "[::1]:9527"),
+        ("[::1]", "[::1]:9527"),
+    ] {
+        assert_eq!(
+            resolve_server_candidates(host, 9527).unwrap(),
+            vec![expected.parse::<SocketAddr>().unwrap()]
+        );
+    }
+}
+
+#[tokio::test]
+async fn resolve_candidates() {
+    let invalid = "bad\0host".to_string();
+    let hosts = [
+        invalid.clone(),
+        "127.0.0.1".to_string(),
+        "::1".to_string(),
+        "127.0.0.1".to_string(),
+        "[::1]".to_string(),
+    ];
+    assert_eq!(
+        resolve_candidates_async(&hosts, 9527).await.unwrap(),
+        vec![
+            "[::1]:9527".parse::<SocketAddr>().unwrap(),
+            "127.0.0.1:9527".parse().unwrap(),
+        ]
+    );
+    for hosts in [vec![], vec![invalid]] {
+        assert!(matches!(
+            resolve_candidates_async(&hosts, 9527).await,
+            Err(ClientError::DnsFailed(_))
+        ));
     }
 }
 

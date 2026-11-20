@@ -65,7 +65,7 @@ class VaultConfig: ObservableObject {
         }
 
         if id.isEmpty {
-            id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            id = generatePeerIdHex()
         }
     }
 
@@ -194,10 +194,10 @@ struct ConnectionDraft: Equatable, Sendable {
 /// Convert the App draft into the shared profile schema at the App boundary.
 extension TunnelLaunchConfiguration {
     init(draft: ConnectionDraft, id: String, clearLogsToken: String? = nil) throws {
-        guard let bytes = [UInt8](hex: id), bytes.count == 16 else { throw TunnelLaunchConfiguration.InvalidField.peerID }
+        guard let peerID = try? peerIdFromHex(value: id) else { throw TunnelLaunchConfiguration.InvalidField.peerID }
         guard let port = UInt16(draft.port), port > 0 else { throw TunnelLaunchConfiguration.InvalidField.port }
         try self.init(providerConfiguration: [
-            "host": draft.host, "port": port, "password": draft.password, "id": Data(bytes),
+            "host": draft.host, "port": port, "password": draft.password, "id": peerID,
             "dnsIpv4": draft.dnsIpv4, "dnsIpv6": draft.dnsIpv6, "probeDomains": draft.probeDomains, "mtu": draft.mtu
         ], clearLogsToken: clearLogsToken)
     }

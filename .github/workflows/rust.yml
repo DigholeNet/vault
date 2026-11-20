@@ -7,14 +7,12 @@ on:
     branches: [main, develop]
   pull_request:
 
-# rustsec/audit-check creates check runs with the GITHUB_TOKEN.
 permissions:
   contents: read
-  checks: write
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
 
@@ -54,13 +52,13 @@ jobs:
           sudo sysctl -w "net.ipv4.ping_group_range=$ping_test_gid $ping_test_gid"
           cargo test --locked -p vault-core --features test diagnostics::transport::tests::ping_loopback -- --exact --ignored
 
-      - name: Verify server network setup in an isolated Linux namespace
+      - name: Verify Linux network and resolver mount namespaces
         run: scripts/test-network-namespace.sh
 
       - name: Security audit
-        uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit --file Cargo.lock
 
   macos:
     runs-on: macos-latest

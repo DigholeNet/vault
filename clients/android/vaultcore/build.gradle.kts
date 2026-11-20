@@ -72,9 +72,6 @@ dependencies {
             type = "aar"
         }
     }
-
-    testImplementation(libs.junit)
-    testImplementation(libs.kotlinx.coroutines.test)
 }
 
 detekt {

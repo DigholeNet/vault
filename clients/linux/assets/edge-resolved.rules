@@ -1,4 +1,4 @@
-// Grant the shared vault service account the resolvectl actions used by edge.
+// Grant only the systemd-resolved actions used by edge.
 polkit.addRule(function(action, subject) {
     if (subject.user == "vault" &&
         (action.id == "org.freedesktop.resolve1.set-dns-servers" ||

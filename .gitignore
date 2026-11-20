@@ -25,6 +25,7 @@ clients/android/vaultcore/src/main/java/net/dighole/vaultcore/uniffi/
 # ============ Apple ============
 xcuserdata/
 DerivedData/
+DerivedData-iOS/
 .swiftpm/
 .build/
 *.ipa

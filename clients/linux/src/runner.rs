@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 use std::{
     io,
-    net::{IpAddr, SocketAddr, ToSocketAddrs as _},
+    net::{IpAddr, SocketAddr},
     os::{
         linux::net::SocketAddrExt,
         unix::net::{SocketAddr as UnixSocketAddr, UnixDatagram},
     },
     process::Command,
-    sync::{Arc, Mutex},
+    sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
 
@@ -22,7 +22,7 @@ use vault_core::{
 };
 
 use crate::config::EdgeConfig;
-use crate::dns::DnsGuard;
+use crate::dns::{DnsGuard, ResolverFile, ResolverViewChanged};
 use crate::edge::Edge;
 use crate::interface::{self, FamilyExits};
 use crate::routes::{RouteGuard, RouteState};
@@ -69,70 +69,35 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     // Keep the netns lease until DNS/routes/TUN have all been cleaned up.
     // Unlike the control-file lock, this also covers private /run mounts.
     let _network_lock = NetworkLock::acquire()?;
+    let resolver = ResolverFile::system(config.get_storage())?;
+    resolver.check_view()?;
+    resolver
+        .restore()
+        .context("recover DNS before resolving the server")?;
     // Resolve name templates before configuring routes or DNS.
-    let device = device::setup_device(config.get_iface(), &device::DeviceType::Tun)?;
+    let device = Arc::new(device::setup_device(
+        config.get_iface(),
+        &device::DeviceType::Tun,
+    )?);
     let tun = device.get_ifname().to_string();
-    let dns = DnsGuard::setup_for_interface(&tun);
+    let mut dns = DnsGuard::setup_for_interface(resolver, &tun);
     let server_addr = format!("{}:{}", config.get_host(), config.get_port());
     info!("Resolving server address: {}", server_addr);
-    let hosts: Vec<_> = server_addr.to_socket_addrs()?.collect();
-    if hosts.is_empty() {
-        return Err(anyhow::anyhow!("Could not resolve server address"));
-    }
+    let hosts =
+        vault_core::client::resolve_server_candidates(config.get_host(), config.get_port())?;
     // Probe each address family's physical exit independently: IPv4 and
     // IPv6 default routes may live on different interfaces with different
     // gateways. A family without a default route contributes no exit; its
     // candidates simply lose the core's handshake race.
-    let physical_exits = Arc::new(Mutex::new(probe_exits(&hosts, &tun)?));
-    // DNS is selected only after the handshake assigns tunnel addresses.
-    let dns_v4 = config.dns_for(true, false);
-    let dns_v6 = config.dns_for(false, true);
-    let dns_dual = config.dns_for(true, true);
-    let assigned_dns = Arc::new(Mutex::new(None::<Vec<String>>));
-    let assignment_dns = assigned_dns.clone();
+    let mut physical_exits = probe_exits(&hosts, &tun)?;
     let routes = RouteGuard::new(&tun, hosts.iter().map(|addr| addr.ip()).collect());
     let route_state = routes.shared();
-    // The server must bypass the VPN before the first handshake, and after
-    // every exit change, rather than waiting for on_ip_assigned.
-    {
-        let exits = physical_exits.lock().unwrap();
-        set_server_routes(&exits, &mut route_state.lock().unwrap())?;
-    }
-    let assignment_routes = route_state.clone();
+    // The server must bypass the VPN before the first handshake and after
+    // every physical exit change.
+    set_server_routes(&physical_exits, &mut route_state.lock().unwrap())?;
 
-    let mut edge = Edge::new(
-        config,
-        device,
-        physical_exits.clone(),
-        hosts.clone(),
-        move |exits, device, _, ipv4, ipv6| {
-            // Serialize assignment routes with DNS application. A poll must not
-            // apply an old list after a newer assignment changed the routes.
-            let mut selected = assignment_dns
-                .lock()
-                .map_err(|_| anyhow::anyhow!("DNS state lock poisoned"))?;
-            let mut routes = assignment_routes
-                .lock()
-                .map_err(|_| anyhow::anyhow!("route state lock poisoned"))?;
-            if let Err(e) = on_ip_assigned(exits, device, ipv4, ipv6, &mut routes) {
-                if let Err(rollback) = routes.restore() {
-                    return Err(e.context(format!("route rollback also failed: {rollback:#}")));
-                }
-                return Err(e);
-            }
-            let servers = match (ipv4.is_some(), ipv6.is_some()) {
-                (true, true) => &dns_dual,
-                (true, false) => &dns_v4,
-                (false, true) => &dns_v6,
-                (false, false) => anyhow::bail!("no tunnel address assigned"),
-            };
-            *selected = Some(servers.clone());
-            Ok(())
-        },
-    )?;
-
-    // Drop DNS before Edge removes the TUN, including on early returns.
-    let mut dns = dns;
+    let (assignments, requests) = mpsc::channel();
+    let mut edge = Edge::new(&config, device.clone(), &hosts, assignments)?;
 
     // Wait for the quit signal; log traffic stats periodically. The
     // session reconnects itself with exponential backoff on failures.
@@ -140,100 +105,151 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     let mut last_network_check = Instant::now();
     let mut network_available = true;
     let mut last_route_error = None;
-    while !signal.is_exited() {
-        std::thread::sleep(Duration::from_millis(500));
-        if let Some(error) = edge.configuration_error() {
-            anyhow::bail!("VPN network configuration failed: {}", error);
-        }
-        // Reuse the runner instead of adding a netlink thread/dependency.
-        // A two-second snapshot naturally coalesces network event bursts.
-        if last_network_check.elapsed() >= Duration::from_secs(2) {
-            last_network_check = Instant::now();
-            match probe_exits(&hosts, &tun) {
-                Ok(current) => {
-                    let mut previous = physical_exits
-                        .lock()
-                        .map_err(|_| anyhow::anyhow!("exits lock poisoned"))?;
-                    if !network_available || *previous != current {
-                        let result = set_server_routes(
-                            &current,
-                            &mut *route_state
-                                .lock()
-                                .map_err(|_| anyhow::anyhow!("route state lock poisoned"))?,
-                        );
-                        match result {
-                            Ok(()) => {
-                                info!(
-                                    "Physical exit restored/changed: {:?} -> {:?}",
-                                    *previous, current
-                                );
-                                *previous = current;
-                                network_available = true;
-                                last_route_error = None;
-                                edge.reconnect()?;
-                            }
-                            Err(e) => {
-                                // A conflict may first appear after an offline
-                                // period. Report it even when availability was
-                                // already false, without repeating every poll.
-                                let message = format!("{e:#}");
-                                if last_route_error.as_ref() != Some(&message) {
-                                    warn!("Could not update server route: {message}");
-                                    last_route_error = Some(message);
+    let mut last_handshake_generation = 0;
+    let mut configured = false;
+    let result = (|| -> anyhow::Result<()> {
+        while !signal.is_exited() {
+            match requests.recv_timeout(Duration::from_millis(500)) {
+                Ok((assignment, setup)) if setup.is_pending() => {
+                    let ipv4 = assignment.ipv4.map(|address| Ipv4 {
+                        ip: address.address,
+                        netmask: address.netmask,
+                    });
+                    let ipv6 = assignment.ipv6.map(|address| Ipv6 {
+                        ip: address.address,
+                        prefix_len: address.prefix_len,
+                    });
+                    let result = (|| -> anyhow::Result<()> {
+                        on_ip_assigned(
+                            &physical_exits,
+                            &device,
+                            ipv4.as_ref(),
+                            ipv6.as_ref(),
+                            &mut route_state.lock().unwrap(),
+                        )
+                        .context("apply assigned VPN addresses and routes")?;
+                        dns.set_servers(&config.dns_for(ipv4.is_some(), ipv6.is_some()))?;
+                        if dns.ensure_applied().context("apply assigned VPN DNS")? {
+                            info!("VPN interface DNS configuration applied");
+                        }
+                        Ok(())
+                    })();
+                    let applied = result.is_ok();
+                    let accepted = setup.complete(
+                        result
+                            .as_ref()
+                            .copied()
+                            .map_err(|error| format!("{error:#}")),
+                    );
+                    if let Err(error) = result
+                        && (error.is::<ResolverViewChanged>() || (accepted && !configured))
+                    {
+                        return Err(error);
+                    }
+                    if applied && accepted {
+                        configured = true;
+                    } else {
+                        // Roll back DNS and tunnel routes, keeping the server route for retries.
+                        let dns_result = dns.restore().context("roll back VPN DNS");
+                        let route_result = route_state
+                            .lock()
+                            .unwrap()
+                            .clear_tunnel_defaults()
+                            .and_then(|()| required_command("ip", &["addr", "flush", "dev", &tun]))
+                            .context("roll back VPN routes");
+                        dns_result.and(route_result)?;
+                    }
+                }
+                Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(error) => return Err(error).context("receive VPN assignment"),
+            }
+            let connection = edge.connection_status();
+            if connection.connected && connection.generation != last_handshake_generation {
+                if connection.public_ip.is_empty() {
+                    info!("Handshake succeeded: generation={}", connection.generation);
+                } else {
+                    info!(
+                        "Handshake succeeded: generation={} public_ip={}",
+                        connection.generation, connection.public_ip
+                    );
+                }
+                last_handshake_generation = connection.generation;
+            }
+            // Reuse the runner instead of adding a netlink thread/dependency.
+            // A two-second snapshot naturally coalesces network event bursts.
+            if last_network_check.elapsed() >= Duration::from_secs(2) {
+                last_network_check = Instant::now();
+                dns.check_view()?;
+                match probe_exits(&hosts, &tun) {
+                    Ok(current) => {
+                        if !network_available || physical_exits != current {
+                            let result =
+                                set_server_routes(&current, &mut route_state.lock().unwrap());
+                            match result {
+                                Ok(()) => {
+                                    info!(
+                                        "Physical exit restored/changed: {:?} -> {:?}",
+                                        physical_exits, current
+                                    );
+                                    physical_exits = current;
+                                    network_available = true;
+                                    last_route_error = None;
+                                    edge.reconnect()?;
                                 }
-                                network_available = false;
+                                Err(e) => {
+                                    // A conflict may first appear after an offline
+                                    // period. Report it even when availability was
+                                    // already false, without repeating every poll.
+                                    let message = format!("{e:#}");
+                                    if last_route_error.as_ref() != Some(&message) {
+                                        warn!("Could not update server route: {message}");
+                                        last_route_error = Some(message);
+                                    }
+                                    network_available = false;
+                                }
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    if network_available {
-                        info!("Waiting for physical network: {e:#}");
+                    Err(e) => {
+                        if network_available {
+                            info!("Waiting for physical network: {e:#}");
+                        }
+                        network_available = false;
                     }
-                    network_available = false;
+                }
+                // Reapply this link's DNS if resolved loses it during reconnect.
+                if network_available && edge.is_active() {
+                    match dns.ensure_applied() {
+                        Ok(true) => info!("VPN interface DNS configuration applied"),
+                        Ok(false) => {}
+                        Err(e) if e.is::<ResolverViewChanged>() => return Err(e),
+                        Err(e) => warn!("Could not restore VPN DNS configuration: {e:#}"),
+                    }
                 }
             }
-            // Reapply this link's DNS if resolved loses it during reconnect.
-            if network_available && edge.is_active() {
-                let servers = assigned_dns
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("DNS state lock poisoned"))?;
-                match servers
-                    .as_ref()
-                    .map_or(Ok(false), |servers| update_dns(&mut dns, servers))
-                {
-                    Ok(true) => info!("VPN interface DNS configuration applied"),
-                    Ok(false) => {}
-                    Err(e) => warn!("Could not restore VPN DNS configuration: {e:#}"),
-                }
+            if last_stats.elapsed() >= Duration::from_secs(10) {
+                let s = edge.traffic_stats();
+                info!(
+                    "Traffic: active={} sent={}B ({}B/s) recv={}B ({}B/s) pkts={}/{}",
+                    edge.is_active(),
+                    s.bytes_sent,
+                    s.send_speed,
+                    s.bytes_received,
+                    s.receive_speed,
+                    s.packets_sent,
+                    s.packets_received
+                );
+                last_stats = Instant::now();
             }
         }
-        if last_stats.elapsed() >= Duration::from_secs(10) {
-            let s = edge.traffic_stats();
-            info!(
-                "Traffic: active={} sent={}B ({}B/s) recv={}B ({}B/s) pkts={}/{}",
-                edge.is_active(),
-                s.bytes_sent,
-                s.send_speed,
-                s.bytes_received,
-                s.receive_speed,
-                s.packets_sent,
-                s.packets_received
-            );
-            last_stats = Instant::now();
-        }
-    }
+        Ok(())
+    })();
 
     edge.shutdown();
-    dns.restore()?;
+    let dns_result = dns.restore();
     drop(edge);
-    routes.restore()?;
-    Ok(())
-}
-
-fn update_dns(dns: &mut DnsGuard, servers: &[String]) -> anyhow::Result<bool> {
-    dns.set_servers(servers)?;
-    dns.ensure_applied()
+    let route_result = routes.restore();
+    result.and(dns_result).and(route_result)
 }
 
 fn required_command(program: &str, args: &[&str]) -> anyhow::Result<()> {

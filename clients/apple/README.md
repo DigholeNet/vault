@@ -77,7 +77,7 @@ These checks do not activate a real tunnel; real tunnel tests need signed target
 - `Host`: Vault server hostname or IP address; required
 - `Port`: Server UDP port; defaults to 9527
 - `Password`: Authentication password; required
-- `MTU`: 1280–1427; empty uses automatic link-based sizing
+- `MTU`: 1280–1427; empty uses automatic link-based sizing; a value caps the automatic result
 - `IPv4 DNS`: Comma-separated IPv4 resolvers; empty uses `1.1.1.1,8.8.8.8`
 - `IPv6 DNS`: Comma-separated IPv6 resolvers; empty uses
   `2001:4860:4860::8888,2001:4860:4860::8844`
@@ -102,12 +102,15 @@ IPv4 or IPv6 tunnel address, including IPv6-only assignments.
 ## Usage and deployment
 
 - **iOS:** Status shows the connection button, session clock, assigned IPv4/IPv6
-  addresses and traffic. Configure validates a draft; Save applies connection settings
-  on the next connection. Language changes apply immediately. Diagnostics holds
-  connection checks and logs. About shows the app icon and version.
+  addresses, the server-observed public/egress IP when available, and traffic.
+  Configure validates a draft; Save applies connection settings on the next
+  connection. Language changes apply immediately. Diagnostics holds connection
+  checks and logs. About shows the app icon and version.
 - **macOS:** the menu bar shows connection state. The popover has a connection
-  button, session clock, traffic, and Diagnostics / Settings / Quit actions.
-  Settings groups General, Connection, Network and Advanced; connection/network/
+  button, session clock, the server-observed public/egress IP when available,
+  traffic, and Diagnostics / Settings / Quit actions. Diagnostics also lists the
+  public IP separately from the tunnel addresses. Settings groups General,
+  Connection, Network and Advanced; connection/network/
   advanced edits require Save and apply on the next connection. General changes
   apply immediately. About is at the bottom of the Settings sidebar.
 - Closing a macOS window leaves the VPN running; Quit waits for the VPN profile
@@ -131,7 +134,7 @@ TEAM_ID=ABCDE12345 scripts/package-apple.sh
 
 Outputs go to `dist/`. Packaging takes the marketing version from the root
 Cargo manifest; direct Xcode builds retain the project development default
-`1.0` unless `MARKETING_VERSION` is overridden. Signing profiles, notarization and CI setup are documented
+`0.1.1` unless `MARKETING_VERSION` is overridden. Signing profiles, notarization and CI setup are documented
 in [Releasing](../../docs/releasing.md#apple-packaging-and-signing).
 For a fork, change `APP_BUNDLE_ID_PREFIX` and `APP_GROUP_ID` in
 `Config/Shared.xcconfig` to identifiers registered to your team, and supply your

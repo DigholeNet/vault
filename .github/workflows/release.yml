@@ -1,6 +1,6 @@
 name: Release
 
-# One tag releases everything: Linux client (.deb) + Linux server (.deb) +
+# One tag releases everything: Linux client/server (.deb/.rpm + static binary tar.gz),
 # Android client (signed APK) + notarized macOS app zip. The signed iOS IPA
 # is built too, but is never uploaded (its Ad Hoc provisioning profile
 # contains the team name and registered device UDIDs). Public workflow
@@ -76,11 +76,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install protoc, asciidoctor and cargo-deb
+      - name: Install Linux packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler asciidoctor
+          sudo apt-get install -y protobuf-compiler asciidoctor rpm
           cargo install cargo-deb --locked
+          cargo install cargo-generate-rpm --locked
 
       - name: Cache cargo registry and target dir
         uses: actions/cache@v5
@@ -91,11 +92,11 @@ jobs:
           key: ${{ runner.os }}-cargo-release-${{ matrix.arch }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-release-${{ matrix.arch }}-
 
-      - name: Build deb package
+      - name: Build and validate deb and rpm packages
         run: |
           scripts/package-linux.sh --manpages-only
           # Keep release artifacts outside the cached target directory.
-          mkdir -p "$RUNNER_TEMP/deb"
+          mkdir -p "$RUNNER_TEMP/deb" "$RUNNER_TEMP/rpm"
           cargo deb -p ${{ matrix.package }} --locked --output "$RUNNER_TEMP/deb/"
           shopt -s nullglob
           packages=("$RUNNER_TEMP"/deb/${{ matrix.package }}_*.deb)
@@ -105,11 +106,108 @@ jobs:
           fi
           dpkg-deb --info "${packages[0]}" | grep -Eq "Architecture: ${{ matrix.arch }}$"
 
+          package_dir="${{ matrix.package }}"
+          if [[ "$package_dir" == edge ]]; then
+            package_dir=clients/linux
+          fi
+          rpm="$RUNNER_TEMP/rpm/${{ matrix.package }}-v${{ needs.version-gate.outputs.version }}-${{ matrix.arch }}.rpm"
+          cargo generate-rpm -p "$package_dir" --output "$rpm"
+          case "${{ matrix.arch }}" in
+            amd64) expected_arch=x86_64 ;;
+            arm64) expected_arch=aarch64 ;;
+          esac
+          test "$(rpm -qp --queryformat '%{ARCH}' "$rpm")" = "$expected_arch"
+          for path in "/usr/bin/${{ matrix.package }}" \
+              "/etc/vault/${{ matrix.package }}.toml.example" \
+              "/usr/lib/systemd/system/${{ matrix.package }}.service" \
+              "/usr/lib/systemd/system/${{ matrix.package }}.target" \
+              "/usr/share/man/man1/${{ matrix.package }}.1.gz"; do
+            rpm -qpl "$rpm" | grep -Fx "$path"
+          done
+          rpm -qp --scripts "$rpm" | grep -F "systemctl try-restart ${{ matrix.package }}.service"
+          rpm -qp --scripts "$rpm" | grep -F "systemctl stop ${{ matrix.package }}.service"
+
       - name: Upload deb artifact
         uses: actions/upload-artifact@v6
         with:
           name: deb-${{ matrix.package }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/deb/${{ matrix.package }}_*.deb
+          if-no-files-found: error
+
+      - name: Upload rpm artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: rpm-${{ matrix.package }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/rpm/${{ matrix.package }}-v${{ needs.version-gate.outputs.version }}-${{ matrix.arch }}.rpm
+          if-no-files-found: error
+
+  linux-binary-packages:
+    needs: [version-gate, rust-checks, android-checks, apple-checks]
+    strategy:
+      matrix:
+        package: [edge, supernode]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-26.04
+            target: x86_64-unknown-linux-musl
+          - arch: arm64
+            runner: ubuntu-26.04-arm
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+
+      - name: Install protoc and cargo-zigbuild
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          cargo install cargo-zigbuild --locked
+
+      - name: Cache cargo registry and target dir
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-binary-release-${{ matrix.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-binary-release-${{ matrix.arch }}-
+
+      - name: Build and validate static binary archive
+        env:
+          DIST_DIR: ${{ runner.temp }}/binary
+          PACKAGE: ${{ matrix.package }}
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.version-gate.outputs.version }}
+        run: |
+          scripts/package-linux.sh --binary "$PACKAGE" "$TARGET"
+          bundle="$PACKAGE-v$VERSION-$ARCH"
+          archive="$DIST_DIR/$bundle.tar.gz"
+          test -f "$archive"
+          tar -tzf "$archive" | sort | diff -u \
+            <(printf '%s\n' "$bundle/" "$bundle/LICENSE" "$bundle/NOTICE" "$bundle/$PACKAGE" | sort) -
+          mkdir -p "$RUNNER_TEMP/binary-smoke"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/binary-smoke"
+          binary="$RUNNER_TEMP/binary-smoke/$bundle/$PACKAGE"
+          test -x "$binary"
+          file "$binary" | grep -q 'statically linked'
+          "$binary" --help >/dev/null
+
+      - name: Upload binary archive artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: binary-${{ matrix.package }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/binary/${{ matrix.package }}-v${{ needs.version-gate.outputs.version }}-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
   android-apk:
@@ -344,7 +442,7 @@ jobs:
           fi
 
   publish:
-    needs: [version-gate, linux-packages, android-apk, apple-packages]
+    needs: [version-gate, linux-packages, linux-binary-packages, android-apk, apple-packages]
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
@@ -373,6 +471,54 @@ jobs:
           name: deb-supernode-arm64
           path: dist
 
+      - name: Download rpm-edge-amd64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: rpm-edge-amd64
+          path: dist
+
+      - name: Download rpm-edge-arm64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: rpm-edge-arm64
+          path: dist
+
+      - name: Download rpm-supernode-amd64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: rpm-supernode-amd64
+          path: dist
+
+      - name: Download rpm-supernode-arm64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: rpm-supernode-arm64
+          path: dist
+
+      - name: Download binary-edge-amd64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: binary-edge-amd64
+          path: dist
+
+      - name: Download binary-edge-arm64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: binary-edge-arm64
+          path: dist
+
+      - name: Download binary-supernode-amd64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: binary-supernode-amd64
+          path: dist
+
+      - name: Download binary-supernode-arm64 release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: binary-supernode-arm64
+          path: dist
+
       - name: Download android-apk release artifact
         uses: actions/download-artifact@v7
         with:
@@ -386,8 +532,9 @@ jobs:
           path: dist
 
       - name: Rename artifacts with version
-        # Match the architecture in each cargo-deb filename so packages cannot
-        # overwrite one another or acquire a misleading release asset name.
+        # Match the architecture in each cargo-deb filename and validate the
+        # already-versioned RPM names so packages cannot overwrite one another
+        # or acquire a misleading release asset name.
         # The iOS IPA is Ad Hoc signed (installable only on devices
         # registered in the profile) and embeds the team name and registered
         # device UDIDs — never upload it as an artifact or Release asset.
@@ -405,6 +552,8 @@ jobs:
                 exit 1
               fi
               mv "${packages[0]}" "$pkg-v${{ needs.version-gate.outputs.version }}-$arch.deb"
+              test -f "$pkg-v${{ needs.version-gate.outputs.version }}-$arch.rpm"
+              test -f "$pkg-v${{ needs.version-gate.outputs.version }}-$arch.tar.gz"
             done
           done
           mv Vault-macOS.zip "Vault-macOS-v${{ needs.version-gate.outputs.version }}.zip"

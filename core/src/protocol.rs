@@ -67,6 +67,7 @@ pub fn build_handshake_request(
         version: PROTOCOL_VERSION,
         device_name: device_name.to_string(),
         platform: platform.to_string(),
+        request_public_ip: true,
     };
 
     build_handshake(pb::handshake_message::Data::Request(request))
@@ -82,6 +83,7 @@ pub fn build_handshake_response(
     ipv4_mask: String,
     ipv6: String,
     ipv6_prefixlen: i32,
+    public_ip: String,
     timestamp: Time,
     request_public_key: &[u8],
     pake_key: &[u8],
@@ -98,6 +100,7 @@ pub fn build_handshake_response(
         timestamp,
         request_public_key: request_public_key.to_vec(),
         confirm_mac: vec![],
+        public_ip,
     };
     // MAC the response with confirm_mac empty, then fill it in. proto3
     // drops empty bytes fields on the wire, so the client can recompute the
@@ -135,6 +138,7 @@ pub fn verify_response_confirm(
         timestamp: response.timestamp,
         request_public_key: response.request_public_key.clone(),
         confirm_mac: vec![],
+        public_ip: response.public_ip.clone(),
     };
     let mut msg = Vec::with_capacity(CONFIRM_LABEL.len() + 256);
     msg.extend_from_slice(CONFIRM_LABEL);
@@ -311,6 +315,7 @@ mod tests {
     fn run_handshake(
         client_password: &[u8],
         server_password: &[u8],
+        public_ip: &str,
     ) -> (HandshakeResponse, zeroize::Zeroizing<Vec<u8>>) {
         let client_id = PeerId([1u8; 16]);
         let server_id = PeerId([2u8; 16]);
@@ -335,6 +340,7 @@ mod tests {
         };
         assert_eq!(request.device_name, "test-device");
         assert_eq!(request.platform, "linux");
+        assert!(request.request_public_ip);
 
         let (server_pake, msg_b) = pake::start_server(server_password, &request.id.0);
         let pake_key_server = server_pake.finish(&request.pake_message).unwrap();
@@ -352,6 +358,7 @@ mod tests {
             "255.255.255.0".to_string(),
             "fd00::2".to_string(),
             64,
+            public_ip.to_string(),
             43,
             &request.public_key_data,
             &pake_key_server,
@@ -361,6 +368,7 @@ mod tests {
             Handshake::Response(r) => r,
             _ => panic!("expected response"),
         };
+        assert_eq!(response.public_ip, public_ip);
 
         let pake_key_client = client_pake.finish(&response.pake_message).unwrap();
         (response, pake_key_client)
@@ -368,7 +376,14 @@ mod tests {
 
     #[test]
     fn handshake_pake_roundtrip() {
-        let (response, pake_key_client) = run_handshake(b"shared-password", b"shared-password");
+        let (response, pake_key_client) =
+            run_handshake(b"shared-password", b"shared-password", "2001:db8::1");
+        verify_response_confirm(&response, &pake_key_client).unwrap();
+    }
+
+    #[test]
+    fn empty_public_ip_roundtrip() {
+        let (response, pake_key_client) = run_handshake(b"shared-password", b"shared-password", "");
         verify_response_confirm(&response, &pake_key_client).unwrap();
     }
 
@@ -376,17 +391,22 @@ mod tests {
     fn wrong_password_rejected() {
         // The server used a different password, so its confirm_mac was
         // keyed differently than the client's PAKE key.
-        let (response, pake_key_client) = run_handshake(b"client-password", b"server-password");
+        let (response, pake_key_client) =
+            run_handshake(b"client-password", b"server-password", "192.0.2.1");
         assert!(verify_response_confirm(&response, &pake_key_client).is_err());
     }
 
     #[test]
     fn tampered_response_rejected() {
-        let (mut response, pake_key_client) = run_handshake(b"pw", b"pw");
+        let (mut response, pake_key_client) = run_handshake(b"pw", b"pw", "192.0.2.1");
         response.ipv4 = "10.0.0.99".to_string();
         assert!(verify_response_confirm(&response, &pake_key_client).is_err());
 
-        let (mut response, pake_key_client) = run_handshake(b"pw", b"pw");
+        let (mut response, pake_key_client) = run_handshake(b"pw", b"pw", "192.0.2.1");
+        response.public_ip = "192.0.2.99".to_string();
+        assert!(verify_response_confirm(&response, &pake_key_client).is_err());
+
+        let (mut response, pake_key_client) = run_handshake(b"pw", b"pw", "192.0.2.1");
         response.confirm_mac[0] ^= 0xff;
         assert!(verify_response_confirm(&response, &pake_key_client).is_err());
     }

@@ -1,28 +1,25 @@
 // SPDX-License-Identifier: MIT
 package net.dighole.vault
 
-import android.util.Log
 import android.os.SystemClock
-import java.util.concurrent.atomic.AtomicLong
+import android.util.Log
+import net.dighole.vaultcore.uniffi.appendSharedLog
+import net.dighole.vaultcore.uniffi.clearSharedLogs
+import net.dighole.vaultcore.uniffi.readSharedLogs
+import net.dighole.vaultcore.uniffi.setLogFilePath
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Rolling file logger writing into the app's private files directory
- * (`filesDir/logs`, no permissions required), so field issues can be
- * diagnosed after the fact instead of relying on ephemeral logcat.
- *
- * Mirrors the Apple FileLogger design: a single current file (`vault.log`)
- * appended with O_APPEND semantics, rotated to one backup file
- * (`vault.prev.log`) when a Kotlin write observes [MAX_LOG_SIZE] exceeded.
- * Rust writes do not run this check, so this is not a strict file-size limit.
- *
- * Kotlin writes are queued on a background thread. Rust appends separately
- * and synchronously; those writes can block on filesystem I/O.
+ * Shared vault.log operations use vault-core when available, with a local file
+ * fallback when the native library cannot be loaded. The optional app-scoped
+ * external event log remains readable with authorized ADB.
  */
 object VaultFileLogger {
     private const val TAG = "VaultFileLogger"
@@ -33,18 +30,19 @@ object VaultFileLogger {
     private val writerThread = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "vault-file-logger").apply { isDaemon = true }
     }
-    private val timestampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
     @Volatile
     private var logFile: File? = null
 
-    @Volatile
     private var prevLogFile: File? = null
+
+    @Volatile
+    private var nativeLogging = false
 
     private var eventFile: File? = null
     private val eventSequence = AtomicLong()
 
-    @Suppress("TooGenericExceptionCaught") // A logger must never crash the app.
+    @Suppress("TooGenericExceptionCaught")
     @Synchronized
     fun init(context: android.content.Context) {
         if (logFile != null) return
@@ -53,6 +51,14 @@ object VaultFileLogger {
             logsDir.mkdirs()
             logFile = File(logsDir, LOG_FILE_NAME)
             prevLogFile = File(logsDir, PREV_LOG_FILE_NAME)
+            logFile?.absolutePath?.let { path ->
+                try {
+                    setLogFilePath(path)
+                    nativeLogging = true
+                } catch (error: LinkageError) {
+                    Log.w(TAG, "vault-bridge native library unavailable; using local logs", error)
+                }
+            }
             context.getExternalFilesDir(null)?.let { directory ->
                 val events = File(directory, "logs")
                 events.mkdirs()
@@ -64,44 +70,38 @@ object VaultFileLogger {
         }
     }
 
-    /** Absolute path of the current log file, null before [init]. */
     val currentLogPath: String?
         get() = logFile?.absolutePath
 
-    /**
-     * Append a single line to the log file. Safe to call from any thread;
-     * the actual write happens on the writer thread.
-     */
-    @Suppress("TooGenericExceptionCaught") // A logger must never crash the caller.
+    /** Queue Kotlin records; file writes happen synchronously on this writer thread. */
+    @Suppress("TooGenericExceptionCaught")
     fun log(priority: Int, tag: String, message: String, throwable: Throwable? = null) {
-        val file = logFile ?: return
+        val timestampMs = System.currentTimeMillis()
         val level = when (priority) {
-            Log.VERBOSE -> "V"
-            Log.DEBUG -> "D"
-            Log.INFO -> "I"
-            Log.WARN -> "W"
-            Log.ERROR -> "E"
-            else -> "?"
+            Log.VERBOSE -> "VERBOSE"
+            Log.DEBUG -> "DEBUG"
+            Log.INFO -> "INFO"
+            Log.WARN -> "WARNING"
+            Log.ERROR -> "ERROR"
+            else -> "INFO"
         }
-        // Capture the time at the call site so lines reflect event order,
-        // not writer-queue delay. Formatting happens on the writer thread
-        // because SimpleDateFormat is not thread-safe.
-        val timestamp = System.currentTimeMillis()
         val stackTrace = throwable?.let { Log.getStackTraceString(it) }
         writerThread.execute {
             try {
-                val line = buildString {
-                    append('[').append(timestampFormat.format(Date(timestamp))).append("] [")
-                        .append(level).append('/').append(tag).append("] ")
-                        .append(message).append('\n')
-                    if (stackTrace != null) {
-                        append(stackTrace)
-                    }
+                val text = buildString {
+                    append(message)
+                    stackTrace?.let { append('\n').append(it) }
                 }
-                prevLogFile?.let { rotateIfNeeded(file, it) }
-                // append=true maps to O_APPEND, so appends never overwrite
-                // existing content even after a rotation race.
-                FileOutputStream(file, true).use { it.write(line.toByteArray(Charsets.UTF_8)) }
+                try {
+                    if (nativeLogging) {
+                        appendSharedLog(level, tag, text, timestampMs.toULong())
+                    } else {
+                        appendFallback(level, tag, text, timestampMs)
+                    }
+                } catch (_: LinkageError) {
+                    nativeLogging = false
+                    appendFallback(level, tag, text, timestampMs)
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to write log line", e)
             }
@@ -109,7 +109,7 @@ object VaultFileLogger {
     }
 
     /** Low-volume lifecycle events; app-scoped copy is readable with authorized ADB. */
-    @Suppress("TooGenericExceptionCaught") // A logger must never crash the caller.
+    @Suppress("TooGenericExceptionCaught")
     fun event(tag: String, message: String) {
         val entry = "seq=${eventSequence.incrementAndGet()} elapsedMs=${SystemClock.elapsedRealtime()} " +
             "thread=${Thread.currentThread().name} [$tag] $message"
@@ -125,16 +125,21 @@ object VaultFileLogger {
         }
     }
 
-    /** Queue UI reads/clears behind Kotlin writes; append-only native writes remain safe. */
+    /** Queue UI reads/clears behind Kotlin writes; native writes remain append-safe. */
     suspend fun readLogs(): String = queuedLogs(false)
     suspend fun clearAndRead(): String = queuedLogs(true)
 
+    @Suppress("TooGenericExceptionCaught")
     private suspend fun queuedLogs(clear: Boolean): String = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
         writerThread.execute {
             try {
                 if (clear) {
-                    logFile?.let { FileOutputStream(it, false).use { stream -> stream.flush() } }
-                    prevLogFile?.delete()
+                    try {
+                        if (nativeLogging) clearSharedLogs() else clearFallback()
+                    } catch (_: LinkageError) {
+                        nativeLogging = false
+                        clearFallback()
+                    }
                     eventFile?.let { file ->
                         FileOutputStream(file, false).use { stream -> stream.flush() }
                         val backup = File(file.parentFile, "vpn-events.prev.log")
@@ -143,13 +148,35 @@ object VaultFileLogger {
                         }
                     }
                 }
-                val content = listOfNotNull(prevLogFile, logFile).filter { it.exists() }
-                    .joinToString("\n") { it.readText() }
+                val content = try {
+                    if (nativeLogging) readSharedLogs() else readFallback()
+                } catch (_: LinkageError) {
+                    nativeLogging = false
+                    readFallback()
+                }
                 if (continuation.isActive) continuation.resumeWith(Result.success(content))
-            } catch (error: java.io.IOException) {
+            } catch (error: Exception) {
                 if (continuation.isActive) continuation.resumeWith(Result.failure(error))
             }
         }
+    }
+
+    private fun appendFallback(level: String, tag: String, text: String, timestampMs: Long) {
+        val file = logFile ?: return
+        val previous = prevLogFile ?: return
+        LocalVaultLog.append(file, previous, level, tag, text, timestampMs)
+    }
+
+    private fun readFallback(): String {
+        val file = logFile ?: return ""
+        val previous = prevLogFile ?: return ""
+        return LocalVaultLog.read(file, previous)
+    }
+
+    private fun clearFallback() {
+        val file = logFile ?: return
+        val previous = prevLogFile ?: return
+        LocalVaultLog.clear(file, previous)
     }
 
     private fun rotateIfNeeded(file: File, prev: File) {
@@ -157,6 +184,44 @@ object VaultFileLogger {
             prev.delete()
             if (!file.renameTo(prev)) {
                 Log.w(TAG, "Log rotation failed")
+            }
+        }
+    }
+}
+
+internal object LocalVaultLog {
+    private const val MAX_LOG_SIZE = 1024 * 1024L
+    private val timestampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS'Z'", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }
+
+    fun append(file: File, previous: File, level: String, tag: String, text: String, timestampMs: Long) {
+        rotateIfNeeded(file, previous)
+        val timestamp = timestampFormat.format(Date(timestampMs))
+        val lines = text.split('\n').let { parts ->
+            if (parts.lastOrNull()?.isEmpty() == true) parts.dropLast(1) else parts
+        }
+        val record = lines.joinToString("") { "[$timestamp] [$level] [$tag] $it\n" }
+        FileOutputStream(file, true).use { it.write(record.toByteArray(Charsets.UTF_8)) }
+    }
+
+    fun read(file: File, previous: File): String = listOf(previous, file)
+        .filter { it.exists() }
+        .flatMap { it.readLines() }
+        .filter { it.isNotEmpty() }
+        .joinToString("\n")
+
+    fun clear(file: File, previous: File) {
+        for (path in listOf(file, previous)) {
+            FileOutputStream(path, false).use { stream -> stream.flush() }
+        }
+    }
+
+    private fun rotateIfNeeded(file: File, previous: File) {
+        if (file.exists() && file.length() > MAX_LOG_SIZE) {
+            previous.delete()
+            if (!file.renameTo(previous)) {
+                Log.w("VaultFileLogger", "Log rotation failed")
             }
         }
     }

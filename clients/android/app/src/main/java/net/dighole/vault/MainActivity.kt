@@ -76,8 +76,6 @@ class MainActivity : BaseActivity() {
     }
 
     private fun showFragment(tag: String, factory: () -> Fragment) {
-        findViewById<android.view.View>(R.id.mainRoot).setBackgroundColor(ContextCompat.getColor(this,
-            if (tag == TAG_STATUS) R.color.status_background else R.color.vault_background))
         val transaction = supportFragmentManager.beginTransaction()
 
         supportFragmentManager.findFragmentByTag(TAG_STATUS)?.let { transaction.hide(it) }

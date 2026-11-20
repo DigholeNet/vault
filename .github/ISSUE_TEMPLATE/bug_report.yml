@@ -19,7 +19,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: App version or deb package version
+      description: App version or deb/rpm package version
     validations:
       required: true
   - type: textarea

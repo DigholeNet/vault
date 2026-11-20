@@ -93,6 +93,11 @@ pub async fn run_mock_server_leases(
                 "255.255.255.0".to_string(),
                 "fd00::2".to_string(),
                 64,
+                if request.request_public_ip {
+                    client_addr.ip().to_canonical().to_string()
+                } else {
+                    String::new()
+                },
                 now_secs(),
                 &request.public_key_data,
                 &pake_key,

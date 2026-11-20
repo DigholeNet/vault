@@ -26,6 +26,25 @@ impl TryFrom<Vec<u8>> for PeerId {
     }
 }
 
+impl std::str::FromStr for PeerId {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value.len() != 32 {
+            anyhow::bail!("peer id must contain 32 hexadecimal characters");
+        }
+        let bytes =
+            hex::decode(value).map_err(|_| anyhow::anyhow!("peer id is not hexadecimal"))?;
+        PeerId::try_from(bytes)
+    }
+}
+
+impl std::fmt::Display for PeerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&hex::encode(self.0))
+    }
+}
+
 pub struct Peer<TS: TimeSource> {
     id: PeerId,
     crypto: CryptoCore,

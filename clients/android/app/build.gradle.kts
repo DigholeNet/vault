@@ -43,7 +43,7 @@ android {
             abiFilters += androidTargets.keys
         }
         versionCode = providers.gradleProperty("versionCode").map(String::toInt).orElse(1).get()
-        versionName = providers.gradleProperty("versionName").orElse("0.1.0").get()
+        versionName = providers.gradleProperty("versionName").orElse("0.1.1").get()
         buildConfigField("String", "GIT_BUILD_ID", "\"$gitBuildId\"")
     }
 
@@ -167,7 +167,6 @@ dependencies {
     testImplementation(libs.junit)
     // The Android JNA AAR omits desktop native libraries needed by JVM tests.
     testRuntimeOnly(libs.jna)
-    androidTestImplementation(libs.androidx.test.junit)
 }
 
 tasks.named("preBuild").configure { dependsOn(licenseAssets) }

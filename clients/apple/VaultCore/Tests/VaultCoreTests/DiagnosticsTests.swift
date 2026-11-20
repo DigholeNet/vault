@@ -149,7 +149,7 @@ private func response(_ request: DiagnosticRequest) -> DiagnosticResponse {
     #expect(original.isSameSession(as: original))
 }
 
-@Test func engineErrorsPropagateWithoutPresentation() {
+@Test func engineErrors() {
     var invalid = context()
     invalid.dns = ["not-an-ip-address"]
     #expect(throws: (any Error).self) {

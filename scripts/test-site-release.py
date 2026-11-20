@@ -14,10 +14,10 @@ BASE = site_release.BASE
 
 def release(names=()):
     return {
-        "tag_name": "v0.1.0",
-        "html_url": f"{BASE}/releases/tag/v0.1.0",
+        "tag_name": "v0.1.1",
+        "html_url": f"{BASE}/releases/tag/v0.1.1",
         "published_at": "2026-11-01T00:00:00Z",
-        "assets": [{"name": name, "browser_download_url": f"{BASE}/releases/download/v0.1.0/{name}"} for name in names],
+        "assets": [{"name": name, "browser_download_url": f"{BASE}/releases/download/v0.1.1/{name}"} for name in names],
     }
 
 
@@ -30,25 +30,46 @@ class ReleaseSnapshotTests(unittest.TestCase):
             self.assertEqual(state["url"], f"{BASE}/releases")
 
     def test_actual_release_asset_names_match_publishing_workflow(self):
-        data = release(["vault-android-v0.1.0.apk", "Vault-macOS-v0.1.0.zip", "edge-v0.1.0-amd64.deb", "edge-v0.1.0-arm64.deb", "supernode-v0.1.0-amd64.deb", "supernode-v0.1.0-arm64.deb", "Vault-iOS.ipa"])
-        state = site_release.release_snapshot(data)
-        self.assertEqual(set(state["assets"]), {"android", "macos", "edge-amd64", "edge-arm64", "supernode-amd64", "supernode-arm64"})
-        self.assertEqual(state["version"], "v0.1.0")
+        names = [
+            "vault-android-v0.1.1.apk",
+            "Vault-macOS-v0.1.1.zip",
+            "Vault-iOS.ipa",
+        ]
+        for package in ["edge", "supernode"]:
+            for arch in ["amd64", "arm64"]:
+                names.extend(
+                    f"{package}-v0.1.1-{arch}.{extension}"
+                    for extension in ["deb", "rpm", "tar.gz"]
+                )
+        state = site_release.release_snapshot(release(names))
+        expected = {"android", "macos"}
+        for package in ["edge", "supernode"]:
+            for arch in ["amd64", "arm64"]:
+                expected.update(
+                    {
+                        f"{package}-{arch}",
+                        f"{package}-rpm-{arch}",
+                        f"{package}-binary-{arch}",
+                    }
+                )
+        self.assertEqual(set(state["assets"]), expected)
+        self.assertEqual(len(state["assets"]), 14)
+        self.assertEqual(state["version"], "v0.1.1")
         self.assertEqual(state["published"], "2026-11-01")
 
     def test_missing_platform_is_not_given_an_invented_url(self):
-        state = site_release.release_snapshot(release(["vault-android-v0.1.0.apk"]))
+        state = site_release.release_snapshot(release(["vault-android-v0.1.1.apk"]))
         self.assertEqual(set(state["assets"]), {"android"})
 
     def test_unexpected_download_host_is_rejected(self):
-        data = release(["vault-android-v0.1.0.apk"])
+        data = release(["vault-android-v0.1.1.apk"])
         data["assets"][0]["browser_download_url"] = "https://example.invalid/package.apk"
         with self.assertRaises(ValueError):
             site_release.release_snapshot(data)
 
     def test_duplicate_platform_assets_are_not_silently_selected(self):
         with self.assertRaises(ValueError):
-            site_release.release_snapshot(release(["vault-android-v0.1.0.apk", "vault-android-v0.1.1.apk"]))
+            site_release.release_snapshot(release(["vault-android-v0.1.1.apk", "vault-android-v0.1.2.apk"]))
 
     def test_missing_latest_verifies_repository_access_before_empty_state(self):
         missing = HTTPError("https://api.github.com", 404, "not found", {}, None)

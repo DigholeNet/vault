@@ -251,16 +251,14 @@ impl<B: Backend> NetworkSetup<B> {
             }
         }
         if ipv4.is_some() {
-            // This is optional host hardening, not a forwarding prerequisite.
-            // Never change global settings or reject startup because of it.
-            match self.backend.read_sysctl("net.ipv4.conf.all.send_redirects") {
-                Ok(value) if value == "0" => {}
-                Ok(_) => tracing::warn!(
-                    "Global IPv4 send_redirects is enabled; TUN-local setting alone may not disable redirects. Continuing startup without changing host settings"
-                ),
-                Err(error) => tracing::warn!(
-                    "Cannot inspect global IPv4 send_redirects: {error:#}; continuing startup"
-                ),
+            // Linux ORs all/interface: TUN-local zero alone cannot suppress
+            // redirects during client-to-client relay. Apply after ip_forward,
+            // which can reset IPv4 defaults. Like forwarding, keep this shared
+            // setting on exit so another instance does not regain redirects.
+            let key = "net.ipv4.conf.all.send_redirects";
+            if self.backend.read_sysctl(key)? != "0" {
+                tracing::info!("Disabling global IPv4 redirect sending: {key}=0");
+                self.backend.write_sysctl(key, "0")?;
             }
         }
         // Only the newly created TUN's settings are owned by this instance.
@@ -669,6 +667,7 @@ mod tests {
                     || matches!(
                         key,
                         "net.ipv4.ip_forward"
+                            | "net.ipv4.conf.all.send_redirects"
                             | "net.ipv6.conf.all.forwarding"
                             | "net/ipv6/conf/eth0/accept_ra"
                     ),
@@ -690,6 +689,8 @@ mod tests {
         fake.0.borrow_mut().sysctls.extend([
             ("net.ipv4.ip_forward".into(), "1".into()),
             ("net.ipv4.conf.all.send_redirects".into(), "1".into()),
+            ("net/ipv4/conf/default/send_redirects".into(), "1".into()),
+            ("net/ipv4/conf/eth0/send_redirects".into(), "1".into()),
             ("net.ipv6.conf.all.forwarding".into(), "1".into()),
             ("net/ipv6/conf/eth0/accept_ra".into(), "2".into()),
             ("net/ipv4/conf/all/rp_filter".into(), "0".into()),
@@ -741,8 +742,9 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
                     ("net/ipv4/conf/all/rp_filter".into(), global.into()),
                     (key.into(), original.into()),
                 ]);
-                let before = fake.0.borrow().sysctls.clone();
-                let mut active = before.clone();
+                let mut after = fake.0.borrow().sysctls.clone();
+                after.insert("net.ipv4.conf.all.send_redirects".into(), "0".into());
+                let mut active = after.clone();
                 active.insert(key.into(), "1".into());
                 active.insert("net/ipv4/conf/vpn/send_redirects".into(), "0".into());
                 let mut setup = NetworkSetup::new(fake.clone());
@@ -752,7 +754,7 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
                 assert_eq!(fake.0.borrow().sysctls, active);
                 drop(setup);
                 let state = fake.0.borrow();
-                assert_eq!(state.sysctls, before);
+                assert_eq!(state.sysctls, after);
                 assert!(state.rules.is_empty());
                 let writes: Vec<_> = state
                     .writes
@@ -776,6 +778,7 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
         for fail in [false, true] {
             let fake = fixture();
             let mut expected = fake.0.borrow().sysctls.clone();
+            expected.insert("net.ipv4.conf.all.send_redirects".into(), "0".into());
             if fail {
                 fake.0.borrow_mut().fail_after_write = Some(key.into());
             }
@@ -808,19 +811,23 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
         setup.configure("vpn", Some(V4), Some(V6), &exits).unwrap();
         let startup_calls = probe.0.borrow().calls;
         drop(setup);
-        // Exercise every read, check and mutation, including the optional read.
+        // Exercise every required read, check and mutation.
         for fail_at in 1..=startup_calls {
             let fake = fixture();
             fake.0.borrow_mut().rules.push(existing.clone());
-            let original = fake.0.borrow().sysctls.clone();
+            let mut expected = fake.0.borrow().sysctls.clone();
             fake.0.borrow_mut().fail_at = Some(fail_at);
             let mut setup = NetworkSetup::new(fake.clone());
             let result = setup.configure("vpn", Some(V4), Some(V6), &exits);
-            assert_eq!(result.is_ok(), fail_at == 3, "failure {fail_at}");
+            assert!(result.is_err(), "failure {fail_at}");
             drop(setup);
             let state = fake.0.borrow();
+            let redirect_write = ("net.ipv4.conf.all.send_redirects".into(), "0".into());
+            if state.writes.contains(&redirect_write) {
+                expected.insert(redirect_write.0, redirect_write.1);
+            }
             assert_eq!(state.rules, vec![existing.clone()], "failure {fail_at}");
-            assert_eq!(state.sysctls, original, "failure {fail_at}");
+            assert_eq!(state.sysctls, expected, "failure {fail_at}");
         }
     }
 
@@ -866,6 +873,7 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
             expected.insert("net.ipv6.conf.all.forwarding".into(), "1".into());
             if ipv4.is_some() {
                 expected.insert("net.ipv4.ip_forward".into(), "1".into());
+                expected.insert("net.ipv4.conf.all.send_redirects".into(), "0".into());
                 expected.insert("net/ipv6/conf/eth0/accept_ra".into(), "2".into());
             }
             let mut setup = NetworkSetup::new(fake.clone());
@@ -878,11 +886,12 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
             assert_eq!(state.sysctls, expected);
             if ipv4.is_some() {
                 assert_eq!(
-                    state.writes[..4],
+                    state.writes[..5],
                     [
                         ("net.ipv4.ip_forward".into(), "1".into()),
                         ("net/ipv6/conf/eth0/accept_ra".into(), "2".into()),
                         ("net.ipv6.conf.all.forwarding".into(), "1".into()),
+                        ("net.ipv4.conf.all.send_redirects".into(), "0".into()),
                         ("net/ipv4/conf/vpn/rp_filter".into(), "1".into()),
                     ]
                 );
@@ -896,15 +905,16 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
     #[test]
     fn forwarding_failure() {
         // Fail either the forwarding write or the subsequent TUN-local write.
-        for fail_at in [2, 5] {
+        for fail_at in [2, 6] {
             let fake = fixture();
             fake.0
                 .borrow_mut()
                 .sysctls
                 .insert("net.ipv4.ip_forward".into(), "0".into());
             let mut expected = fake.0.borrow().sysctls.clone();
-            if fail_at == 5 {
+            if fail_at == 6 {
                 expected.insert("net.ipv4.ip_forward".into(), "1".into());
+                expected.insert("net.ipv4.conf.all.send_redirects".into(), "0".into());
             }
             fake.0.borrow_mut().fail_at = Some(fail_at);
             let mut setup = NetworkSetup::new(fake.clone());
@@ -917,6 +927,66 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
             assert_eq!(fake.0.borrow().sysctls, expected);
             assert!(fake.0.borrow().rules.is_empty());
         }
+    }
+
+    #[test]
+    fn redirects() {
+        let global_key = "net.ipv4.conf.all.send_redirects";
+        let tun_key = "net/ipv4/conf/vpn/send_redirects";
+        for global in ["0", "1"] {
+            for local in ["0", "1"] {
+                let fake = fixture();
+                fake.0.borrow_mut().sysctls.extend([
+                    (global_key.into(), global.into()),
+                    (tun_key.into(), local.into()),
+                ]);
+                let mut expected = fake.0.borrow().sysctls.clone();
+                expected.insert(global_key.into(), "0".into());
+                let mut setup = NetworkSetup::new(fake.clone());
+                setup
+                    .configure("vpn", Some(V4), None, &["eth0".into()])
+                    .unwrap();
+                // Both switches must be off for the kernel to suppress redirects.
+                for key in [global_key, tun_key] {
+                    assert_eq!(fake.0.borrow().sysctls[key], "0");
+                }
+                drop(setup);
+                let state = fake.0.borrow();
+                // Only the global value persists; default/uplink settings survive.
+                assert_eq!(state.sysctls, expected);
+                let writes: Vec<_> = state
+                    .writes
+                    .iter()
+                    .filter(|(key, _)| key == global_key)
+                    .cloned()
+                    .collect();
+                let expected_writes = if global == "1" {
+                    vec![(global_key.into(), "0".into())]
+                } else {
+                    vec![]
+                };
+                assert_eq!(writes, expected_writes);
+            }
+        }
+    }
+
+    #[test]
+    fn redirect_write_failure() {
+        let key = "net.ipv4.conf.all.send_redirects";
+        let fake = fixture();
+        let mut expected = fake.0.borrow().sysctls.clone();
+        expected.insert(key.into(), "0".into());
+        fake.0.borrow_mut().fail_after_write = Some(key.into());
+        let mut setup = NetworkSetup::new(fake.clone());
+        assert!(
+            setup
+                .configure("vpn", Some(V4), None, &["eth0".into()])
+                .is_err()
+        );
+        drop(setup);
+        // A command that applied the shared value before failing must not undo it.
+        assert_eq!(fake.0.borrow().sysctls, expected);
+        assert!(fake.0.borrow().rules.is_empty());
     }
 
     /// Executed by scripts/test-network-namespace.sh in a fresh netns only.
@@ -964,6 +1034,9 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
         ];
         for global in ["0", "1", "2"] {
             backend.write_sysctl("net.ipv4.ip_forward", "0").unwrap();
+            backend
+                .write_sysctl("net.ipv4.conf.all.send_redirects", "0")
+                .unwrap();
             let original = [global, "2", "2", "0", "1"];
             for (key, value) in host_rpf.iter().zip(original) {
                 backend.write_sysctl(key, value).unwrap();
@@ -977,6 +1050,13 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
                     .configure("vpn0", Some(V4), None, &["exit0".into()])
                     .unwrap();
                 assert_eq!(backend.read_sysctl("net.ipv4.ip_forward").unwrap(), "1");
+                // Enabling forwarding must not leave either redirect switch on.
+                for key in [
+                    "net.ipv4.conf.all.send_redirects",
+                    "net/ipv4/conf/vpn0/send_redirects",
+                ] {
+                    assert_eq!(backend.read_sysctl(key).unwrap(), "0", "{key}");
+                }
                 assert_eq!(
                     backend.read_sysctl("net/ipv4/conf/vpn0/rp_filter").unwrap(),
                     "1"
@@ -986,6 +1066,12 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
                 }
             }
             assert_eq!(backend.read_sysctl("net.ipv4.ip_forward").unwrap(), "1");
+            assert_eq!(
+                backend
+                    .read_sysctl("net.ipv4.conf.all.send_redirects")
+                    .unwrap(),
+                "0"
+            );
             assert_eq!(
                 backend.read_sysctl("net/ipv4/conf/vpn0/rp_filter").unwrap(),
                 "0"
@@ -1006,7 +1092,9 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
         }
         let keys = [
             "net.ipv4.ip_forward",
-            "net.ipv4.conf.all.send_redirects",
+            "net/ipv4/conf/default/send_redirects",
+            "net/ipv4/conf/exit0/send_redirects",
+            "net/ipv4/conf/lan0/send_redirects",
             "net.ipv6.conf.all.forwarding",
             "net/ipv6/conf/exit0/accept_ra",
             "net/ipv4/conf/all/rp_filter",
@@ -1027,6 +1115,12 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
         {
             let mut setup = NetworkSetup::new(SystemBackend);
             setup.configure("vpn0", Some(V4), Some(V6), &exits).unwrap();
+            for key in [
+                "net.ipv4.conf.all.send_redirects",
+                "net/ipv4/conf/vpn0/send_redirects",
+            ] {
+                assert_eq!(backend.read_sysctl(key).unwrap(), "0", "{key}");
+            }
             for (program, cidr) in [("iptables", V4), ("ip6tables", V6)] {
                 for rule in tunnel_rules(program, "vpn0", cidr, &exits) {
                     assert!(backend.has_rule(&rule).unwrap());
@@ -1044,6 +1138,12 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
             .map(|k| backend.read_sysctl(k).unwrap())
             .collect();
         assert_eq!(before, after);
+        assert_eq!(
+            backend
+                .read_sysctl("net.ipv4.conf.all.send_redirects")
+                .unwrap(),
+            "0"
+        );
         for (program, cidr) in [("iptables", V4), ("ip6tables", V6)] {
             for rule in tunnel_rules(program, "vpn0", cidr, &exits) {
                 assert!(!backend.has_rule(&rule).unwrap());
@@ -1058,7 +1158,8 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
     #[test]
     fn isolated_cleanup() {
         let fake = fixture();
-        let host_before = fake.0.borrow().sysctls.clone();
+        let mut host_after = fake.0.borrow().sysctls.clone();
+        host_after.insert("net.ipv4.conf.all.send_redirects".into(), "0".into());
         let exits = vec!["eth0".into()];
         let mut a = NetworkSetup::new(fake.clone());
         a.configure("vpn.1", Some("10.1.0.0/24"), Some("fd01::/96"), &exits)
@@ -1072,12 +1173,12 @@ lan0 000010AC 0101A8C0 0003 0 0 0 0000FFFF";
                 assert!(fake.0.borrow().rules.contains(&rule));
             }
         }
-        for (key, value) in &host_before {
+        for (key, value) in &host_after {
             assert_eq!(fake.0.borrow().sysctls.get(key), Some(value));
         }
         drop(b);
         assert!(fake.0.borrow().rules.is_empty());
-        for (key, value) in &host_before {
+        for (key, value) in &host_after {
             assert_eq!(fake.0.borrow().sysctls.get(key), Some(value));
         }
     }

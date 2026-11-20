@@ -17,21 +17,21 @@ relays traffic between clients and the public internet (NAT), and answers
 heartbeat pings.
 
 == Host network setup
-The server sets its own TUN redirect switches to zero. Administrators may
-optionally set *net.ipv4.conf.all.send_redirects=0*: both switches must be zero
-to disable IPv4 redirect sending. If the global switch is on or cannot be read,
-the server warns and continues startup. The server leaves the global redirect switch unchanged.
+The server automatically enables *net.ipv4.ip_forward=1* for an IPv4 pool and
+*net.ipv6.conf.all.forwarding=1* for an IPv6 pool when needed at startup.
+For IPv4, it then sets *net.ipv4.conf.all.send_redirects=0* and disables redirect
+sending on its TUN to prevent ICMP Redirect messages during client-to-client relay.
+Before enabling IPv6 forwarding, it changes exit interfaces with *accept_ra=1*
+to *accept_ra=2* to preserve RA reception; disabled RA stays disabled. It also
+disables IPv6 redirect acceptance on its TUN. Only configured address families
+are changed. Required sysctl read/write failures abort startup.
+
+Forwarding, global IPv4 redirect, and uplink RA changes remain after shutdown or
+failed startup because other services or server instances may depend on them.
 
 Exit interfaces come from usable default, connected and static routes, including
 virtual uplinks. LAN-only deployments do not need a default route. Routes must be
 present at startup; restart after changing exit interfaces.
-
-The server automatically enables *net.ipv4.ip_forward=1* for an IPv4 pool and
-*net.ipv6.conf.all.forwarding=1* for an IPv6 pool when needed at startup.
-Before enabling IPv6 forwarding, it changes exit interfaces with *accept_ra=1*
-to *accept_ra=2* to preserve RA reception. Disabled RA remains disabled.
-Forwarding and uplink RA changes are never rolled back, including after failed
-startup, because other services may depend on them.
 
 Changing IPv4 *ip_forward* resets other IPv4 tunables. Hosts with custom settings
 can provision forwarding before applying those tunables; see the supernode README.
