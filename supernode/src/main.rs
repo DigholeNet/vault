@@ -53,6 +53,8 @@ mod limiter;
 mod mock_time;
 #[cfg(any(target_os = "linux", test))]
 mod network;
+#[cfg(any(target_os = "linux", test))]
+mod p2p;
 #[cfg(target_os = "linux")]
 mod supernode;
 

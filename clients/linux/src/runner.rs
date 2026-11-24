@@ -25,6 +25,7 @@ use crate::config::EdgeConfig;
 use crate::dns::{DnsGuard, ResolverFile, ResolverViewChanged};
 use crate::edge::Edge;
 use crate::interface::{self, FamilyExits};
+use crate::peer_routes::PeerRouting;
 use crate::routes::{RouteGuard, RouteState};
 
 /// Hold from before the first network mutation until all route/DNS cleanup ends.
@@ -96,13 +97,23 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     // every physical exit change.
     set_server_routes(&physical_exits, &mut route_state.lock().unwrap())?;
 
+    let peer_routes = PeerRouting::new();
+    peer_routes.set_mtu(device.mtu().unwrap_or(0));
+    peer_routes.update(Some(&physical_exits), &hosts);
     let (assignments, requests) = mpsc::channel();
-    let mut edge = Edge::new(&config, device.clone(), &hosts, assignments)?;
+    let mut edge = Edge::new(
+        &config,
+        device.clone(),
+        &hosts,
+        assignments,
+        peer_routes.socket_setup(),
+    )?;
 
     // Wait for the quit signal; log traffic stats periodically. The
     // session reconnects itself with exponential backoff on failures.
     let mut last_stats = Instant::now();
     let mut last_network_check = Instant::now();
+    let mut suspend_offset = suspended_time();
     let mut network_available = true;
     let mut last_route_error = None;
     let mut last_handshake_generation = 0;
@@ -163,6 +174,7 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
                 Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(error) => return Err(error).context("receive VPN assignment"),
             }
+            peer_routes.set_mtu(device.mtu().unwrap_or(0));
             let connection = edge.connection_status();
             if connection.connected && connection.generation != last_handshake_generation {
                 if connection.public_ip.is_empty() {
@@ -177,12 +189,24 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
             }
             // Reuse the runner instead of adding a netlink thread/dependency.
             // A two-second snapshot naturally coalesces network event bursts.
-            if last_network_check.elapsed() >= Duration::from_secs(2) {
+            let offset = suspended_time();
+            let resumed = offset.zip(suspend_offset).is_some_and(|(now, previous)| {
+                now.saturating_sub(previous) >= Duration::from_millis(100)
+            });
+            suspend_offset = offset;
+            if resumed {
+                edge.pause_transport()?;
+            }
+            if resumed || last_network_check.elapsed() >= Duration::from_secs(2) {
                 last_network_check = Instant::now();
                 dns.check_view()?;
                 match probe_exits(&hosts, &tun) {
                     Ok(current) => {
-                        if !network_available || physical_exits != current {
+                        if resumed || !network_available || physical_exits != current {
+                            if network_available && !resumed {
+                                edge.pause_transport()?;
+                            }
+                            peer_routes.update(Some(&current), &hosts);
                             let result =
                                 set_server_routes(&current, &mut route_state.lock().unwrap());
                             match result {
@@ -194,9 +218,10 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
                                     physical_exits = current;
                                     network_available = true;
                                     last_route_error = None;
-                                    edge.reconnect()?;
+                                    edge.resume_transport()?;
                                 }
                                 Err(e) => {
+                                    peer_routes.update(None, &hosts);
                                     // A conflict may first appear after an offline
                                     // period. Report it even when availability was
                                     // already false, without repeating every poll.
@@ -211,7 +236,11 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
                         }
                     }
                     Err(e) => {
-                        if network_available {
+                        if network_available || resumed {
+                            if !resumed {
+                                edge.pause_transport()?;
+                            }
+                            peer_routes.update(None, &hosts);
                             info!("Waiting for physical network: {e:#}");
                         }
                         network_available = false;
@@ -239,6 +268,14 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
                     s.packets_sent,
                     s.packets_received
                 );
+                info!(
+                    direct_up_bytes = s.direct_bytes_sent,
+                    direct_down_bytes = s.direct_bytes_received,
+                    relay_up_bytes = (s.bytes_sent as u64).saturating_sub(s.direct_bytes_sent),
+                    relay_down_bytes =
+                        (s.bytes_received as u64).saturating_sub(s.direct_bytes_received),
+                    "VPN path traffic totals"
+                );
                 last_stats = Instant::now();
             }
         }
@@ -248,8 +285,30 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     edge.shutdown();
     let dns_result = dns.restore();
     drop(edge);
+    drop(peer_routes);
     let route_result = routes.restore();
     result.and(dns_result).and(route_result)
+}
+
+/// CLOCK_BOOTTIME includes suspension and CLOCK_MONOTONIC excludes it.
+/// Their difference detects resume even when the physical route is unchanged.
+fn suspended_time() -> Option<Duration> {
+    let read = |clock| {
+        let mut value = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: value points to writable storage for one timespec.
+        if unsafe { libc::clock_gettime(clock, &mut value) } != 0 {
+            return None;
+        }
+        Some(Duration::new(
+            value.tv_sec.try_into().ok()?,
+            value.tv_nsec.try_into().ok()?,
+        ))
+    };
+    let monotonic = read(libc::CLOCK_MONOTONIC)?;
+    Some(read(libc::CLOCK_BOOTTIME)?.saturating_sub(monotonic))
 }
 
 fn required_command(program: &str, args: &[&str]) -> anyhow::Result<()> {

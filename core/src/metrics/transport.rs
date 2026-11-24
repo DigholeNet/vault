@@ -30,7 +30,7 @@ pub(crate) fn maintenance_interval() -> Interval {
 }
 
 pub(crate) struct QueueMetrics {
-    sender: mpsc::WeakSender<Vec<u8>>,
+    depth: Box<dyn Fn() -> usize + Send + Sync>,
     capacity: usize,
     peak: AtomicUsize,
 }
@@ -43,9 +43,14 @@ pub(crate) struct QueueSnapshot {
 }
 
 impl QueueMetrics {
-    pub fn new(sender: &mpsc::Sender<Vec<u8>>) -> Self {
+    pub fn new<T: Send + 'static>(sender: &mpsc::Sender<T>) -> Self {
+        let weak = sender.downgrade();
+        let capacity = sender.max_capacity();
         Self {
-            sender: sender.downgrade(),
+            depth: Box::new(move || {
+                weak.upgrade()
+                    .map_or(0, |sender| capacity - sender.capacity())
+            }),
             capacity: sender.max_capacity(),
             peak: AtomicUsize::new(sender.max_capacity() - sender.capacity()),
         }
@@ -57,11 +62,7 @@ impl QueueMetrics {
     }
 
     pub fn snapshot(&self) -> QueueSnapshot {
-        let depth = self
-            .sender
-            .upgrade()
-            .map(|sender| self.capacity - sender.capacity())
-            .unwrap_or(0);
+        let depth = (self.depth)();
         // Carry current occupancy into the next window even if no packet
         // arrives to trigger another observe() call while the queue is stuck.
         let peak = self.peak.swap(depth, Ordering::Relaxed).max(depth);
@@ -93,7 +94,7 @@ pub(crate) struct ReceiveSnapshot {
 }
 
 impl ReceiveMetrics {
-    pub fn new(sender: &mpsc::Sender<Vec<u8>>) -> Self {
+    pub fn new<T: Send + 'static>(sender: &mpsc::Sender<T>) -> Self {
         Self {
             queue: QueueMetrics::new(sender),
             waits: AtomicU64::new(0),
@@ -470,7 +471,7 @@ mod tests {
 
     #[test]
     fn queue_window() {
-        let (sender, mut receiver) = mpsc::channel(2);
+        let (sender, mut receiver) = mpsc::channel::<Vec<u8>>(2);
         let metrics = QueueMetrics::new(&sender);
         sender.try_send(vec![1]).unwrap();
         metrics.observe(1);
@@ -492,7 +493,7 @@ mod tests {
 
     #[test]
     fn channel_lifetime() {
-        let (sender, mut receiver) = mpsc::channel(2);
+        let (sender, mut receiver) = mpsc::channel::<Vec<u8>>(2);
         let metrics = ReceiveMetrics::new(&sender);
         drop(sender);
         assert!(matches!(
@@ -504,7 +505,7 @@ mod tests {
 
     #[test]
     fn receive_window() {
-        let (sender, _receiver) = mpsc::channel(2);
+        let (sender, _receiver) = mpsc::channel::<Vec<u8>>(2);
         let metrics = ReceiveMetrics::new(&sender);
         metrics.record_wait(Duration::from_micros(250));
         metrics.record_wait(Duration::from_micros(750));
@@ -612,7 +613,7 @@ mod tests {
             .with_writer(move || output.clone())
             .finish();
         tracing::subscriber::with_default(subscriber, || {
-            let (sender, _receiver) = mpsc::channel(2);
+            let (sender, _receiver) = mpsc::channel::<Vec<u8>>(2);
             let mut uplink = UplinkReport::new(
                 Arc::new(UplinkQueueMetrics::new(&sender)),
                 "127.0.0.1:1001".parse().unwrap(),
@@ -664,7 +665,7 @@ mod tests {
             .with_writer(move || output.clone())
             .finish();
         tracing::subscriber::with_default(subscriber, || {
-            let (sender, _receiver) = mpsc::channel(2);
+            let (sender, _receiver) = mpsc::channel::<Vec<u8>>(2);
             let queue = Arc::new(UplinkQueueMetrics::new(&sender));
             let receive = Arc::new(ReceiveMetrics::new(&sender));
             let mut uplink = UplinkReport::new(queue.clone(), "127.0.0.1:1001".parse().unwrap(), 1);
@@ -714,7 +715,7 @@ mod tests {
             .with_writer(move || output.clone())
             .finish();
         tracing::subscriber::with_default(subscriber, || {
-            let (sender, _receiver) = mpsc::channel(2);
+            let (sender, _receiver) = mpsc::channel::<Vec<u8>>(2);
             let receive = Arc::new(ReceiveMetrics::new(&sender));
             let mut report =
                 DownlinkReport::new(receive.clone(), "127.0.0.1:1001".parse().unwrap(), 1);
@@ -736,7 +737,7 @@ mod tests {
             .with_writer(move || output.clone())
             .finish();
         tracing::subscriber::with_default(subscriber, || {
-            let (old_sender, _old_receiver) = tokio::sync::mpsc::channel(2);
+            let (old_sender, _old_receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(2);
             let old_queue = Arc::new(UplinkQueueMetrics::new(&old_sender));
             let mut old =
                 UplinkReport::new(old_queue.clone(), "127.0.0.1:1001".parse().unwrap(), 41);
@@ -746,7 +747,7 @@ mod tests {
 
             // A replacement can already have sent traffic when cancellation
             // finally drops the previous task and flushes its last window.
-            let (new_sender, _new_receiver) = tokio::sync::mpsc::channel(2);
+            let (new_sender, _new_receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(2);
             let new_queue = Arc::new(UplinkQueueMetrics::new(&new_sender));
             let mut new =
                 UplinkReport::new(new_queue.clone(), "127.0.0.1:1002".parse().unwrap(), 42);

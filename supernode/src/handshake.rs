@@ -37,6 +37,8 @@ pub struct PendingHandshake {
     pub device_name: String,
     pub platform: String,
     pub failed_decrypts: u8,
+    #[cfg(target_os = "linux")]
+    pub registration: Option<crate::p2p::Registration>,
     request_key: [u8; 32],
     timestamp: Time,
     authenticated: bool,
@@ -58,6 +60,8 @@ impl PendingHandshake {
             device_name: request.device_name.clone(),
             platform: request.platform.clone(),
             failed_decrypts: 0,
+            #[cfg(target_os = "linux")]
+            registration: None,
             request_key,
             timestamp: request.timestamp,
             authenticated: false,
@@ -220,7 +224,8 @@ mod tests {
             version: vault_core::PROTOCOL_VERSION,
             device_name: "test".into(),
             platform: "test".into(),
-            request_public_ip: false,
+            peer_public_key: vec![],
+            peer_lan_endpoint: None,
         };
         let request_key = client_public.bytes().as_slice().try_into().unwrap();
         let pending = PendingHandshake::new(

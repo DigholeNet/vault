@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last Updated:** October 31, 2026
+**Last Updated:** November 25, 2026
 
 ## Introduction
 
@@ -9,9 +9,11 @@ Vault is open-source, self-hosted VPN software. This is an important distinction
 - **The software authors** ("we") publish the Vault source code and client applications.
   We operate no VPN servers and receive no data from your use of the software.
 - **The server operator** is whoever deploys and runs the `supernode` server you
-  connect to. All VPN traffic is relayed through that server by design. If you use a
-  server operated by someone else, their logging and retention practices apply to you —
-  ask them, not us.
+  connect to. It decrypts the VPN layer for relayed traffic, including
+  internet-bound traffic.
+  Direct peer traffic uses keys derived by the two devices. The server supplies the
+  peer identity and public key that clients trust. If you use someone else's server,
+  contact its operator about logging and retention.
 
 ## Software Behavior
 
@@ -25,6 +27,8 @@ The client applications:
   speeds to your configured server during the handshake. These handshake fields are
   not encrypted and can also be observed on the network. The password itself is
   not sent; it is used in the SPAKE2 exchange
+- When offering P2P, send a temporary public key and, when available, a local
+  UDP endpoint in the handshake
 - Transmit nothing to the software authors
 - Integrate no third-party analytics, advertising, or tracking services
 
@@ -65,8 +69,14 @@ See [shared diagnostics](docs/diagnostics-engine.md) for probe scopes and defaul
 
 ### Server (supernode)
 
-The supernode decrypts tunnel packets and reads their IP headers to route traffic.
-It does not log packet bodies, browsing URLs, or DNS query contents. Its runtime logs
+The Supernode decrypts relayed packets and reads their IP headers to route traffic.
+For P2P discovery, it shares peer IDs, assigned VPN addresses, public keys and
+observed UDP endpoints with eligible peers on the same server. It can also share
+an eligible LAN endpoint or an advertised gateway-mapped port. The peers can
+observe those addresses when probing or exchanging direct traffic.
+
+The provided Supernode does not log packet bodies, browsing URLs or DNS query
+contents. Its runtime logs
 include **connection metadata** needed to operate and debug the service:
 
 - Client source IP address and port
@@ -106,8 +116,9 @@ The Android app requires the following permissions:
 
 The protocol implements industry-standard cryptography:
 
-- **Encryption**: All VPN traffic is encrypted using AES-256-GCM, AES-128-GCM, or
-  ChaCha20-Poly1305
+- **Encryption**: Supernode tunnels negotiate AES-256-GCM, AES-128-GCM or
+  ChaCha20-Poly1305. Direct peer traffic uses ChaCha20-Poly1305 with a separate
+  pair key.
 - **Key Exchange**: X25519 Elliptic Curve Diffie-Hellman for secure key exchange
 - **Authentication**: SPAKE2 password-authenticated key exchange (PAKE) for handshake verification
 - **Perfect Forward Secrecy**: New keys are generated for each session

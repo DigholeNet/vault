@@ -42,18 +42,19 @@ Vault is implemented in Rust. All protocol and cryptographic logic lives in the 
 `core/` crate (`vault-core`); clients and the supernode server exchange messages over a
 custom UDP-based protocol.
 
-X25519, AEAD, HKDF, confirmation MACs and their random generation use
-[ring](https://github.com/briansmith/ring). SPAKE2 uses the
-[spake2](https://github.com/RustCrypto/PAKEs) crate with its Ed25519 group
-implementation; it is not implemented by ring:
+The center handshake uses [ring](https://github.com/briansmith/ring) for X25519
+and confirmation MACs. Direct peer key agreement uses `curve25519-dalek`.
+Both paths use ring for AEAD, HKDF and randomness. The
+[spake2](https://github.com/RustCrypto/PAKEs) crate implements SPAKE2 with its
+Ed25519 group.
 
 | Component              | Algorithm                            | Purpose                  |
 |------------------------|--------------------------------------|--------------------------|
 | Key Exchange           | X25519 (Curve25519)                  | ECDH key agreement       |
 | Data Encryption        | AES-128-GCM / AES-256-GCM            | Symmetric encryption     |
-| Alternative Encryption | ChaCha20-Poly1305                    | Mobile/ARM-optimized     |
+| Data Encryption        | ChaCha20-Poly1305                   | Direct peer traffic and a negotiated option for Supernode tunnels |
 | Password Authentication| SPAKE2 (PAKE, Ed25519 group)         | Handshake authentication |
-| Key Derivation         | HKDF-SHA256 (over X25519 + PAKE key) | Session keys             |
+| Key Derivation         | HKDF-SHA256                         | Supernode session keys bound to PAKE and separate peer pair keys |
 | Random Generation      | ring `SystemRandom`                  | Key generation           |
 
 Security properties:
@@ -77,7 +78,8 @@ Security properties:
   bans source IPs after repeated invalid encrypted confirmations.
   The server proves it holds the password with a confirmation MAC before the client
   sends any traffic, and the PAKE output salts the session-key HKDF, binding the
-  encrypted channel to the authenticated exchange.
+  encrypted channel to the authenticated exchange. In protocol v2 the MAC also
+  binds the original request bytes, including any advertised peer key and LAN endpoint.
 
 ## Known Limitations
 
@@ -139,13 +141,20 @@ known limitations of the current protocol:
    mitigate this at the firewall by restricting which source addresses may reach the
    supernode's UDP port.
 
+7. **P2P still trusts the Supernode for identity.** Direct traffic uses a key
+   derived by the two peers. The Supernode introduces the peer identity,
+   VPN addresses and public key, so a malicious Supernode could substitute a
+   key and impersonate a peer. Direct traffic bypasses the Supernode's Linux
+   forwarding rules, rate limits and relay audit. Those controls apply only
+   to traffic the Supernode handles. See the [P2P trust model](docs/p2p.md#身份和转发边界).
+
 ## Security Best Practices for Users
 
 - Use strong, unique passwords for each VPN network you deploy (see limitation 2)
 - Keep clients and the supernode updated to receive security patches
 - Restrict network access to the supernode's UDP port where possible (firewall rules)
-- Only connect to VPN servers operated by parties you trust — tunnel traffic is
-  decrypted and relayed through the supernode by design
+- Use a trusted Supernode operator. The server can read relayed traffic and
+  supplies the identities and public keys that clients trust for direct traffic.
 - Review [traffic protection scope](README.md#traffic-routing-and-protection-scope):
   server-route exclusions, unassigned address families and OS teardown can leave
   traffic outside the VPN. Vault has no cross-platform persistent kill switch

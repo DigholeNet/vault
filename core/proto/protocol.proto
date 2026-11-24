@@ -12,6 +12,18 @@ message Algorithm{
     float speed = 2;
 }
 
+message IpAddress {
+    oneof address {
+        bytes ipv4 = 1; // Exactly 4 octets in network order.
+        bytes ipv6 = 2; // Exactly 16 octets in network order.
+    }
+}
+
+message Endpoint {
+    IpAddress ip = 1;
+    uint32 port = 2; // 1 through 65535.
+}
+
 message HandshakeRequest {
     bytes id = 1;
     // SPAKE2 message A: password-authenticated key exchange. A passive
@@ -29,9 +41,8 @@ message HandshakeRequest {
     string device_name = 7;
     // Client platform: android/ios/macos/linux; empty on old clients.
     string platform = 8;
-    // Requests the server-observed source IP in the response. Old clients
-    // leave this false so their response confirmation MAC stays unchanged.
-    bool request_public_ip = 9;
+    bytes peer_public_key = 10; // Empty or a 32-byte X25519 public key.
+    Endpoint peer_lan_endpoint = 11; // Optional; requires peer_public_key.
 }
 
 message HandshakeResponse {
@@ -49,13 +60,12 @@ message HandshakeResponse {
     // Echo of the request's ephemeral ECDH public key, binding this response
     // to one specific handshake attempt.
     bytes request_public_key = 10;
-    // HMAC-SHA256 over this response (with this field empty), keyed by the
-    // PAKE-derived confirmation key: proves the server holds the password
-    // before the client sends any traffic.
+    // HMAC-SHA256 over the v2 label, request digest and this response
+    // with confirm_mac cleared. Keyed by the PAKE-derived confirmation key.
     bytes confirm_mac = 11;
-    // Server-observed outer source IP without a port. Empty on old servers or
-    // when the client did not request it.
+    // Server-observed outer source IP without a port. Included in every v2 reply.
     string public_ip = 12;
+    fixed64 peer_session_epoch = 13; // Zero means relay only.
 }
 
 message HandshakeMessage {
@@ -63,6 +73,75 @@ message HandshakeMessage {
         HandshakeRequest request = 1;
         HandshakeResponse response = 2;
     };
+}
+
+message FindPeerMessage {
+    oneof data {
+        FindPeerRequest request = 1;
+        FindPeerResponse response = 2;
+    PeerPunch punch = 3; // Client -> supernode, after a direct probe is sent.
+    PeerInfo punch_peer = 4; // Supernode -> the other client, with current peer info.
+    PeerMapping mapping = 5; // Client -> Supernode, over its authenticated transport.
+    }
+}
+
+message PeerMapping {
+    fixed64 revision = 1; // Monotonically increasing for this transport.
+    uint32 port = 2; // Public UDP port at the server-observed IP, or zero to withdraw.
+    uint32 lifetime_ms = 3;
+}
+
+message PeerPunch {
+  bytes peer_id = 1; // Exactly 16 bytes, the target of the direct probe.
+  bytes pair_id = 2; // Exactly 16 bytes, the existing pair authorization.
+}
+
+message FindPeerRequest {
+    fixed64 request_id = 1;
+    oneof target {
+        IpAddress target_vpn_ip = 2; // Client -> supernode.
+        PeerInfo peer = 3; // Supernode -> other client.
+    }
+    bytes renew_pair_id = 4; // Client renewal only, empty or exactly 16 bytes.
+    bytes replace_pair_id = 5; // Client rediscovery only, empty or exactly 16 bytes.
+}
+
+message FindPeerResponse {
+    fixed64 request_id = 1;
+    // Supernode response: present on success, absent when unavailable.
+    // Client response: absent, acknowledging receipt of the introduction.
+    PeerInfo peer = 2;
+}
+
+message PeerInfo {
+    bytes pair_id = 1; // Exactly 16 random bytes. Shared by both nodes.
+    fixed64 revision = 2; // Nonzero, increases across creation and renewal.
+    fixed64 local_session_epoch = 3;
+    fixed64 peer_session_epoch = 4;
+    bytes peer_id = 5; // Exactly 16 bytes.
+    bytes peer_public_key = 6; // Exactly 32 bytes, from the current registration.
+    repeated IpAddress peer_vpn_ips = 7; // One or two, at most one per family.
+    Endpoint observed_endpoint = 8;
+    Endpoint lan_endpoint = 9; // Optional authorized LAN candidate.
+    uint32 valid_for_ms = 10; // Server's remaining lifetime at send time, 1 through 60000.
+    uint32 mapped_port = 11; // Optional extra UDP port at observed_endpoint's IP.
+    uint32 mapped_valid_for_ms = 12; // Remaining lease, bounded by the pair lifetime.
+    bool accepts_mapping = 13; // Supernode understands PeerMapping updates.
+}
+
+message PeerRegisterMessage {
+    oneof data {
+        PeerRegisterRequest request = 1;
+        PeerRegisterResponse response = 2;
+    }
+}
+
+message PeerRegisterRequest {
+    fixed32 cookie = 1; // Nonzero.
+}
+
+message PeerRegisterResponse {
+    fixed32 cookie = 1; // Echoes the request.
 }
 
 message Ping {

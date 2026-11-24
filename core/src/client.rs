@@ -15,20 +15,26 @@
 
 use std::io::Write;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{interval, sleep};
 use tracing::{debug, info, warn};
 
 #[cfg(test)]
 #[path = "../tests/client/mod.rs"]
 mod tests;
+
+pub use crate::gateway::Gateway;
+use crate::{
+    crypto::PeerKeyPair,
+    discovery::{DirectAuthorization, Discovery, destination},
+};
 
 use crate::metrics::transport::{
     DownlinkReport, ReceiveMetrics, UplinkQueueMetrics, UplinkReport, maintenance_interval,
@@ -56,6 +62,7 @@ pub const DATA_BATCH_CAPACITY: usize = 32;
 /// Bounded uplink queue; packets are dropped when full (UDP semantics).
 pub const UPLINK_QUEUE_CAPACITY: usize = 1024;
 pub const DOWNLINK_QUEUE_CAPACITY: usize = 256;
+const DOWNLINK_CENTER_RESERVE: usize = DATA_BATCH_CAPACITY;
 const UDP_RECEIVE_BUFFER_BYTES: usize = 2 * 1024 * 1024;
 
 fn configure_udp_receive_buffer(socket: &UdpSocket) {
@@ -132,6 +139,19 @@ impl From<anyhow::Error> for ClientError {
     }
 }
 
+/// A candidate list resolved on a specific physical network.
+pub struct TransportPath {
+    pub hosts: Vec<String>,
+    pub generation: u64,
+    pub prepare_socket: PeerSocketSetup,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct TransportRoutes {
+    pub addresses: Vec<String>,
+    pub generation: u64,
+}
+
 /// Client-side callbacks delivered by the session. All callbacks fire on
 /// internal worker threads; implementations must be cheap and non-blocking.
 pub trait ClientCallbacks: Send + Sync {
@@ -144,6 +164,20 @@ pub trait ClientCallbacks: Send + Sync {
         assignment: crate::settings::TunnelAssignment,
         setup: Arc<TunnelSetup>,
     );
+    /// Invoked on a blocking worker for platforms with a network-aware resolver.
+    fn resolve_transport(&self) -> Option<Result<TransportPath, ClientError>> {
+        None
+    }
+
+    fn on_transport_assigned(
+        &self,
+        assignment: crate::settings::TunnelAssignment,
+        _routes: Option<TransportRoutes>,
+        setup: Arc<TunnelSetup>,
+    ) {
+        self.on_ip_assigned(assignment, setup);
+    }
+
     /// Runtime error notification. The session keeps retrying reconnects on
     /// its own; this is informational (e.g. for UI status updates).
     fn on_error(&self, error: String);
@@ -171,6 +205,17 @@ impl TunnelSetup {
     }
 }
 
+pub struct PeerSocket {
+    pub mtu: Arc<AtomicUsize>,
+    pub lan_endpoint: Option<SocketAddr>,
+    pub allow_lan: Arc<dyn Fn(SocketAddr) -> bool + Send + Sync>,
+    pub gateway: Option<Gateway>,
+}
+
+pub type PeerSocketSetup =
+    Arc<dyn Fn(i32, SocketAddr, SocketAddr) -> Option<PeerSocket> + Send + Sync>;
+type SharedDiscovery = Arc<Mutex<Discovery>>;
+
 pub struct ClientConfig {
     pub password: String,
     /// Candidate supernode addresses (usually literal IPs resolved by the
@@ -185,6 +230,10 @@ pub struct ClientConfig {
     pub device_name: String,
     /// Client platform (android/ios/macos/linux), sent in the handshake.
     pub platform: String,
+    /// Resolve and bind each transport attempt using the platform callbacks.
+    pub managed_transport: bool,
+    /// Prepare a socket whose outer traffic can reach arbitrary peers.
+    pub peer_socket_setup: Option<PeerSocketSetup>,
     /// Optional platform hook called once per (re)connect with the UDP socket
     /// fd. Android uses it to call `VpnService.protect(fd)`; iOS/macOS pass a
     /// hook that just returns true (the system manages the tunnel socket).
@@ -205,6 +254,8 @@ pub struct TrafficStats {
     /// Payload bytes accepted by the UDP socket (not peer delivery acknowledgements).
     pub bytes_sent: i64,
     pub bytes_received: i64,
+    pub direct_bytes_sent: u64,
+    pub direct_bytes_received: u64,
     pub packets_sent: i64,
     pub packets_received: i64,
     pub send_speed: i64,
@@ -214,6 +265,7 @@ pub struct TrafficStats {
 #[derive(Default)]
 struct UplinkCounters {
     bytes_sent: AtomicU64,
+    direct_bytes_sent: AtomicU64,
     packets_sent: AtomicU64,
     queue_drops: AtomicU64,
     not_connected: AtomicU64,
@@ -338,11 +390,15 @@ async fn resolve_candidates_async(
 struct ClientState {
     is_active: bool,
     connection_generation: u64,
+    network_generation: u64,
     assigned_addresses: Option<crate::settings::TunnelAssignment>,
+    transport_routes: Option<TransportRoutes>,
     public_ip: String,
     is_closing: bool,
+    pausing: bool,
     last_pong: Instant,
     receive_handle: Option<JoinHandle<()>>,
+    discovery: Option<SharedDiscovery>,
     heartbeat_handle: Option<JoinHandle<()>>,
     uplink_handle: Option<JoinHandle<()>>,
     uplink_tx: Option<mpsc::Sender<Vec<u8>>>,
@@ -351,6 +407,7 @@ struct ClientState {
     shutdown_tx: Option<mpsc::Sender<()>>,
     reconnect_tx: Option<mpsc::Sender<()>>,
     bytes_received: AtomicU64,
+    direct_bytes_received: AtomicU64,
     packets_received: AtomicU64,
     decrypt_failures: AtomicU64,
     last_bytes_sent: AtomicU64,
@@ -361,6 +418,7 @@ struct ClientState {
 struct ClientInner {
     uplink: Arc<UplinkCounters>,
     config: ClientConfig,
+    resolving_transport: Arc<AtomicBool>,
     callbacks: Arc<dyn ClientCallbacks>,
     runtime: Arc<SessionRuntime>,
     algorithms: Vec<Algorithm>,
@@ -414,6 +472,7 @@ impl ClientSession {
         let inner = Arc::new(ClientInner {
             uplink: Arc::new(UplinkCounters::default()),
             config,
+            resolving_transport: Arc::new(AtomicBool::new(false)),
             callbacks,
             runtime,
             algorithms: supported_algorithms(),
@@ -428,7 +487,10 @@ impl ClientSession {
     fn spawn_run_loop(&self) -> Result<(), ClientError> {
         let mut state = self.lock_state()?;
 
-        if state.run_handle.is_some() {
+        if state.is_closing {
+            return Err(ClientError::NotConnected);
+        }
+        if state.run_handle.is_some() || state.pausing {
             return Err(ClientError::AlreadyConnected);
         }
 
@@ -520,6 +582,8 @@ impl ClientSession {
         TrafficStats {
             bytes_sent: bytes_sent as i64,
             bytes_received: bytes_received as i64,
+            direct_bytes_sent: self.inner.uplink.direct_bytes_sent.load(Ordering::Relaxed),
+            direct_bytes_received: state.direct_bytes_received.load(Ordering::Relaxed),
             packets_sent: self.inner.uplink.packets_sent.load(Ordering::Relaxed) as i64,
             packets_received: state.packets_received.load(Ordering::Relaxed) as i64,
             send_speed,
@@ -543,10 +607,11 @@ impl ClientSession {
     /// Wake the existing connection loop after an underlying network change.
     /// A bounded channel coalesces requests; shutdown always takes priority.
     pub fn reconnect(&self) -> Result<(), ClientError> {
-        let state = self.lock_state()?;
+        let mut state = self.lock_state()?;
         if state.is_closing {
             return Err(ClientError::NotConnected);
         }
+        state.network_changed();
         let tx = state
             .reconnect_tx
             .as_ref()
@@ -558,64 +623,71 @@ impl ClientSession {
     }
 
     pub fn shutdown(&self) -> Result<(), ClientError> {
-        let (mut handles, report_totals) = {
+        self.stop_transport(true)
+    }
+
+    /// Stop and join all transport work before the platform changes routing.
+    /// Call from outside the session's own runtime.
+    pub fn pause_transport(&self) -> Result<(), ClientError> {
+        self.stop_transport(false)
+    }
+
+    /// Restart a paused transport, retaining the configured tunnel and counters.
+    pub fn resume_transport(&self) -> Result<(), ClientError> {
+        self.spawn_run_loop()
+    }
+
+    fn stop_transport(&self, closing: bool) -> Result<(), ClientError> {
+        let current = tokio::runtime::Handle::try_current().ok();
+        let on_own_runtime = current
+            .as_ref()
+            .is_some_and(|handle| handle.id() == self.inner.runtime.handle().id());
+        let (handle, report_totals) = {
             let mut state = self.lock_state()?;
 
-            let report_totals = !state.is_closing;
-            state.is_closing = true;
+            if !closing && (on_own_runtime || state.pausing || state.is_closing) {
+                return Err(ClientError::NotConnected);
+            }
+            let report_totals = closing && !state.is_closing;
+            state.is_closing |= closing;
+            state.pausing |= !closing;
+            state.network_changed();
             state.reconnect_tx = None;
 
             if let Some(tx) = state.shutdown_tx.take() {
                 let _ = tx.try_send(());
             }
-            let mut handles = Vec::new();
-            if let Some(handle) = state.receive_handle.take() {
-                handle.abort();
-                handles.push(handle);
-            }
-            if let Some(handle) = state.heartbeat_handle.take() {
-                handle.abort();
-                handles.push(handle);
-            }
-            if let Some(handle) = state.uplink_handle.take() {
-                handle.abort();
-                handles.push(handle);
-            }
             state.uplink_tx = None;
             state.uplink_queue_metrics = None;
-            if let Some(handle) = state.run_handle.take() {
-                handle.abort();
-                handles.push(handle);
-            }
-
             state.is_active = false;
             state.public_ip.clear();
-            (handles, report_totals)
+            (state.run_handle.take(), report_totals)
         };
 
         // Finish callbacks before platform guards restore DNS/routes. A
         // different runtime (e.g. app_main's runtime) does not prevent us
         // joining these tasks, but block_on must then run on a helper thread.
-        let current = tokio::runtime::Handle::try_current().ok();
-        let on_own_runtime = current
-            .as_ref()
-            .is_some_and(|handle| handle.id() == self.inner.runtime.handle().id());
-        if !on_own_runtime {
+        let joined = if !on_own_runtime && let Some(handle) = handle {
             let rt = self.inner.runtime.clone();
             let wait = move || {
                 rt.block_on(async move {
-                    for handle in handles.drain(..) {
-                        let _ = handle.await;
-                    }
-                })
+                    let _ = handle.await;
+                });
             };
             if current.is_some() {
                 std::thread::scope(|scope| scope.spawn(wait).join())
-                    .map_err(|_| ClientError::InternalError("shutdown waiter panicked".into()))?;
+                    .map_err(|_| ClientError::InternalError("shutdown waiter panicked".into()))
             } else {
                 wait();
+                Ok(())
             }
+        } else {
+            Ok(())
+        };
+        if !closing {
+            self.lock_state()?.pausing = false;
         }
+        joined?;
 
         if report_totals {
             let failures = self.inner.uplink.failures();
@@ -647,15 +719,71 @@ impl Drop for ClientSession {
 }
 
 impl ClientState {
+    fn commit_downlink(
+        &self,
+        batch: &mut Vec<Vec<u8>>,
+        direct: &[Option<DirectAuthorization>],
+        discovery: Option<&SharedDiscovery>,
+    ) {
+        // A network change removes the discovery session before the next batch
+        // can commit. Keep the original order of all packets still deliverable.
+        let current = discovery
+            .filter(|session| {
+                !self.is_closing
+                    && direct.iter().any(Option::is_some)
+                    && self
+                        .discovery
+                        .as_ref()
+                        .is_some_and(|current| Arc::ptr_eq(current, session))
+            })
+            .map(|session| session.lock().unwrap_or_else(|e| e.into_inner()));
+        let mut authorizations = direct.iter().copied();
+        let mut bytes = 0;
+        let mut direct_bytes = 0;
+        batch.retain(|packet| {
+            let size = packet.len() as u64;
+            if let Some(authorization) = authorizations.next().unwrap() {
+                if !current
+                    .as_ref()
+                    .is_some_and(|session| session.authorizes(authorization))
+                {
+                    return false;
+                }
+                direct_bytes += size;
+            }
+            bytes += size;
+            true
+        });
+        self.bytes_received.fetch_add(bytes, Ordering::Relaxed);
+        self.direct_bytes_received
+            .fetch_add(direct_bytes, Ordering::Relaxed);
+        self.packets_received
+            .fetch_add(batch.len() as u64, Ordering::Relaxed);
+    }
+
+    fn network_changed(&mut self) {
+        self.network_generation = self.network_generation.saturating_add(1);
+        if let Some(discovery) = self.discovery.take() {
+            discovery
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .disable();
+        }
+    }
+
     fn new() -> Self {
         Self {
             is_active: false,
             connection_generation: 0,
+            network_generation: 0,
             assigned_addresses: None,
+            transport_routes: None,
             public_ip: String::new(),
             is_closing: false,
+            pausing: false,
             last_pong: Instant::now(),
             receive_handle: None,
+            discovery: None,
             heartbeat_handle: None,
             uplink_handle: None,
             uplink_tx: None,
@@ -664,6 +792,7 @@ impl ClientState {
             shutdown_tx: None,
             reconnect_tx: None,
             bytes_received: AtomicU64::new(0),
+            direct_bytes_received: AtomicU64::new(0),
             packets_received: AtomicU64::new(0),
             decrypt_failures: AtomicU64::new(0),
             last_bytes_sent: AtomicU64::new(0),
@@ -673,6 +802,17 @@ impl ClientState {
     }
 }
 
+struct HandshakeTransport {
+    socket: Arc<UdpSocket>,
+    crypto: Arc<CryptoCore>,
+    remote_addr: SocketAddr,
+    response: HandshakeResponse,
+    peer_key: Option<PeerKeyPair>,
+    peer_socket: Option<PeerSocket>,
+}
+
+type HandshakeAttempts = JoinSet<(usize, SocketAddr, Result<HandshakeTransport, ClientError>)>;
+
 impl ClientInner {
     async fn run(
         self: &Arc<Self>,
@@ -680,6 +820,7 @@ impl ClientInner {
         mut reconnect_rx: mpsc::Receiver<()>,
     ) -> Result<(), ClientError> {
         let mut reconnect_delay = INITIAL_RECONNECT_DELAY_MS;
+        let mut attempts = HandshakeAttempts::new();
         loop {
             let result = tokio::select! {
                 biased;
@@ -689,11 +830,12 @@ impl ClientInner {
                     reconnect_delay = INITIAL_RECONNECT_DELAY_MS;
                     None
                 }
-                result = self.try_connect() => Some(result),
+                result = self.try_connect(&mut attempts) => Some(result),
             };
             // try_connect may have been cancelled with live data-pump tasks.
             // Tear them down before opening another socket; keep statistics.
-            self.clear_connection();
+            attempts.shutdown().await;
+            self.clear_connection().await;
             if self
                 .state
                 .lock()
@@ -728,7 +870,8 @@ impl ClientInner {
                 _ => reconnect_delay = INITIAL_RECONNECT_DELAY_MS,
             }
         }
-        self.clear_connection();
+        attempts.shutdown().await;
+        self.clear_connection().await;
         Ok(())
     }
 
@@ -747,38 +890,74 @@ impl ClientInner {
         }
     }
 
-    fn clear_connection(&self) {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        for handle in [
-            state.receive_handle.take(),
-            state.heartbeat_handle.take(),
-            state.uplink_handle.take(),
-        ]
-        .into_iter()
-        .flatten()
-        {
+    async fn clear_connection(&self) {
+        let handles = {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(discovery) = state.discovery.take() {
+                discovery
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .disable();
+            }
+            state.uplink_tx = None;
+            state.uplink_queue_metrics = None;
+            state.is_active = false;
+            state.public_ip.clear();
+            [
+                state.receive_handle.take(),
+                state.heartbeat_handle.take(),
+                state.uplink_handle.take(),
+            ]
+        };
+        for handle in handles.iter().flatten() {
             handle.abort();
         }
-        state.uplink_tx = None;
-        state.uplink_queue_metrics = None;
-        state.is_active = false;
-        state.public_ip.clear();
+        for handle in handles.into_iter().flatten() {
+            let _ = handle.await;
+        }
     }
 
-    async fn try_connect(self: &Arc<Self>) -> Result<(), ClientError> {
-        let generation = {
+    async fn try_connect(
+        self: &Arc<Self>,
+        attempts: &mut HandshakeAttempts,
+    ) -> Result<(), ClientError> {
+        let (generation, network_generation) = {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             // A generation identifies an attempt even when it fails or keeps
             // the same IP. Consumers must not infer transport identity from IP.
             state.connection_generation = state.connection_generation.saturating_add(1);
-            state.connection_generation
+            (state.connection_generation, state.network_generation)
         };
-        let candidates = self.resolve_candidates().await?;
+        let transport = self.resolve_transport().await?;
+        let candidates = match transport.as_ref() {
+            Some(path) => resolve_candidates_async(&path.hosts, self.config.port).await?,
+            None => self.resolve_candidates().await?,
+        };
+        let transport_routes = transport.as_ref().map(|path| TransportRoutes {
+            addresses: candidates
+                .iter()
+                .map(|addr| addr.ip().to_string())
+                .collect(),
+            generation: path.generation,
+        });
         info!(
             "Racing {} supernode candidate(s): {candidates:?}",
             candidates.len()
         );
-        let (socket, crypto, remote_addr, response) = self.race_handshakes(candidates).await?;
+        let HandshakeTransport {
+            socket,
+            crypto,
+            remote_addr,
+            response,
+            peer_key,
+            peer_socket,
+        } = self
+            .race_handshakes(
+                attempts,
+                candidates,
+                transport.map(|path| path.prepare_socket),
+            )
+            .await?;
         info!("Handshake race won by {remote_addr}");
 
         let addresses = crate::settings::TunnelAssignment::new(
@@ -790,7 +969,11 @@ impl ClientInner {
         .map_err(ClientError::HandshakeFailed)?;
         let needs_setup = {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            let changed = state.assigned_addresses.as_ref() != Some(&addresses);
+            if state.network_generation != network_generation || state.is_closing {
+                return Err(ClientError::NotConnected);
+            }
+            let changed = state.assigned_addresses.as_ref() != Some(&addresses)
+                || state.transport_routes != transport_routes;
             if changed {
                 // The OS may have replaced the previous tunnel even if the
                 // new configuration fails or the attempt is cancelled.
@@ -800,8 +983,9 @@ impl ClientInner {
         };
         if needs_setup {
             let (complete, ready) = oneshot::channel();
-            self.callbacks.on_ip_assigned(
+            self.callbacks.on_transport_assigned(
                 addresses.clone(),
+                transport_routes.clone(),
                 Arc::new(TunnelSetup(Mutex::new(Some(complete)))),
             );
             // The server holds the unconfirmed handshake for 15 seconds.
@@ -816,6 +1000,25 @@ impl ClientInner {
                 })?;
         }
 
+        let mut peer_socket = peer_socket;
+        let gateway = peer_socket.as_mut().and_then(|peer| peer.gateway.take());
+        let discovery = peer_key
+            .filter(|_| response.peer_session_epoch != 0)
+            .map(|key| {
+                let mut discovery = Discovery::new(
+                    addresses.clone(),
+                    self.config.id,
+                    response.peer_session_epoch,
+                    key,
+                    remote_addr,
+                );
+                if let Some(socket) = peer_socket {
+                    discovery.enable_direct(socket);
+                }
+                Arc::new(Mutex::new(discovery))
+            });
+        let public_v4 = response.public_ip.parse::<std::net::Ipv4Addr>().ok();
+
         let (uplink_tx, uplink_rx) = mpsc::channel::<Vec<u8>>(UPLINK_QUEUE_CAPACITY);
         let queue_metrics = Arc::new(UplinkQueueMetrics::new(&uplink_tx));
         {
@@ -823,7 +1026,7 @@ impl ClientInner {
                 .state
                 .lock()
                 .map_err(|_| ClientError::InternalError("lock poisoned".to_string()))?;
-            if state.is_closing {
+            if state.is_closing || state.network_generation != network_generation {
                 return Err(ClientError::NotConnected);
             }
             let uplink_handle = self.runtime.spawn(Self::run_uplink_loop(
@@ -834,12 +1037,15 @@ impl ClientInner {
                 self.uplink.clone(),
                 queue_metrics.clone(),
                 generation,
+                discovery.clone(),
             ));
+            state.discovery = discovery.clone();
             state.last_pong = Instant::now();
             state.uplink_tx = Some(uplink_tx);
             state.uplink_queue_metrics = Some(queue_metrics);
             state.uplink_handle = Some(uplink_handle);
             state.assigned_addresses = Some(addresses);
+            state.transport_routes = transport_routes;
             state.public_ip = response.public_ip;
             state.is_active = true;
         }
@@ -854,10 +1060,58 @@ impl ClientInner {
             self.uplink.not_connected.load(Ordering::Relaxed)
         );
 
-        self.run_data_loop(socket, crypto, remote_addr, generation)
-            .await;
+        let data = self.run_data_loop(
+            socket.clone(),
+            crypto.clone(),
+            remote_addr,
+            generation,
+            discovery.clone(),
+        );
+        if let (Some(gateway), Some(discovery), Some(public_ip)) = (gateway, discovery, public_v4)
+            && remote_addr.is_ipv4()
+            && let Ok(local) = socket.local_addr()
+        {
+            tokio::select! {
+                () = data => {}
+                () = run_gateway_mapping(gateway, local.port(), public_ip, discovery, &socket, &crypto, remote_addr) => {}
+            }
+        } else {
+            data.await;
+        }
 
         Ok(())
+    }
+
+    async fn resolve_transport(&self) -> Result<Option<TransportPath>, ClientError> {
+        if !self.config.managed_transport {
+            return Ok(None);
+        }
+        let callbacks = self.callbacks.clone();
+        let resolving = self.resolving_transport.clone();
+        let worker = tokio::task::spawn_blocking(move || {
+            if resolving.swap(true, Ordering::AcqRel) {
+                return Err(ClientError::DnsFailed(
+                    "platform resolution still pending".into(),
+                ));
+            }
+            struct Resolution(Arc<AtomicBool>);
+            impl Drop for Resolution {
+                fn drop(&mut self) {
+                    self.0.store(false, Ordering::Release);
+                }
+            }
+            let _resolution = Resolution(resolving);
+            callbacks.resolve_transport().unwrap_or_else(|| {
+                Err(ClientError::DnsFailed(
+                    "physical network unavailable".into(),
+                ))
+            })
+        });
+        tokio::time::timeout(Duration::from_secs(DNS_TIMEOUT_SECS), worker)
+            .await
+            .map_err(|_| ClientError::DnsFailed("platform resolution timed out".into()))?
+            .map_err(|error| ClientError::DnsFailed(error.to_string()))?
+            .map(Some)
     }
 
     /// Resolve every configured host and concatenate the addresses in
@@ -877,20 +1131,14 @@ impl ClientInner {
     /// candidate's error is returned.
     async fn race_handshakes(
         self: &Arc<Self>,
+        attempts: &mut HandshakeAttempts,
         candidates: Vec<SocketAddr>,
-    ) -> Result<
-        (
-            Arc<UdpSocket>,
-            Arc<CryptoCore>,
-            SocketAddr,
-            HandshakeResponse,
-        ),
-        ClientError,
-    > {
+        prepare_socket: Option<PeerSocketSetup>,
+    ) -> Result<HandshakeTransport, ClientError> {
         let mut errors: Vec<Option<ClientError>> = (0..candidates.len()).map(|_| None).collect();
-        let mut attempts = tokio::task::JoinSet::new();
         for (index, addr) in candidates.into_iter().enumerate() {
             let inner = Arc::clone(self);
+            let prepare_socket = prepare_socket.clone();
             attempts.spawn(async move {
                 if index > 0 {
                     sleep(Duration::from_millis(
@@ -898,7 +1146,11 @@ impl ClientInner {
                     ))
                     .await;
                 }
-                (index, addr, inner.handshake_attempt(addr).await)
+                (
+                    index,
+                    addr,
+                    inner.handshake_attempt(addr, prepare_socket.as_ref()).await,
+                )
             });
         }
         while let Some(joined) = attempts.join_next().await {
@@ -912,7 +1164,7 @@ impl ClientInner {
             };
             match result {
                 Ok(winner) => {
-                    attempts.abort_all();
+                    attempts.shutdown().await;
                     return Ok(winner);
                 }
                 Err(e) => {
@@ -935,15 +1187,8 @@ impl ClientInner {
     async fn handshake_attempt(
         &self,
         remote_addr: SocketAddr,
-    ) -> Result<
-        (
-            Arc<UdpSocket>,
-            Arc<CryptoCore>,
-            SocketAddr,
-            HandshakeResponse,
-        ),
-        ClientError,
-    > {
+        prepare_socket: Option<&PeerSocketSetup>,
+    ) -> Result<HandshakeTransport, ClientError> {
         info!("Connecting to {remote_addr}");
 
         let (private_key, public_key) =
@@ -970,6 +1215,23 @@ impl ClientInner {
             }
         }
 
+        #[cfg(unix)]
+        let peer_socket = {
+            use std::os::unix::io::AsRawFd;
+            let setup = prepare_socket.or(self.config.peer_socket_setup.as_ref());
+            let prepared = setup.and_then(|setup| {
+                setup(socket.as_raw_fd(), remote_addr, socket.local_addr().ok()?)
+            });
+            if prepare_socket.is_some() && prepared.is_none() {
+                return Err(ClientError::BindFailed(
+                    "could not bind to the resolved physical network".into(),
+                ));
+            }
+            prepared
+        };
+        #[cfg(not(unix))]
+        let peer_socket = None;
+
         let socket = Arc::new(socket);
         let mut recv_buf = vec![0u8; 65535];
 
@@ -980,6 +1242,17 @@ impl ClientInner {
         let (pake_state, pake_message) =
             pake::start_client(self.config.password.as_bytes(), &self.config.id.0);
 
+        let peer_key = if peer_socket.is_some() {
+            match PeerKeyPair::generate() {
+                Ok(key) => Some(key),
+                Err(error) => {
+                    warn!("Could not enable peer discovery for this session: {error}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         let handshake_buf = protocol::build_handshake_request(
             &self.config.id,
             &pake_message,
@@ -988,6 +1261,14 @@ impl ClientInner {
             current_ts_secs(),
             &self.config.device_name,
             &self.config.platform,
+            peer_key.as_ref().map(|key| {
+                (
+                    key.public,
+                    peer_socket
+                        .as_ref()
+                        .and_then(|s| s.lan_endpoint.map(Into::into)),
+                )
+            }),
         )
         .map_err(|e| ClientError::HandshakeFailed(e.to_string()))?;
 
@@ -1033,7 +1314,7 @@ impl ClientInner {
         let pake_key = pake_state
             .finish(&response.pake_message)
             .map_err(|e| ClientError::HandshakeFailed(e.to_string()))?;
-        protocol::verify_response_confirm(&response, &pake_key)
+        protocol::verify_response_confirm(&response, &pake_key, &handshake_buf.as_ref()[1..])
             .map_err(|e| ClientError::HandshakeFailed(e.to_string()))?;
 
         // Freshness + binding: the timestamp must be near our clock, and
@@ -1061,12 +1342,20 @@ impl ClientInner {
             .map_err(|e| ClientError::HandshakeFailed(e.to_string()))?,
         );
 
-        Ok((socket, crypto, remote_addr, response))
+        Ok(HandshakeTransport {
+            socket,
+            crypto,
+            remote_addr,
+            response,
+            peer_key,
+            peer_socket,
+        })
     }
 
     /// Drains the uplink queue: encrypts each queued packet and sends it to
     /// the peer. Reuses a single Buffer across packets so the hot path does
     /// not allocate/zero 64KB per packet.
+    #[allow(clippy::too_many_arguments)]
     async fn run_uplink_loop(
         socket: Arc<UdpSocket>,
         crypto: Arc<CryptoCore>,
@@ -1075,6 +1364,7 @@ impl ClientInner {
         counters: Arc<UplinkCounters>,
         queue_metrics: Arc<UplinkQueueMetrics>,
         generation: u64,
+        discovery: Option<SharedDiscovery>,
     ) {
         let mut buf = Buffer::new(EXTRA_LEN + 1);
         let mut report = UplinkReport::new(queue_metrics.clone(), remote_addr, generation);
@@ -1084,6 +1374,20 @@ impl ClientInner {
                 packet = rx.recv() => {
                     let Some(data) = packet else { break; };
                     queue_metrics.queue.observe(rx.len().saturating_add(1));
+                    if let Some(discovery) = &discovery
+                        && let Some(ip) = destination(&data)
+                    {
+                        let now = Instant::now();
+                        let mut discovery = discovery.lock().unwrap_or_else(|e| e.into_inner());
+                        if discovery.send_direct(&socket, &mut buf, &data, ip, now) {
+                            discovery.observe(ip, now);
+                            counters.bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
+                            counters.direct_bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
+                            counters.packets_sent.fetch_add(1, Ordering::Relaxed);
+                            report.sent(data.len());
+                            continue;
+                        }
+                    }
                     buf.clear();
                     // Bound both the fixed backing buffer and IPv4 UDP's
                     // maximum payload before copying/encrypting FFI input.
@@ -1099,6 +1403,11 @@ impl ClientInner {
                             counters.bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
                             counters.packets_sent.fetch_add(1, Ordering::Relaxed);
                             report.sent(data.len());
+                            if let Some(discovery) = &discovery
+                                && let Some(ip) = destination(&data)
+                            {
+                                discovery.lock().unwrap_or_else(|e| e.into_inner()).observe(ip, Instant::now());
+                            }
                         }
                         Err(error) => {
                             counters.send_failures.fetch_add(1, Ordering::Relaxed);
@@ -1119,9 +1428,11 @@ impl ClientInner {
         crypto: Arc<CryptoCore>,
         remote_addr: SocketAddr,
         generation: u64,
+        discovery: Option<SharedDiscovery>,
     ) {
         info!("Data loop started for {remote_addr}");
-        let (packet_tx, mut packet_rx) = mpsc::channel::<Vec<u8>>(DOWNLINK_QUEUE_CAPACITY);
+        let (packet_tx, mut packet_rx) =
+            mpsc::channel::<(SocketAddr, Vec<u8>)>(DOWNLINK_QUEUE_CAPACITY);
         let receive_metrics = Arc::new(ReceiveMetrics::new(&packet_tx));
 
         {
@@ -1131,19 +1442,30 @@ impl ClientInner {
             }
             let receive_socket = socket.clone();
             let metrics = receive_metrics.clone();
+            let peer_filter = discovery.clone();
             let receive_handle = tokio::spawn(async move {
                 let mut buf = vec![0u8; 65535];
                 loop {
                     match receive_socket.recv_from(&mut buf).await {
                         Ok((len, from)) => {
-                            // Drop packets from anyone but the supernode: random
-                            // internet noise hitting this ephemeral port must not
-                            // reach the protocol parser.
-                            if from != remote_addr {
-                                continue;
-                            }
-                            let packet = buf[..len].to_vec();
-                            if !enqueue_downlink(&packet_tx, &metrics, packet).await {
+                            if from == remote_addr {
+                                if !enqueue_downlink(
+                                    &packet_tx,
+                                    &metrics,
+                                    (from, buf[..len].to_vec()),
+                                )
+                                .await
+                                {
+                                    break;
+                                }
+                            } else if peer_filter.as_ref().is_some_and(|filter| {
+                                filter
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .admit(from, &buf[..len])
+                            }) && !try_enqueue_peer(&packet_tx, &metrics, || {
+                                (from, buf[..len].to_vec())
+                            }) {
                                 break;
                             }
                         }
@@ -1194,7 +1516,7 @@ impl ClientInner {
         let mut heartbeat_buf = Buffer::new(0);
         // Raw-packet staging is reused. Delivery transfers ownership of batch,
         // so reserve its next allocation once, when the first data packet arrives.
-        let mut pending: Vec<Vec<u8>> = Vec::with_capacity(DATA_BATCH_CAPACITY);
+        let mut pending = Vec::with_capacity(DATA_BATCH_CAPACITY);
         let mut batch: Vec<Vec<u8>> = Vec::new();
 
         // Keep the timer outside select: recreating sleep(1s) per packet
@@ -1204,6 +1526,10 @@ impl ClientInner {
         // Counts packets that are neither HEARTBEAT nor DATA_INTERFACE
         // (e.g. REJECTED after a NAT mapping change, or random internet
         // noise hitting this ephemeral port). Throttled to avoid log spam.
+        let mut discovery_tick = interval(Duration::from_millis(100));
+        let mut discovery_buf = discovery
+            .as_ref()
+            .map(|_| Buffer::new(EXTRA_LEN + protocol::REGISTER_HEADER));
         let mut unknown_packets: u64 = 0;
         // REJECTED is a single unauthenticated byte, so anyone on the path
         // can forge it. Instead of tearing the session down immediately we
@@ -1231,8 +1557,23 @@ impl ClientInner {
                     }
 
                     batch.clear();
+                    let mut direct = [None; DATA_BATCH_CAPACITY];
                     let pending_packets = pending.len();
-                    for mut packet in pending.drain(..) {
+                    for (from, mut packet) in pending.drain(..) {
+                        if from != remote_addr {
+                            if let (Some(discovery), Some(buffer)) = (&discovery, &mut discovery_buf) {
+                                let authorization = discovery.lock().unwrap_or_else(|e| e.into_inner())
+                                    .receive_direct(&socket, buffer, from, &mut packet, Instant::now());
+                                if authorization.is_some() {
+                                    if batch.is_empty() {
+                                        batch.reserve_exact(pending_packets);
+                                    }
+                                    direct[batch.len()] = authorization;
+                                    batch.push(packet);
+                                }
+                            }
+                            continue;
+                        }
                         if packet.is_empty() {
                             continue;
                         }
@@ -1244,6 +1585,9 @@ impl ClientInner {
                                 if heartbeat_buf.write_all(&packet[1..]).is_ok() {
                                     match protocol::parse_pong(&mut heartbeat_buf, &crypto) {
                                         Ok(_pong) => {
+                                            if let Some(discovery) = &discovery {
+                                                discovery.lock().unwrap_or_else(|e| e.into_inner()).confirm();
+                                            }
                                             debug!("Pong received from {remote_addr}");
                                             last_pong = Instant::now();
                                             rejected_since = None;
@@ -1258,7 +1602,11 @@ impl ClientInner {
                             }
                             protocol::DATA_INTERFACE => {
                                 if decrypt_packet(&crypto, &mut packet).is_ok() {
-                                    report.packet(packet.len());
+                                    if let Some(discovery) = &discovery {
+                                        let mut discovery = discovery.lock().unwrap_or_else(|e| e.into_inner());
+                                        discovery.confirm();
+                                        discovery.observe_relayed(&packet, Instant::now());
+                                    }
                                     // Any successfully authenticated
                                     // packet proves the session is alive;
                                     // refresh the liveness timestamp so
@@ -1266,12 +1614,7 @@ impl ClientInner {
                                     // not cause a spurious reconnect.
                                     last_pong = Instant::now();
                                     rejected_since = None;
-                                    {
-                                        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                                        state.last_pong = last_pong;
-                                        state.bytes_received.fetch_add(packet.len() as u64, Ordering::Relaxed);
-                                        state.packets_received.fetch_add(1, Ordering::Relaxed);
-                                    }
+                                    self.state.lock().unwrap_or_else(|e| e.into_inner()).last_pong = last_pong;
                                     if batch.is_empty() {
                                         batch.reserve_exact(pending_packets);
                                     }
@@ -1283,6 +1626,31 @@ impl ClientInner {
                                         state.decrypt_failures.fetch_add(1, Ordering::Relaxed);
                                     }
                                     debug!("Downlink packet decrypt failed");
+                                }
+                            }
+                            protocol::FIND_PEER => {
+                                if let Some(discovery) = &discovery
+                                    && let Some(buffer) = &mut discovery_buf
+                                    && packet.len() <= protocol::MAX_FIND_PEER_PLAINTEXT + EXTRA_LEN + crate::TAG_LEN + 1
+                                {
+                                    buffer.clear();
+                                    let reply = buffer.write_all(&packet[1..]).map_err(Into::into)
+                                        .and_then(|()| protocol::parse_find_peer(buffer, &crypto))
+                                        .and_then(|data| {
+                                            let now = Instant::now();
+                                            let mut discovery = discovery.lock().unwrap_or_else(|e| e.into_inner());
+                                            let reply = discovery.receive(data, now)?;
+                                            let punches = discovery.poll_paths(&socket, buffer, now);
+                                            Ok((reply, punches))
+                                        });
+                                    match reply {
+                                        Ok((reply, punches)) => {
+                                            for data in reply.into_iter().chain(punches) {
+                                                send_find_peer(buffer, &crypto, &socket, remote_addr, data);
+                                            }
+                                        }
+                                        Err(error) => debug!("Dropping FIND_PEER from {remote_addr}: {error}"),
+                                    }
                                 }
                             }
                             protocol::REJECTED => {
@@ -1327,12 +1695,32 @@ impl ClientInner {
                     }
 
                     if !batch.is_empty() {
+                        self.state
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .commit_downlink(&mut batch, &direct, discovery.as_ref());
+                    }
+                    if !batch.is_empty() {
                         let packet_count = batch.len();
+                        for packet in &batch {
+                            report.packet(packet.len());
+                        }
                         let callback_started = Instant::now();
                         self.callbacks.on_packets(std::mem::take(&mut batch));
                         report.batch(packet_count, callback_started.elapsed());
                     }
                 }
+                _ = discovery_tick.tick(), if discovery.is_some() => {
+                    if let (Some(discovery), Some(buffer)) = (&discovery, &mut discovery_buf) {
+                        let now = Instant::now();
+                        let mut discovery = discovery.lock().unwrap_or_else(|e| e.into_inner());
+                        let punches = discovery.poll_paths(&socket, buffer, now);
+                        for query in punches.into_iter().chain(discovery.due_queries(now)) {
+                            send_find_peer(buffer, &crypto, &socket, remote_addr, query);
+                        }
+                    }
+                }
+
                 _ = ticker.tick() => {
                     report.report_if_due();
                 }
@@ -1355,8 +1743,109 @@ impl ClientInner {
         }
 
         info!("Data loop ended for {remote_addr}");
+    }
+}
 
-        self.clear_connection();
+async fn run_gateway_mapping(
+    gateway: Gateway,
+    local_port: u16,
+    public_ip: std::net::Ipv4Addr,
+    discovery: SharedDiscovery,
+    socket: &UdpSocket,
+    crypto: &CryptoCore,
+    remote: SocketAddr,
+) {
+    use protocol::{PeerMapping, find_peer_message::Data};
+
+    let mut tick = interval(Duration::from_secs(1));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut lease: Option<crate::gateway::Lease> = None;
+    let mut retry_at = tokio::time::Instant::now();
+    let mut needed_since = None;
+    let mut next_announcement = retry_at;
+    let mut renew_at = retry_at;
+    let mut revision = 0;
+    let mut buffer = Buffer::new(EXTRA_LEN + 1);
+    loop {
+        tick.tick().await;
+        let now = tokio::time::Instant::now();
+        let (needed, can_announce) = {
+            let discovery = discovery.lock().unwrap_or_else(|e| e.into_inner());
+            (
+                discovery.mapping_needed(Instant::now()),
+                discovery.accepts_mapping(),
+            )
+        };
+        if !needed {
+            needed_since = None;
+        } else {
+            needed_since.get_or_insert(now);
+        }
+        if lease.is_none()
+            && now >= retry_at
+            && needed_since.is_some_and(|since| now - since >= Duration::from_secs(2))
+        {
+            match gateway.map(local_port, public_ip).await {
+                Ok(mapped) => {
+                    info!(local_port, endpoint = ?mapped.advertised(), "Acquired gateway UDP mapping");
+                    renew_at = tokio::time::Instant::now() + mapped.renew_after();
+                    lease = Some(mapped);
+                    next_announcement = now;
+                }
+                Err(error) => {
+                    debug!(%error, "Gateway UDP mapping unavailable");
+                    retry_at = now + Duration::from_secs(60);
+                }
+            }
+        }
+        if let Some(mapped) = lease.as_mut()
+            && now >= renew_at
+        {
+            if mapped.renew().await.is_ok() {
+                renew_at = tokio::time::Instant::now() + mapped.renew_after();
+                next_announcement = now;
+            } else {
+                debug!("Gateway UDP mapping renewal failed");
+                lease = None;
+                retry_at = now + Duration::from_secs(30);
+                next_announcement = now;
+            }
+        }
+        if can_announce && now >= next_announcement && (lease.is_some() || revision != 0) {
+            let (port, lifetime_ms) = lease
+                .as_ref()
+                .and_then(|mapped| mapped.advertised())
+                .unwrap_or_default();
+            revision += 1;
+            send_find_peer(
+                &mut buffer,
+                crypto,
+                socket,
+                remote,
+                Data::Mapping(PeerMapping {
+                    revision,
+                    port: u32::from(port),
+                    lifetime_ms,
+                }),
+            );
+            next_announcement = now + Duration::from_secs(10);
+        }
+    }
+}
+
+fn send_find_peer(
+    buffer: &mut Buffer,
+    crypto: &CryptoCore,
+    socket: &UdpSocket,
+    remote_addr: SocketAddr,
+    data: protocol::find_peer_message::Data,
+) {
+    if let Err(error) = protocol::build_find_peer(buffer, crypto, data).and_then(|()| {
+        socket
+            .try_send_to(buffer.as_ref(), remote_addr)
+            .map_err(Into::into)
+    }) {
+        debug!("Could not send FIND_PEER to {remote_addr}: {error}");
     }
 }
 
@@ -1373,10 +1862,10 @@ fn decrypt_packet(crypto: &CryptoCore, packet: &mut Vec<u8>) -> anyhow::Result<(
     Ok(())
 }
 
-async fn enqueue_downlink(
-    sender: &mpsc::Sender<Vec<u8>>,
+async fn enqueue_downlink<T>(
+    sender: &mpsc::Sender<T>,
     metrics: &ReceiveMetrics,
-    packet: Vec<u8>,
+    packet: T,
 ) -> bool {
     match sender.try_send(packet) {
         Ok(()) => {
@@ -1396,6 +1885,28 @@ async fn enqueue_downlink(
         }
         Err(mpsc::error::TrySendError::Closed(_)) => false,
     }
+}
+
+fn try_enqueue_peer<T>(
+    sender: &mpsc::Sender<T>,
+    metrics: &ReceiveMetrics,
+    packet: impl FnOnce() -> T,
+) -> bool {
+    // The socket reader is the sole producer. Reserve room for center traffic
+    // and drop peer frames at the limit, before allocating their buffers.
+    if sender.capacity() > DOWNLINK_CENTER_RESERVE {
+        match sender.try_reserve() {
+            Ok(permit) => {
+                permit.send(packet());
+                metrics
+                    .queue
+                    .observe(sender.max_capacity() - sender.capacity());
+            }
+            Err(mpsc::error::TrySendError::Full(())) => {}
+            Err(mpsc::error::TrySendError::Closed(())) => return false,
+        }
+    }
+    !sender.is_closed()
 }
 
 fn current_ts() -> i64 {

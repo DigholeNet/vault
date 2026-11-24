@@ -1,9 +1,139 @@
 // SPDX-License-Identifier: MIT
-//! Platform network binding for the portable diagnostic transport.
+//! Platform binding and physical subnet checks for UDP sockets.
 use std::io;
-#[cfg(target_vendor = "apple")]
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::Arc;
 use vault_core::diagnostics::transport::NetworkBinding;
+
+#[derive(Clone)]
+pub struct LanAddresses(Arc<[(IpAddr, u8)]>);
+
+impl LanAddresses {
+    pub fn new(addresses: &[String]) -> Self {
+        Self(
+            addresses
+                .iter()
+                .filter_map(|entry| {
+                    let (address, prefix) = entry.split_once('/')?;
+                    let address: IpAddr = address.split('%').next()?.parse().ok()?;
+                    let prefix: u8 = prefix.parse().ok()?;
+                    (usable_lan_ip(address)
+                        && (1..=if address.is_ipv4() { 32 } else { 128 }).contains(&prefix))
+                    .then_some((address, prefix))
+                })
+                .collect(),
+        )
+    }
+
+    pub fn endpoint(
+        &self,
+        server: SocketAddr,
+        port: u16,
+        bind: impl FnOnce(i32) -> io::Result<()>,
+    ) -> Option<SocketAddr> {
+        #[cfg(unix)]
+        {
+            use std::net::UdpSocket;
+            use std::os::fd::AsRawFd;
+
+            let ipv4 = server.ip().to_canonical().is_ipv4();
+            if !self.0.iter().any(|(ip, _)| ip.is_ipv4() == ipv4) {
+                return None;
+            }
+            // UDP connect selects the platform's source address without sending a packet.
+            // Keep the actual tunnel socket unconnected so it can also receive peer traffic.
+            let any = if server.is_ipv4() {
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+            } else {
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+            };
+            let probe = UdpSocket::bind(SocketAddr::new(any, 0)).ok()?;
+            bind(probe.as_raw_fd()).ok()?;
+            probe.connect(server).ok()?;
+            let source = probe.local_addr().ok()?.ip().to_canonical();
+            self.0
+                .iter()
+                .any(|(ip, _)| *ip == source)
+                .then(|| SocketAddr::new(source, port))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (server, port, bind);
+            None
+        }
+    }
+
+    pub fn allows(&self, local: IpAddr, remote: IpAddr) -> bool {
+        usable_lan_ip(remote)
+            && !self.0.iter().any(|(own, _)| *own == remote)
+            && self.0.iter().any(|&(own, prefix)| {
+                if own != local {
+                    return false;
+                }
+                match (own, remote) {
+                    (IpAddr::V4(own), IpAddr::V4(remote)) => {
+                        let mask = u32::MAX << (32 - prefix);
+                        let remote = u32::from(remote);
+                        let network = u32::from(own) & mask;
+                        remote & mask == network
+                            && (prefix >= 31 || (remote != network && remote != (network | !mask)))
+                    }
+                    (IpAddr::V6(own), IpAddr::V6(remote)) => {
+                        let shift = 128 - prefix;
+                        u128::from(own) >> shift == u128::from(remote) >> shift
+                    }
+                    _ => false,
+                }
+            })
+    }
+}
+
+fn usable_lan_ip(ip: IpAddr) -> bool {
+    !ip.is_unspecified()
+        && !ip.is_multicast()
+        && !ip.is_loopback()
+        && match ip {
+            IpAddr::V4(ip) => !ip.is_link_local() && !ip.is_broadcast(),
+            IpAddr::V6(ip) => !ip.is_unicast_link_local() && ip.to_ipv4_mapped().is_none(),
+        }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lan_prefixes() {
+        let addresses = LanAddresses::new(
+            &[
+                "192.168.1.99/25",
+                "192.168.1.110/25",
+                "fd00:1::99/64",
+                "fe80::99%en0/64",
+                "10.0.0.1/0",
+            ]
+            .map(String::from),
+        );
+        let ipv4 = "192.168.1.99".parse().unwrap();
+        assert!(addresses.allows(ipv4, "192.168.1.107".parse().unwrap()));
+        for remote in [
+            "192.168.1.110",
+            "192.168.1.128",
+            "192.168.1.0",
+            "192.168.1.127",
+            "222.210.167.234",
+            "224.0.0.1",
+            "fd00:1::107",
+        ] {
+            assert!(!addresses.allows(ipv4, remote.parse().unwrap()), "{remote}");
+        }
+        let ipv6 = "fd00:1::99".parse().unwrap();
+        assert!(addresses.allows(ipv6, "fd00:1::107".parse().unwrap()));
+        assert!(!addresses.allows(ipv6, "fd00:2::107".parse().unwrap()));
+        assert!(!addresses.allows("fe80::99".parse().unwrap(), "fe80::107".parse().unwrap()));
+        assert!(!addresses.allows("10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap()));
+    }
+}
 
 // Android's NDK equivalent of Network.bindSocket; only tunnel requests use it.
 #[cfg(target_os = "android")]

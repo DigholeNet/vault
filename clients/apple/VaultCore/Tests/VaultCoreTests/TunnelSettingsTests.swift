@@ -223,3 +223,28 @@ private func configuration(_ ip: String, mtu: Int = 1427, dns: [String] = []) ->
     #expect(state.next() == nil)
     #expect(state.applied == nil)
 }
+
+@Test func candidateRoutes() throws {
+    var state = TunnelSettingsState()
+    let previous = TunnelConfiguration(
+        ipv4: "10.0.0.2", mask: "255.255.255.0", ipv6: "", prefix: 0, mtu: 1427,
+        serverCandidates: ["192.0.2.1"]
+    )
+    let replacement = TunnelConfiguration(
+        ipv4: "10.0.0.2", mask: "255.255.255.0", ipv6: "", prefix: 0, mtu: 1427,
+        serverCandidates: ["2001:db8::1"]
+    )
+    let initial = state.enqueue(previous)
+    let first = try #require(initial)
+    let firstApplied = state.complete(first, succeeded: true)
+    #expect(firstApplied)
+    let queued = state.enqueue(replacement)
+    let change = try #require(queued)
+    #expect(state.readyNetwork == nil)
+    let replacementApplied = state.complete(change, succeeded: true)
+    #expect(replacementApplied)
+    #expect(state.readyNetwork == replacement)
+    let mtuChange = state.updateMTU(1380)
+    let mtu = try #require(mtuChange)
+    #expect(mtu.configuration.serverCandidates == replacement.serverCandidates)
+}

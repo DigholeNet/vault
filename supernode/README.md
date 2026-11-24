@@ -1,12 +1,10 @@
 # Vault Supernode
 
-The server of the [Vault VPN](../README.md) system — a Linux-only VPN server
-written in Rust. It sits at the center of the star topology: edge clients
-connect to it over encrypted UDP tunnels, and it assigns virtual IPs and
-relays traffic between them. It reuses `vault-core`'s epoll, TUN, peer
-management and protocol implementation, and adds the address pool (CIDR
-allocation with leases and recycling), NAT/forwarding setup, and the relay
-loop.
+The Linux server of [Vault VPN](../README.md) authenticates edge clients over
+encrypted UDP, assigns VPN addresses, introduces eligible peers and relays
+traffic. Peer traffic starts on relay and can switch to direct encrypted UDP
+after client-side path verification. The Supernode carries internet traffic
+and provides relay when a direct path is unavailable.
 
 System requirements:
 
@@ -28,6 +26,7 @@ supernode/
 │   ├── error.rs            # Error types
 │   ├── supernode.rs        # Main SuperNode logic and event loop
 │   ├── handshake.rs        # Pending handshake tracking and replay protection
+│   ├── p2p.rs              # Peer directory, pair leases and introductions
 │   ├── limiter.rs          # INIT rate limiting and source-IP banning
 │   ├── mock_time.rs        # Test time source
 │   └── ip/
@@ -111,6 +110,19 @@ ipv6 = "fd00::/96"
 
 The server needs working IPv6 egress for clients to reach IPv6 internet targets.
 
+### Peer discovery and protocol upgrades
+
+The Supernode introduces confirmed v2 clients that offer a valid peer key.
+LAN candidates are exchanged automatically when both clients report distinct
+RFC 1918 addresses and the server observes the same IPv4 address for both.
+Remove any `[[p2p_pairs]]` blocks from earlier test configurations before
+starting this version. Upgrade or roll back the Supernode and all clients in
+the same maintenance window, including relay-only clients.
+
+Direct traffic bypasses the Supernode's Linux `FORWARD` rules and is outside
+its relay traffic counters. See the
+[protocol](../docs/protocol.md#peer-discovery) and [security model](../SECURITY.md).
+
 ## Usage and deployment
 
 Release archives named `supernode-v<version>-<arch>.tar.gz` contain only the
@@ -193,7 +205,8 @@ the following rules for each configured address family:
   source/destination addresses
 
 Rules are appended, so earlier administrator DROP rules still take precedence.
-The default FORWARD policy can be DROP; the scoped allow rules cover VPN traffic.
+The default FORWARD policy can be DROP. The scoped allow rules cover the
+traffic forwarded by this Supernode.
 Exits are taken from usable routes exposed by Linux for the configured address
 families, including default, connected and static routes over physical or virtual
 interfaces. Loopback, the server's TUN, rejected routes and IPv6 local/multicast

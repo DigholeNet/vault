@@ -59,6 +59,20 @@ architecture. Release CI writes packages into runner temporary directories
 outside the Cargo cache and uploads only each matrix component's packages.
 Cached packages from previous builds are not collected as release artifacts.
 
+## Protocol v2 rollout
+
+Upgrade the Supernode and every client in the same maintenance window.
+Protocol v1 and v2 cannot establish a session with one another, including
+relay-only clients. Roll back both sides together if needed. Remove
+`[[p2p_pairs]]` from earlier Supernode test configurations and remove
+`peer_discovery` and `peer_lan` from earlier Linux Edge test configurations
+before startup.
+
+Validate Supernode relay, encrypted direct peer traffic, and fallback to
+relay on the release build. To test relay-only operation, use a path where
+peer UDP is blocked and the Supernode remains reachable. See the
+[P2P acceptance scenarios](p2p.md#6-实施和验收).
+
 ## Android version-code policy
 
 Local packaging and release CI share the encoder in `scripts/package-android.sh`.

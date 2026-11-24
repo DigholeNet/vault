@@ -17,6 +17,7 @@ fn idle_session() -> ClientSession {
     ClientSession {
         inner: Arc::new(ClientInner {
             uplink: Arc::new(UplinkCounters::default()),
+            resolving_transport: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config: ClientConfig {
                 password: "test".into(),
                 hosts: vec!["127.0.0.1".into()],
@@ -24,6 +25,8 @@ fn idle_session() -> ClientSession {
                 id: PeerId([1; 16]),
                 device_name: String::new(),
                 platform: String::new(),
+                managed_transport: false,
+                peer_socket_setup: None,
                 socket_protect: None,
             },
             callbacks: Arc::new(NoCallbacks),
@@ -225,6 +228,8 @@ fn reconnect_handshake() {
             id: PeerId([1; 16]),
             device_name: String::new(),
             platform: String::new(),
+            managed_transport: false,
+            peer_socket_setup: None,
             socket_protect: None,
         },
         Arc::new(NoCallbacks),
@@ -233,6 +238,10 @@ fn reconnect_handshake() {
     let mut packet = [0u8; 4096];
     let (len, _) = server.recv_from(&mut packet).unwrap();
     let first = packet[..len].to_vec();
+    let Handshake::Request(request) = protocol::parse_handshake(&first[1..]).unwrap() else {
+        panic!("expected handshake request");
+    };
+    assert!(request.peer_public_key.is_empty());
     session.reconnect().unwrap();
     let (len, _) = server.recv_from(&mut packet).unwrap();
     assert_eq!(packet[0], protocol::INIT);
@@ -258,6 +267,8 @@ async fn receiver_exit() {
             id: PeerId([1; 16]),
             device_name: String::new(),
             platform: String::new(),
+            managed_transport: false,
+            peer_socket_setup: None,
             socket_protect: None,
         },
         Arc::new(NoCallbacks),
@@ -308,6 +319,8 @@ fn reconnect_backoff() {
             id: PeerId([1; 16]),
             device_name: String::new(),
             platform: String::new(),
+            managed_transport: false,
+            peer_socket_setup: None,
             socket_protect: Some(Arc::new(move |_| {
                 let _ = attempt_tx.send(());
                 false
@@ -440,6 +453,7 @@ async fn uplink_accounting() {
         counters.clone(),
         queue_metrics,
         1,
+        None,
     )
     .await;
     let mut buf = [0; 128];
@@ -469,6 +483,7 @@ async fn udp_send_failure() {
         counters.clone(),
         queue_metrics,
         1,
+        None,
     )
     .await;
     assert_eq!(counters.bytes_sent.load(Ordering::Relaxed), 0);

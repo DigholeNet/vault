@@ -6,8 +6,11 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
+import android.net.InetAddresses
+import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
@@ -27,10 +30,11 @@ import net.dighole.vaultcore.Edge
 import net.dighole.vaultcore.EdgeConfig
 import net.dighole.vaultcore.PeerId
 import net.dighole.vaultcore.uniffi.EdgeSettings
+import net.dighole.vaultcore.uniffi.MobileRoutes
+import net.dighole.vaultcore.uniffi.MobileTransport
 import net.dighole.vaultcore.uniffi.RustTunnelSetup
 import net.dighole.vaultcore.uniffi.TunnelAssignment
 import net.dighole.vaultcore.uniffi.VpnException
-import net.dighole.vaultcore.uniffi.resolveServerCandidates
 import net.dighole.vaultcore.uniffi.setFdBlocking
 import net.dighole.vaultcore.uniffi.validateEdgeSettings
 import java.io.File
@@ -77,8 +81,8 @@ class VaultVpnService : VpnService() {
     private var dnsIpv6List: List<String> = emptyList()
 
     private var tunnelMtu: Int = VPN_MTU
-    private var underlyingLinkMtu: Int? = null
-    private var lastUnderlyingTransport: Int? = null
+    private var mtuCap: Int? = null
+    private val physicalNetworks = PhysicalNetworks(::notifyNetworkChanged)
 
     private var connectedEvent: VpnStatusEvent.Connected? = null
     private var lastCoreConnected: Boolean? = null
@@ -155,11 +159,6 @@ class VaultVpnService : VpnService() {
 
         closeTunnelIo()
 
-        // Probe the underlying link MTU once per connect, while the active
-        // network is still the physical one (the VPN interface is not up yet).
-        // Both the TUN interface and the I/O read buffer use this value.
-        tunnelMtu = probeTunnelMtu()
-
         // Start foreground BEFORE validating extras to avoid ANR.
         // If EXTRA_ID is missing we stopSelf immediately after.
         startForeground(
@@ -211,7 +210,7 @@ class VaultVpnService : VpnService() {
                     probeDomains = config.probeDomains
                 ))
                 if (!sessionGate.update(sessionToken) {
-                    tunnelMtu = TunnelPolicy.mtu(underlyingLinkMtu, validated.mtuCap?.toInt())
+                    mtuCap = validated.mtuCap?.toInt()
                     serverHost = validated.host
                     dnsIpv4List = validated.dnsIpv4
                     dnsIpv6List = validated.dnsIpv6
@@ -239,20 +238,7 @@ class VaultVpnService : VpnService() {
         id: ByteArray,
         sessionToken: Long
     ) {
-        // Resolve the server host before the VPN interface is up. Once the TUN
-        // interface is active, system DNS queries may be routed through the VPN
-        // and black-holed while the tunnel is reconnecting, causing repeated
-        // "DNS resolution failed: timeout".
-        val candidates = try {
-            resolveServerCandidates(host, port)
-        } catch (error: VpnException) {
-            Log.w(TAG, "DNS resolution failed for excludeRoute: $host", error)
-            emptyList()
-        }
-
-        // Prefer literal IPs for the UDP connection so Rust does not need to
-        // perform a DNS lookup that could be intercepted by our own VPN interface.
-        val edgeConfig = EdgeConfig(password, candidates.ifEmpty { listOf(host) }, port)
+        val edgeConfig = EdgeConfig(password, listOf(host), port)
 
         val newEdge = Edge(
             config = edgeConfig,
@@ -262,8 +248,10 @@ class VaultVpnService : VpnService() {
                     vpnIoHandler?.enqueueDownlink(packets)
                 }
             },
-            onIpAssigned = { assignment, setup ->
-                handleEdgeIpAssigned(assignment, setup, candidates, sessionToken)
+            onIpAssigned = { _, setup -> setup.complete("Missing physical network route configuration") },
+            resolveTransport = { resolveTransport(host) },
+            onTransportAssigned = { assignment, routes, setup ->
+                handleEdgeIpAssigned(assignment, setup, routes, sessionToken)
             },
             pendingCompletion = { error ->
                 sessionGate.update(sessionToken) {
@@ -293,15 +281,50 @@ class VaultVpnService : VpnService() {
         newEdge.connect()
     }
 
+    private fun resolveTransport(host: String): MobileTransport? {
+        val selected = physicalNetworks.selected ?: return null
+        val candidates = try {
+            if (InetAddresses.isNumericAddress(host)) {
+                listOf(InetAddresses.parseNumericAddress(host))
+            } else {
+                selected.network.getAllByName(host).toList()
+            }
+        } catch (error: java.net.UnknownHostException) {
+            Log.w(TAG, "Supernode resolution failed on physical network", error)
+            return null
+        }
+        val addresses = candidates.mapNotNull(InetAddress::getHostAddress).distinct()
+        if (physicalNetworks.selected != selected || addresses.isEmpty()) return null
+        val gateway = if (selected.canMapPorts) {
+            selected.link.defaults.firstNotNullOfOrNull { route ->
+                (route.gateway as? java.net.Inet4Address)?.takeUnless { it.isAnyLocalAddress }?.hostAddress
+            }
+        } else null
+        val lanAddresses = if (selected.canMapPorts) {
+            selected.link.addresses.mapNotNull { link ->
+                link.address.hostAddress?.let { "$it/${link.prefixLength}" }
+            }
+        } else emptyList()
+        return MobileTransport(
+            addresses, selected.network.networkHandle.toULong(), selected.generation, gateway, lanAddresses
+        )
+    }
+
     // Native/Android setup failures must be reported only to the current session.
     @Suppress("TooGenericExceptionCaught")
     private fun handleEdgeIpAssigned(
         assignment: TunnelAssignment,
         setup: RustTunnelSetup,
-        addrs: List<String>,
+        routes: MobileRoutes,
         sessionToken: Long
     ) {
         trace("IP_ASSIGNED_CALLBACK")
+        val selected = physicalNetworks.selected
+        if (selected == null || selected.generation != routes.generation) {
+            setup.complete("Physical network changed")
+            return
+        }
+        val appliedMtu = TunnelPolicy.mtu(selected.link.mtu ?: readLinkMtu(selected.link.name), mtuCap)
         var sequence = 0L
         if (!sessionGate.updateIf(sessionToken, setup::isPending) {
             tunnelConfigurationSequence++
@@ -310,16 +333,17 @@ class VaultVpnService : VpnService() {
             setup.complete("VPN session ended")
             return
         }
-        val currentSetup = { sequence == tunnelConfigurationSequence && setup.isPending() }
+        val currentSetup = {
+            sequence == tunnelConfigurationSequence &&
+                physicalNetworks.selected == selected && setup.isPending()
+        }
         scope.launch {
             sessionGate.configure {
                 if (!sessionGate.updateIf(sessionToken, currentSetup) {}) {
                     return@configure
                 }
                 try {
-                    // Rust only notifies initial or changed IP configuration.
-                    // Same-IP transport reconnects keep this TUN and its I/O.
-                    val newInterface = createVpnInterface(assignment, addrs)
+                    val newInterface = createVpnInterface(assignment, routes.addresses, selected.network, appliedMtu)
                     sessionGate.commit(
                         sessionToken,
                         newInterface,
@@ -330,6 +354,8 @@ class VaultVpnService : VpnService() {
                             closeTunnelIo()
                         }
                     ) { iface ->
+                        tunnelMtu = appliedMtu
+                        edge?.setPeerMtu(appliedMtu)
                         vpnIoHandler = createTunnelIo(iface)
                         if (!setup.complete(null)) {
                             closeTunnelIo()
@@ -347,15 +373,8 @@ class VaultVpnService : VpnService() {
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
-                    if (!setup.complete(error.message ?: "VPN interface configuration failed")) {
-                        return@configure
-                    }
-                    sessionGate.updateIf(sessionToken, { sequence == tunnelConfigurationSequence }) {
-                        Log.e(TAG, "Failed to configure VPN interface", error)
-                        connectJob = null
-                        saveVpnState(false, "", "", "")
-                        emitVpnEvent(VpnStatusEvent.Error(error.message))
-                        stopSelf()
+                    if (setup.complete(error.message ?: "VPN interface configuration failed")) {
+                        Log.w(TAG, "Failed to configure VPN interface; Rust will retry", error)
                     }
                 }
             }
@@ -429,86 +448,29 @@ class VaultVpnService : VpnService() {
         } catch (_: Exception) {
         }
 
-        lastUnderlyingTransport = null
         emitVpnEvent(VpnStatusEvent.Disconnected)
     }
 
-    /**
-     * Register system network callback to detect WiFi/mobile data switches.
-     * When the default network changes, triggers Edge reconnect so the UDP socket
-     * binds to the new network interface and gets re-protected.
-     */
     private fun registerNetworkCallback() {
         try {
             val cm = getSystemService(ConnectivityManager::class.java) ?: return
             val callback = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    trace("NETWORK_AVAILABLE network=$network")
-                    Log.d(TAG, "Network available: $network")
-                    if (isVpnNetwork(network)) {
-                        Log.d(TAG, "Ignoring our own VPN network")
-                        return
-                    }
-                    notifyNetworkChanged("onAvailable network=$network")
-                }
+                override fun onLost(network: Network) = physicalNetworks.lost(network)
 
-                override fun onLost(network: Network) {
-                    trace("NETWORK_LOST network=$network")
-                    Log.d(TAG, "Network lost: $network")
-                    if (isVpnNetwork(network)) {
-                        Log.d(TAG, "Ignoring our own VPN network loss")
-                        return
-                    }
-                    lastUnderlyingTransport = null
-                    notifyNetworkChanged("onLost network=$network")
-                }
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) =
+                    physicalNetworks.capabilities(network, caps)
 
-                override fun onCapabilitiesChanged(
-                    network: Network,
-                    caps: NetworkCapabilities
-                ) {
-                    trace(
-                        "NETWORK_CAPABILITIES network=$network " +
-                            "vpn=${caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)} " +
-                            "wifi=${caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)} " +
-                            "cell=${caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)}"
-                    )
-                    // VPN capabilities also carry the underlying physical transport.
-                    // Keep tracking it so a cellular/Wi-Fi handoff triggers recovery.
-                    val transport = when {
-                        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ->
-                            NetworkCapabilities.TRANSPORT_WIFI
-                        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ->
-                            NetworkCapabilities.TRANSPORT_CELLULAR
-                        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ->
-                            NetworkCapabilities.TRANSPORT_ETHERNET
-                        else -> null
-                    }
-                    val previous = lastUnderlyingTransport
-                    // Remember loss as well: Wi-Fi -> no network -> the same
-                    // Wi-Fi must wake recovery, not look like an unchanged path.
-                    lastUnderlyingTransport = transport
-                    if (previous != null && previous != transport) {
-                        Log.i(
-                            TAG,
-                            "Underlying transport changed $previous -> $transport, scheduling reconnect"
-                        )
-                        notifyNetworkChanged("onCapabilitiesChanged network=$network transport=$previous->$transport")
-                    }
-                }
-
-                private fun isVpnNetwork(network: Network): Boolean {
-                    val caps = cm.getNetworkCapabilities(network)
-                    val vpn = caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
-                    trace("NETWORK_CLASSIFY network=$network capsPresent=${caps != null} vpn=$vpn")
-                    return vpn
-                }
+                override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) =
+                    physicalNetworks.link(network, properties)
             }
-            cm.registerDefaultNetworkCallback(callback)
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                .build()
+            cm.registerNetworkCallback(request, callback)
             networkCallback = callback
-            Log.d(TAG, "Network callback registered")
-        } catch (_: Exception) {
-            Log.e(TAG, "Failed to register network callback")
+        } catch (error: SecurityException) {
+            Log.e(TAG, "Failed to register physical network callback", error)
         }
     }
 
@@ -525,18 +487,17 @@ class VaultVpnService : VpnService() {
         }
     }
 
-    /** Report OS path changes even before the first TUN exists; Rust owns retries. */
-    private fun notifyNetworkChanged(source: String) {
-        trace("NETWORK_CHANGED source=$source")
+    /** Invalidate the active transport before requesting another connection attempt. */
+    private fun notifyNetworkChanged() {
         val currentEdge = edge ?: return
-        scope.launch {
-            try {
-                if (edge === currentEdge) currentEdge.reconnect()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: VpnException) {
-                Log.w(TAG, "Could not notify Rust of network change", error)
-            }
+        try {
+            currentEdge.reconnect()
+        } catch (error: VpnException) {
+            Log.w(TAG, "Could not notify Rust of network change", error)
+        }
+        if (serviceRunning.get()) {
+            val underlying = physicalNetworks.selected?.let { arrayOf(it.network) }
+            setUnderlyingNetworks(underlying ?: emptyArray())
         }
     }
 
@@ -558,36 +519,24 @@ class VaultVpnService : VpnService() {
         Log.d(TAG, "Saved VPN state: connected=$connected, ipv4=$ipv4, ipv6=$ipv6, publicIp=$publicIp")
     }
 
-    /** Probes the physical link; core derives the tunnel MTU and applies the user cap. */
-    private fun probeTunnelMtu(): Int {
-        underlyingLinkMtu = try {
-            val cm = getSystemService(ConnectivityManager::class.java)
-            val ifaceName = cm?.activeNetwork
-                ?.let { cm.getLinkProperties(it) }
-                ?.interfaceName
-            ifaceName?.let {
-                File("/sys/class/net/$it/mtu").readText().trim().toIntOrNull()
-            }
-        } catch (_: Exception) {
-            null
-        }
-        if (underlyingLinkMtu == null) {
-            Log.w(TAG, "Could not read underlying link MTU, using default MTU $VPN_MTU")
-        }
-        return TunnelPolicy.mtu(underlyingLinkMtu, cap = null).also { mtu ->
-            underlyingLinkMtu?.let { Log.d(TAG, "Underlying link MTU $it, tunnel MTU $mtu") }
-        }
+    private fun readLinkMtu(name: String?): Int? = try {
+        name?.let { File("/sys/class/net/$it/mtu").readText().trim().toIntOrNull() }
+    } catch (_: java.io.IOException) {
+        null
     }
 
     private fun createVpnInterface(
         assignment: TunnelAssignment,
-        addrs: List<String>
+        addrs: List<String>,
+        network: Network,
+        mtu: Int
     ): ParcelFileDescriptor {
         try {
             val addresses = TunnelAddresses.from(assignment)
             val resolvers = addresses.dns(dnsIpv4List, dnsIpv6List)
             val builder = Builder()
-                .setMtu(tunnelMtu)
+                .setMtu(mtu)
+                .setUnderlyingNetworks(arrayOf(network))
                 .setSession(getString(R.string.vpn_service_name))
                 .setConfigureIntent(
                     PendingIntent.getActivity(
@@ -607,7 +556,7 @@ class VaultVpnService : VpnService() {
             // Exclude server IP from VPN routing (API 33+ only)
             try {
                 for (candidate in addrs) {
-                    val address = InetAddress.getByName(candidate)
+                    val address = InetAddresses.parseNumericAddress(candidate)
                     val len = if (address.address.size == 4) 32 else 128
                     builder.excludeRoute(android.net.IpPrefix(address, len))
                     Log.d(TAG, "Excluded server IP from VPN: ${address.hostAddress}")

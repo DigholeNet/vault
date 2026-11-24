@@ -7,14 +7,14 @@ Notable changes to Vault are recorded here using the
 
 ### Added
 
-- Minimal statically linked musl binary archives for Linux edge and supernode on amd64 and arm64
-- RPM packages for Linux edge and supernode on amd64 and arm64, built with cargo-generate-rpm
-- Automatic Linux DNS through NetworkManager-managed resolv.conf, with current-state regeneration on network changes and exit
-- Server-observed client public/egress IP in compatible handshake responses, with status display on Android, iOS and macOS and handshake-success logging on Linux
+- Encrypted P2P connections on Linux, Android, iOS and macOS with automatic peer discovery and Supernode relay fallback.
+- Static Linux binaries and RPM packages for Edge and Supernode on amd64 and arm64.
+- Automatic Linux VPN DNS on systems where NetworkManager manages `resolv.conf`.
+- Server-observed public IP in the Android, iOS and macOS status screens and in Linux connection logs.
 
 ### Fixed
 
-- Repeated ICMP Redirect messages during IPv4 client-to-client relay
+- Prevented repeated ICMP Redirect messages during IPv4 client-to-client relay.
 
 ## [0.1.0] - 2026-11-10
 

@@ -95,23 +95,29 @@ public struct TunnelConfiguration: Equatable, Sendable {
     public let prefix: Int32
     public let mtu: Int
     public let dns: [String]
+    public let serverCandidates: [String]
 
-    public init(ipv4: String, mask: String, ipv6: String, prefix: Int32, mtu: Int, dns: [String] = []) {
+    public init(
+        ipv4: String, mask: String, ipv6: String, prefix: Int32,
+        mtu: Int, dns: [String] = [], serverCandidates: [String] = []
+    ) {
         self.ipv4 = ipv4
         self.mask = mask
         self.ipv6 = ipv6
         self.prefix = prefix
         self.mtu = mtu
         self.dns = dns
+        self.serverCandidates = serverCandidates
     }
 
-    public init(assignment: TunnelAssignment, mtu: Int, dns: [String]) {
+    public init(assignment: TunnelAssignment, mtu: Int, dns: [String], serverCandidates: [String] = []) {
         ipv4 = assignment.ipv4?.address ?? ""
         mask = assignment.ipv4?.netmask ?? ""
         ipv6 = assignment.ipv6?.address ?? ""
         prefix = Int32(assignment.ipv6?.prefixLen ?? 0)
         self.mtu = mtu
         self.dns = dns
+        self.serverCandidates = serverCandidates
     }
 
     public var addresses: String { ipv6.isEmpty ? ipv4 : "\(ipv4)/\(ipv6)" }
@@ -119,7 +125,7 @@ public struct TunnelConfiguration: Equatable, Sendable {
     /// Addresses, routes and DNS that must be applied for tunnel readiness.
     public func hasSameNetwork(as other: TunnelConfiguration) -> Bool {
         ipv4 == other.ipv4 && mask == other.mask && ipv6 == other.ipv6
-            && prefix == other.prefix && dns == other.dns
+            && prefix == other.prefix && dns == other.dns && serverCandidates == other.serverCandidates
     }
 }
 

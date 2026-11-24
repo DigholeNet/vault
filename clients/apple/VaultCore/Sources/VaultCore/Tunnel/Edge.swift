@@ -36,13 +36,19 @@ public final class Edge: @unchecked Sendable {
     final class Callbacks: EdgeCallbacks, @unchecked Sendable {
         let onPackets: ([Data]) -> Void
         let onIpAssigned: (TunnelAssignment, RustTunnelSetup) -> Void
+        let transportResolver: (() -> MobileTransport?)?
+        let transportAssigned: ((TunnelAssignment, MobileRoutes, RustTunnelSetup) -> Void)?
 
         init(
             onPackets: @escaping ([Data]) -> Void,
-            onIpAssigned: @escaping (TunnelAssignment, RustTunnelSetup) -> Void
+            onIpAssigned: @escaping (TunnelAssignment, RustTunnelSetup) -> Void,
+            transportResolver: (() -> MobileTransport?)? = nil,
+            transportAssigned: ((TunnelAssignment, MobileRoutes, RustTunnelSetup) -> Void)? = nil
         ) {
             self.onPackets = onPackets
             self.onIpAssigned = onIpAssigned
+            self.transportResolver = transportResolver
+            self.transportAssigned = transportAssigned
         }
 
         func onDataBatch(packets: [Data]) {
@@ -60,13 +66,26 @@ public final class Edge: @unchecked Sendable {
             }
         }
 
+        func resolveTransport() -> MobileTransport? {
+            autoreleasepool { self.transportResolver?() }
+        }
+
+        func onTransportAssigned(assignment: TunnelAssignment, routes: MobileRoutes, setup: RustTunnelSetup) {
+            autoreleasepool {
+                if let transportAssigned {
+                    transportAssigned(assignment, routes, setup)
+                } else {
+                    onIpAssigned(assignment, setup)
+                }
+            }
+        }
+
         func onError(error: String) {
             Logger.network.errorAndFile("vault-core client error: \(error)")
         }
 
         func protectSocket(fd: Int32) -> Bool {
-            // Not needed on Apple platforms: traffic from the Network
-            // Extension process bypasses the tunnel by default.
+            // Managed transports bind to the physical interface in Rust.
             true
         }
     }
@@ -83,9 +102,14 @@ public final class Edge: @unchecked Sendable {
         deviceName: String,
         platform: String,
         onPackets: @escaping (([Data]) -> Void),
-        onIpAssigned: @escaping (TunnelAssignment, RustTunnelSetup) -> Void
+        onIpAssigned: @escaping (TunnelAssignment, RustTunnelSetup) -> Void,
+        resolveTransport: (() -> MobileTransport?)? = nil,
+        onTransportAssigned: ((TunnelAssignment, MobileRoutes, RustTunnelSetup) -> Void)? = nil
     ) throws {
-        let callbacks = Callbacks(onPackets: onPackets, onIpAssigned: onIpAssigned)
+        let callbacks = Callbacks(
+            onPackets: onPackets, onIpAssigned: onIpAssigned,
+            transportResolver: resolveTransport, transportAssigned: onTransportAssigned
+        )
         self.callbacks = callbacks
         // The Rust core races every candidate Happy-Eyeballs style (300 ms
         // stagger, first completed handshake wins).
@@ -100,6 +124,7 @@ public final class Edge: @unchecked Sendable {
         )
         // Starts the connection loop (handshake, heartbeat, reconnect) in
         // the background; IP assignment arrives via onIpAssigned.
+        if resolveTransport != nil { self.rustEdge.enableManagedTransport() }
         try self.rustEdge.connect()
         Logger.network.noticeAndFile("Edge (vault-core) connecting to \(hosts)")
     }
@@ -120,6 +145,10 @@ public final class Edge: @unchecked Sendable {
     /// Rebuild the UDP connection without replacing the tunnel or statistics.
     public func reconnect() throws {
         try rustEdge.reconnect()
+    }
+
+    public func setPeerMTU(_ mtu: Int) {
+        rustEdge.setPeerMtu(mtu: UInt32(clamping: mtu))
     }
 
     /// Shuts down the session. Safe to call multiple times.

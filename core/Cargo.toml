@@ -17,6 +17,7 @@ test = []
 
 [dependencies]
 anyhow.workspace = true
+curve25519-dalek = "4.1"
 hex.workspace = true
 libc = {version = "0.2"}
 prost = {version = "0.13"}

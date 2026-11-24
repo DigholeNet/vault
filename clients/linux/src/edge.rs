@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: MIT
 use crate::config::EdgeConfig;
 use crate::storage::SimpleFileStorage;
+use anyhow::Context;
+use std::io;
 use std::net::SocketAddr;
+use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc::Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tracing::{debug, info, warn};
-use vault_core::client::{ClientCallbacks, ClientConfig, ClientSession, TrafficStats, TunnelSetup};
+use vault_core::client::{
+    ClientCallbacks, ClientConfig, ClientSession, PeerSocketSetup, TrafficStats, TunnelSetup,
+};
 use vault_core::device::TunTapDevice;
 use vault_core::settings::TunnelAssignment;
 use vault_core::{Buffer, PeerId};
@@ -31,6 +36,7 @@ impl Edge {
         device: Arc<TunTapDevice>,
         hosts: &[SocketAddr],
         assignments: Sender<Assignment>,
+        peer_socket_setup: PeerSocketSetup,
     ) -> anyhow::Result<Self> {
         // Load or generate the persistent device id. A corrupt storage file
         // is a hard error: silently regenerating the id would lose the IP
@@ -63,6 +69,8 @@ impl Edge {
             id,
             device_name,
             platform: "linux".to_string(),
+            managed_transport: false,
+            peer_socket_setup: Some(peer_socket_setup),
             socket_protect: None,
         };
 
@@ -71,11 +79,13 @@ impl Edge {
             assignments,
         });
 
+        device
+            .set_nonblocking()
+            .context("set nonblocking TUN I/O")?;
         let session = Arc::new(ClientSession::start(client_config, callbacks)?);
 
-        // Uplink pump: TUN -> session. The read blocks in the kernel until a
-        // packet arrives, so there is no busy loop. Packets read while the
-        // session is reconnecting are dropped (UDP semantics).
+        // Wait for readability in the reader thread. The shared TUN must be
+        // nonblocking so downlink backpressure cannot stall transport pause.
         let stop = Arc::new(AtomicBool::new(false));
         let reader = {
             let device = device.clone();
@@ -85,7 +95,29 @@ impl Edge {
                 .name("tun-reader".to_string())
                 .spawn(move || {
                     let mut buffer = Buffer::new(0);
+                    let mut tun = libc::pollfd {
+                        fd: device.as_raw_fd(),
+                        events: libc::POLLIN,
+                        revents: 0,
+                    };
                     while !stop.load(Ordering::Relaxed) {
+                        // SAFETY: tun is one live pollfd, and its fd is owned by device.
+                        let ready = unsafe { libc::poll(&mut tun, 1, 500) };
+                        if ready < 0 {
+                            let error = io::Error::last_os_error();
+                            if error.kind() == io::ErrorKind::Interrupted {
+                                continue;
+                            }
+                            warn!("Could not wait for TUN readability: {error}");
+                            break;
+                        }
+                        if ready == 0 || stop.load(Ordering::Relaxed) {
+                            continue;
+                        }
+                        if tun.revents & libc::POLLIN == 0 {
+                            warn!(events = tun.revents, "TUN is no longer readable");
+                            break;
+                        }
                         match device.read(&mut buffer) {
                             Ok(len) if len > 0 => {
                                 if let Err(e) = session.write_packet(buffer.as_ref().to_vec()) {
@@ -93,6 +125,13 @@ impl Edge {
                                 }
                             }
                             Ok(_) => {}
+                            Err(e)
+                                if e.downcast_ref::<io::Error>().is_some_and(|e| {
+                                    matches!(
+                                        e.kind(),
+                                        io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                                    )
+                                }) => {}
                             Err(e) => {
                                 debug!("TUN read failed: {}", e);
                                 std::thread::sleep(Duration::from_millis(10));
@@ -121,19 +160,24 @@ impl Edge {
         self.session.is_active()
     }
 
-    pub fn reconnect(&self) -> anyhow::Result<()> {
-        self.session.reconnect()?;
+    pub fn pause_transport(&self) -> anyhow::Result<()> {
+        self.session.pause_transport()?;
+        Ok(())
+    }
+
+    pub fn resume_transport(&self) -> anyhow::Result<()> {
+        self.session.resume_transport()?;
         Ok(())
     }
 
     pub fn shutdown(&mut self) {
         info!("Shutting down session...");
         self.stop.store(true, Ordering::Relaxed);
-        // The reader thread may be parked in a blocking read(); detach it —
-        // process exit reaps it.
-        let _ = self.reader.take();
         if let Err(e) = self.session.shutdown() {
             warn!("Session shutdown failed: {}", e);
+        }
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
         }
     }
 }
@@ -154,10 +198,7 @@ impl ClientCallbacks for EdgeCallbacks {
     fn on_packets(&self, packets: Vec<Vec<u8>>) {
         for packet in packets {
             if let Err(e) = self.device.write(&packet) {
-                // The edge TUN fd is blocking, so a full queue blocks here
-                // instead of erroring; if write still fails, drop the packet
-                // (UDP semantics).
-                debug!("Failed to write packet to TUN: {}", e);
+                debug!("Downlink packet dropped: {e}");
             }
         }
     }

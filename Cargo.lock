@@ -325,6 +325,7 @@ dependencies = [
  "rand_core",
  "rustc_version",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -387,6 +388,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "dashmap",
+ "libc",
  "pnet",
  "serde",
  "serde_json",
@@ -1866,6 +1868,7 @@ dependencies = [
  "anyhow",
  "caps",
  "clap",
+ "curve25519-dalek",
  "daemonize",
  "dashmap",
  "hex",

@@ -43,6 +43,19 @@ impl EdgeCallbacks for TestCallbacks {
         ));
     }
 
+    fn resolve_transport(&self) -> Option<vault_bridge::MobileTransport> {
+        None
+    }
+
+    fn on_transport_assigned(
+        &self,
+        assignment: vault_bridge::settings::TunnelAssignment,
+        _: vault_bridge::MobileRoutes,
+        setup: Arc<RustTunnelSetup>,
+    ) {
+        self.on_ip_assigned(assignment, setup);
+    }
+
     fn on_error(&self, error: String) {
         let _ = self.events.send(Event::Error(error));
     }

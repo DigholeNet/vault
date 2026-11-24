@@ -10,11 +10,23 @@ edge - Vault VPN linux client
 *edge* -s quit
 
 == Description
-edge is a Linux VPN client compatible with the Vault VPN protocol.
+edge is a Linux VPN client compatible with Vault protocol v2. Use a v2 Supernode.
 It connects to a supernode server over an encrypted UDP tunnel (SPAKE2 password
 authentication, X25519 ECDH key exchange, HKDF-SHA256 and AEAD encryption), takes over the system default route via a TUN
 device and keeps the connection alive with periodic heartbeats and automatic
 reconnect with exponential backoff.
+
+== Peer-to-peer traffic
+Eligible VPN peers use encrypted direct UDP after verifying a path. Traffic
+uses the Supernode while probing and when a direct path fails. Internet traffic
+uses the Supernode.
+
+Edge automatically uses eligible public and LAN candidates. Supernode
+forwarding policy and relay counters apply to traffic handled by the server.
+
+IPv4 direct routing needs an effective physical-interface *rp_filter* of
+0 or 2. The effective value is the larger of the host-wide *all* setting and
+the physical-interface setting. Edge uses relay if the value is 1 or unavailable.
 
 == Options
 *--config* <FILE>::

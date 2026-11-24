@@ -25,10 +25,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var probeDomains: [String] = []
     /// Cancels the Rust transport executing the current provider-side probe.
     let diagnostics = ProviderDiagnostics()
-    private var edge: Edge!
+    var edge: Edge!
     private var pendingStart: PendingStart?
     private var startTimeoutWorkItem: DispatchWorkItem?
-    private var settingsTimeoutWorkItem: DispatchWorkItem?
+    var settingsTimeoutWorkItem: DispatchWorkItem?
     /// Polls Rust counters and publishes an in-memory status snapshot over IPC.
     private var statsTimer: DispatchSourceTimer?
     private var statsSession = PacketStats.Session()
@@ -39,23 +39,32 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// or suspended without warning.
     private var aliveTimer: DispatchSourceTimer?
     private let sessionStart = Date()
-    private var stopRequested = false
-    private var sessionToken = UUID()
+    var stopRequested = false
+    var sessionToken = UUID()
     /// Whether platform tunnel startup completed.
     private var startFinished = false
     private var startupBeganAt: TimeInterval?
     /// Diagnostic: counts startTunnel invocations per extension process.
     private static var startTunnelCallCount = 0
-    private var superNodeIp: String = ""
+    private var superNodeIp: String { serverCandidates.first ?? "" }
     /// Tunnel MTU ceiling from the "mtu" provider configuration
     /// (Configure page); default is the built-in upper bound.
     private var mtuCap: Int = TunnelConstants.mtuUpperBound
-    private var serverCandidates: [String] = []
-    private var tunnelSettings = TunnelSettingsState()
-    private var pendingSetup: (configuration: TunnelConfiguration, setup: RustTunnelSetup)?
+    private var serverCandidates: [String] { tunnelSettings.applied?.serverCandidates ?? [] }
+    var tunnelSettings = TunnelSettingsState()
+    private struct PendingAssignment {
+        let configuration: TunnelConfiguration
+        let generation: UInt64
+        let setup: RustTunnelSetup
+    }
+
+    private var pendingSetup: PendingAssignment?
+    let physicalPath = PhysicalPath()
+    var routePreparation: RoutePreparation?
+    var applyingPreparation: (revision: UInt64, request: RoutePreparation)?
+    var clearingRouteSettings = false
     private var assignedIp: String { tunnelSettings.applied?.addresses ?? "" }
-    private var pathMonitor: NWPathMonitor?
-    private var lastNetworkPath: String?
+    var pathMonitor: NWPathMonitor?
     /// A unique identifier for this provider instance so repeated Console.app
     /// lines can be matched to the same session.
     private let sessionID = String(UUID().uuidString.prefix(8))
@@ -174,7 +183,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             deadline: .now() + TunnelConstants.startTimeout,
             execute: timeoutWorkItem
         )
-        resolveAndStartEdge(launch, pending: pending)
+        startNetworkMonitoring()
+        startEdge(launch)
     }
 
     private func readLaunchConfiguration() -> TunnelLaunchConfiguration? {
@@ -194,44 +204,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             Logger.network.errorAndFile("Invalid tunnel launch configuration: \(error)")
             finishStart(with: error)
             return nil
-        }
-    }
-
-    private func resolveAndStartEdge(_ launch: TunnelLaunchConfiguration, pending: PendingStart) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else {
-                DispatchQueue.main.async {
-                    if let completion = pending.takeCompletion() {
-                        completion(EdgeError.connectionFailed)
-                    }
-                }
-                return
-            }
-            let resolveStarted = ProcessInfo.processInfo.systemUptime
-            Logger.network.noticeAndFile("[session:\(self.sessionID)] Resolving supernode hostname")
-            let candidates = self.resolveAllAddresses(launch.host, port: launch.port)
-            let resolveMs = Int(((ProcessInfo.processInfo.systemUptime - resolveStarted) * 1000).rounded())
-            Logger.network.noticeAndFile(
-                "[session:\(self.sessionID)] Hostname resolution completed "
-                    + "durationMs=\(resolveMs) candidates=\(candidates.count)"
-            )
-            DispatchQueue.main.async {
-                guard !self.stopRequested, self.pendingStart === pending, pending.isPending else { return }
-                guard !candidates.isEmpty else {
-                    Logger.network.error("Failed to resolve hostname: \(launch.host)")
-                    self.startFailed(reason: "hostname resolution failed")
-                    return
-                }
-                self.serverCandidates = candidates
-                self.superNodeIp = candidates.first ?? launch.host
-                self.startEdge(
-                    candidates: candidates,
-                    host: launch.host,
-                    port: launch.port,
-                    password: launch.password,
-                    id: launch.peerID
-                )
-            }
         }
     }
 
@@ -286,17 +258,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// races the candidates Happy-Eyeballs style (300 ms stagger, first
     /// completed handshake wins) and retries failures within the platform
     /// startup deadline.
-    private func startEdge(
-        candidates: [String],
-        host: String,
-        port: UInt16,
-        password: String,
-        id: Data
-    ) {
+    private func startEdge(_ launch: TunnelLaunchConfiguration) {
         diagnostics.cancel()
-        Logger.network.noticeAndFile(
-            "[session:\(self.sessionID)] Trying supernode addresses \(candidates)"
-        )
 
         // Reported in the handshake so the supernode can log which
         // device and OS a peer is running.
@@ -314,27 +277,34 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let writeMetrics = tunWriteMetrics
         do {
             let config = EdgeConfig(
-                password: password,
-                host: host,
-                port: port
+                password: launch.password,
+                host: launch.host,
+                port: launch.port
             )
             let edgeStarted = ProcessInfo.processInfo.systemUptime
             let edge = try Edge(
                 config: config,
-                id: id,
-                hosts: candidates,
+                id: launch.peerID,
+                hosts: [launch.host],
                 deviceName: deviceName,
                 platform: platform,
                 onPackets: { [weak self] packets in
                     self?.writePacketsToTunnel(packets, metrics: writeMetrics)
                 },
-                onIpAssigned: { [weak self] assignment, setup in
+                onIpAssigned: { _, setup in
+                    _ = setup.complete(error: "Missing physical network route configuration")
+                },
+                resolveTransport: { [weak self] in
+                    self?.resolveTransport(host: launch.host, port: launch.port)
+                },
+                onTransportAssigned: { [weak self] assignment, routes, setup in
                     DispatchQueue.main.async {
-                        guard let self, !self.stopRequested, self.sessionToken == token else {
-                            _ = setup.complete(error: "Tunnel session ended")
+                        guard let self, !self.stopRequested, self.sessionToken == token,
+                              self.physicalPath.snapshot.generation == routes.generation else {
+                            _ = setup.complete(error: "Physical network changed")
                             return
                         }
-                        self.applyAssignedIp(assignment, setup: setup)
+                        self.applyAssignedIp(assignment, routes: routes, setup: setup)
                     }
                 }
             )
@@ -374,7 +344,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             releaseStart()
             startFinished = true
             Self.activeProvider = self
-            startNetworkMonitoring()
             let now = ProcessInfo.processInfo.systemUptime
             let startupMs = Int(((now - (startupBeganAt ?? now)) * 1000).rounded())
             Logger.network.noticeAndFile("[session:\(sessionID)] startTunnel completed durationMs=\(startupMs)")
@@ -418,7 +387,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         diagnostics.cancel()
         pathMonitor?.cancel()
         pathMonitor = nil
-        lastNetworkPath = nil
+        physicalPath.update(index: 0, signature: "", force: true)
+        routePreparation?.finish(false)
+        routePreparation = nil
         reasserting = false
         aliveTimer?.cancel()
         aliveTimer = nil
@@ -466,61 +437,35 @@ extension PacketTunnelProvider {
             level: "NOTICE"
         )
         DispatchQueue.main.async { [weak self] in
-            guard let self = self, self.edge != nil else { return }
-            if let path = self.pathMonitor?.currentPath { self.refreshMTU(path) }
-            self.notifyNetworkChanged(reason: "wake")
+            guard let self, !self.stopRequested else { return }
+            self.updatePhysicalPath(self.pathMonitor?.currentPath, force: true)
         }
     }
 
-    /// Keep path events on the main queue, alongside
-    /// tunnel configuration completion. Ignore utun changes caused by us.
-    private func startNetworkMonitoring() {
-        guard pathMonitor == nil else { return }
-        let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] path in
-            guard let self = self, !self.stopRequested else { return }
-            let available = path.status == .satisfied
-            let interfaces = path.availableInterfaces.filter {
-                path.usesInterfaceType($0.type) && !$0.name.hasPrefix("utun")
-            }.map { "\($0.name):\($0.index)" }.sorted().joined(separator: ",")
-            let signature = "\(available)|\(interfaces)|v4=\(path.supportsIPv4)|v6=\(path.supportsIPv6)|\(path.gateways)"
-            let previous = self.lastNetworkPath
-            self.lastNetworkPath = signature
-            guard available else {
-                self.notifyNetworkChanged(reason: "network unavailable")
-                return
-            }
-            self.refreshMTU(path)
-            // The first callback establishes the baseline; it is not a switch.
-            if previous != nil && previous != signature {
-                self.notifyNetworkChanged(reason: "network path changed")
-            }
+    func refreshMTU(_ path: Network.NWPath) {
+        guard !stopRequested, startFinished, !clearingRouteSettings, path.status == .satisfied,
+              let mtu = TunnelNetworkSettings.mtu(cap: mtuCap, sessionID: sessionID, path: path) else { return }
+        if let current = tunnelSettings.applied?.mtu, mtu > current {
+            edge?.setPeerMTU(mtu)
         }
-        pathMonitor = monitor
-        monitor.start(queue: .main)
+        if let update = tunnelSettings.updateMTU(mtu) {
+            diagnostics.cancel()
+            applySettings(update)
+        }
     }
 
-    private func refreshMTU(_ path: Network.NWPath) {
-        guard !stopRequested, startFinished, path.status == .satisfied,
-              let mtu = TunnelNetworkSettings.mtu(cap: mtuCap, sessionID: sessionID, path: path),
-              let update = tunnelSettings.updateMTU(mtu) else { return }
-        diagnostics.cancel()
-        applySettings(update)
-    }
-
-    /// Forward OS events; Rust debounces notifications and restarts transport.
-    private func notifyNetworkChanged(reason: String) {
-        guard !stopRequested, startFinished, let edge = edge else { return }
+    func notifyNetworkChanged() {
+        routePreparation?.finish(false)
+        routePreparation = nil
         diagnostics.cancel()
         do {
-            Logger.network.noticeAndFile("[session:\(sessionID)] Network changed: \(reason)")
-            try edge.reconnect()
+            try edge?.reconnect()
         } catch {
             Logger.network.errorAndFile("Network change notification failed: \(error)")
         }
     }
 
-    private func applyAssignedIp(_ assignment: TunnelAssignment, setup: RustTunnelSetup) {
+    private func applyAssignedIp(_ assignment: TunnelAssignment, routes: MobileRoutes, setup: RustTunnelSetup) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard setup.isPending() else { return }
         diagnostics.cancel()
@@ -546,9 +491,10 @@ extension PacketTunnelProvider {
                 sessionID: sessionID,
                 path: pathMonitor?.currentPath
             ) ?? tunnelSettings.latestMTU ?? mtuCap,
-            dns: dns
+            dns: dns,
+            serverCandidates: routes.addresses
         )
-        pendingSetup = (configuration, setup)
+        pendingSetup = PendingAssignment(configuration: configuration, generation: routes.generation, setup: setup)
         let update = tunnelSettings.enqueue(configuration)
         confirmSetup(applied: tunnelSettings.readyNetwork)
         if let update { applySettings(update) }
@@ -556,20 +502,22 @@ extension PacketTunnelProvider {
 
     private func confirmSetup(applied: TunnelConfiguration?) {
         guard let pending = pendingSetup, let applied,
+              pending.generation == physicalPath.snapshot.generation,
               pending.configuration.hasSameNetwork(as: applied) else { return }
         pendingSetup = nil
+        edge?.setPeerMTU(applied.mtu)
         guard pending.setup.complete(error: nil), pendingStart?.isPending == true else { return }
         finishStart(with: nil)
         startStatsPolling()
         readPacketFromTunnel()
     }
 
-    private func applySettings(_ update: TunnelSettingsState.Update) {
+    func applySettings(_ update: TunnelSettingsState.Update) {
         let configuration = update.configuration
         let settings = TunnelNetworkSettings.make(
             configuration,
-            remoteAddress: superNodeIp,
-            candidates: serverCandidates,
+            remoteAddress: configuration.serverCandidates.first ?? "",
+            candidates: configuration.serverCandidates,
             dns: configuration.dns
         )
         Logger.network.noticeAndFile("[session:\(sessionID)] Applying tunnel settings revision=\(update.revision)")
@@ -589,17 +537,21 @@ extension PacketTunnelProvider {
         DispatchWorkItem { [weak self] in
             guard let self, !self.stopRequested, self.sessionToken == token,
                   self.tunnelSettings.outstanding == update else { return }
-            _ = self.pendingSetup?.setup.complete(error: "Network settings timed out")
-            Logger.network.errorAndFile("[session:\(self.sessionID)] OS settings request timed out; recycling provider process")
-            Self.settingsRestartRequired = true
-            let error = NEVPNError(.connectionFailed)
-            if self.pendingStart?.isPending == true {
-                self.finishStart(with: error)
-            } else {
-                self.cancelTunnelWithError(error)
-                self.cleanupSession()
-                self.exitIfUnowned()
-            }
+            self.recycleAfterSettingsTimeout()
+        }
+    }
+
+    func recycleAfterSettingsTimeout() {
+        _ = pendingSetup?.setup.complete(error: "Network settings timed out")
+        Logger.network.errorAndFile("[session:\(sessionID)] OS settings request timed out; recycling provider process")
+        Self.settingsRestartRequired = true
+        let error = NEVPNError(.connectionFailed)
+        if pendingStart?.isPending == true {
+            finishStart(with: error)
+        } else {
+            cancelTunnelWithError(error)
+            cleanupSession()
+            exitIfUnowned()
         }
     }
 
@@ -616,32 +568,38 @@ extension PacketTunnelProvider {
             if let next = tunnelSettings.next() { applySettings(next) }
             return
         }
+        if completeRoutePreparation(update, error: error) { return }
         if let error {
-            if let pending = pendingSetup {
-                if let next = tunnelSettings.next() {
-                    applySettings(next)
-                    return
-                }
-                if !pending.configuration.hasSameNetwork(as: update.configuration) {
-                    confirmSetup(applied: tunnelSettings.applied)
-                    return
-                }
-                pendingSetup = nil
-                guard pending.setup.complete(error: error.localizedDescription) else { return }
-            }
-            Logger.network.errorAndFile("Failed to set network settings: \(error)")
-            if pendingStart?.isPending == true {
-                finishStart(with: error)
-            } else {
-                cancelTunnelWithError(error)
-            }
+            handleSettingsFailure(error, update: update)
             return
         }
         Logger.network.noticeAndFile(
             "[session:\(sessionID)] Tunnel settings applied revision=\(update.revision) mtu=\(update.configuration.mtu)"
         )
+        edge?.setPeerMTU(update.configuration.mtu)
         confirmSetup(applied: update.configuration)
+        advanceRoutePreparation()
         if let next = tunnelSettings.next() { applySettings(next) }
+    }
+
+    private func handleSettingsFailure(_ error: Error, update: TunnelSettingsState.Update) {
+        Logger.network.errorAndFile("Failed to set network settings: \(error)")
+        defer { advanceRoutePreparation() }
+        // Rust retries setup failures. A failed MTU update keeps the last
+        // applied size until another settings request succeeds.
+        edge?.setPeerMTU(tunnelSettings.applied?.mtu ?? 0)
+        if let pending = pendingSetup {
+            if let next = tunnelSettings.next() {
+                applySettings(next)
+                return
+            }
+            if !pending.configuration.hasSameNetwork(as: update.configuration) {
+                confirmSetup(applied: tunnelSettings.applied)
+                return
+            }
+            pendingSetup = nil
+            _ = pending.setup.complete(error: error.localizedDescription)
+        }
     }
 
     func diagnosticContext() -> AppleDiagnosticContext? {
@@ -710,6 +668,7 @@ extension PacketTunnelProvider {
         timer.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1))
         timer.setEventHandler { [weak self] in
             guard let self = self, let edge = self.edge else { return }
+            self.updatePhysicalPath(self.pathMonitor?.currentPath, refreshMTUOnUnchangedPath: false)
             self.reasserting = self.tunnelSettings.isApplying || !edge.isConnected
             self.statsSession.update(PacketStats.Stats(edge.getTrafficStats()))
             self.reportTunWriteMetrics()

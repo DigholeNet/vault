@@ -92,6 +92,7 @@ impl DataLoop {
         let (delivered_tx, delivered) = mpsc::unbounded_channel();
         let inner = Arc::new(ClientInner {
             uplink: Arc::new(UplinkCounters::default()),
+            resolving_transport: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config: ClientConfig {
                 password: String::new(),
                 hosts: vec!["127.0.0.1".into()],
@@ -99,6 +100,8 @@ impl DataLoop {
                 id: PeerId([3; 16]),
                 device_name: String::new(),
                 platform: String::new(),
+                managed_transport: false,
+                peer_socket_setup: None,
                 socket_protect: None,
             },
             callbacks: Arc::new(DeliveryCallbacks {
@@ -120,7 +123,7 @@ impl DataLoop {
                 // entered. Tokio task.abort drops outside WithSubscriber's
                 // poll scope; production uses a global subscriber instead.
                 tokio::select! {
-                    _ = running.run_data_loop(socket, receiver_crypto, server_address, 17) => {}
+                    _ = running.run_data_loop(socket, receiver_crypto, server_address, 17, None) => {}
                     _ = stop_rx => {}
                 }
             }
@@ -174,7 +177,7 @@ impl DataLoop {
     async fn stop(mut self) -> Vec<Fields> {
         self.stop.take().unwrap().send(()).unwrap();
         let _ = (&mut self.task).await;
-        self.inner.clear_connection();
+        self.inner.clear_connection().await;
         self.events.snapshots()
     }
 }
@@ -182,7 +185,10 @@ impl DataLoop {
 impl Drop for DataLoop {
     fn drop(&mut self) {
         self.task.abort();
-        self.inner.clear_connection();
+        let inner = self.inner.clone();
+        self.inner
+            .runtime
+            .spawn(async move { inner.clear_connection().await });
     }
 }
 
@@ -313,6 +319,22 @@ async fn final_report() {
 }
 
 #[tokio::test]
+async fn center_queue_reserve() {
+    let (sender, mut receiver) = mpsc::channel(DOWNLINK_CENTER_RESERVE + 1);
+    let metrics = ReceiveMetrics::new(&sender);
+    assert!(try_enqueue_peer(&sender, &metrics, || 1));
+    assert!(try_enqueue_peer(&sender, &metrics, || panic!(
+        "peer queue full"
+    )));
+    assert_eq!(sender.capacity(), DOWNLINK_CENTER_RESERVE);
+    assert!(enqueue_downlink(&sender, &metrics, 2).await);
+    assert_eq!(receiver.recv().await, Some(1));
+    assert_eq!(receiver.recv().await, Some(2));
+    drop(receiver);
+    assert!(!try_enqueue_peer(&sender, &metrics, || 3));
+}
+
+#[tokio::test]
 async fn queue_backpressure() {
     use std::future::{Future, poll_fn};
     use std::task::Poll;
@@ -423,4 +445,115 @@ async fn mixed_delivery() {
             .iter()
             .all(|report| number(report, "batch_packets_max") <= DATA_BATCH_CAPACITY as f64)
     );
+}
+
+#[tokio::test]
+async fn mixed_path_batch() {
+    use crate::protocol::{
+        FindPeerRequest, PeerInfo, find_peer_message::Data, find_peer_request::Target,
+    };
+
+    let local = PeerKeyPair::generate().unwrap();
+    let local_public = local.public;
+    let local_id = PeerId([3; 16]);
+    let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = socket.local_addr().unwrap();
+    let mut discovery = Discovery::new(
+        crate::settings::TunnelAssignment::new("10.0.0.2", "255.255.255.0", "", 0).unwrap(),
+        local_id,
+        1,
+        local,
+        "192.0.2.1:9527".parse().unwrap(),
+    );
+    discovery.enable_direct(PeerSocket {
+        mtu: Arc::new(AtomicUsize::new(1427)),
+        lan_endpoint: None,
+        allow_lan: Arc::new(|_| false),
+        gateway: None,
+    });
+    discovery.confirm();
+    let peer = PeerId([4; 16]);
+    let key = PeerKeyPair::generate().unwrap();
+    let introduce = |discovery: &mut Discovery, revision: u64, pair: [u8; 16]| {
+        let info = PeerInfo {
+            pair_id: pair.to_vec(),
+            revision,
+            local_session_epoch: 1,
+            peer_session_epoch: 2,
+            peer_id: peer.0.to_vec(),
+            peer_public_key: key.public.to_vec(),
+            peer_vpn_ips: vec!["10.0.0.3".parse::<std::net::IpAddr>().unwrap().into()],
+            observed_endpoint: Some(endpoint.into()),
+            valid_for_ms: 60_000,
+            ..Default::default()
+        };
+        assert!(
+            discovery
+                .receive(
+                    Data::Request(FindPeerRequest {
+                        request_id: revision,
+                        target: Some(Target::Peer(info)),
+                        ..Default::default()
+                    }),
+                    Instant::now()
+                )
+                .unwrap()
+                .is_some()
+        );
+        let crypto = key
+            .derive(pair, (peer, 2), (local_id, 1, local_public))
+            .unwrap();
+        let mut buffer = Buffer::new(EXTRA_LEN + protocol::REGISTER_HEADER);
+        protocol::build_peer_register(
+            &mut buffer,
+            &crypto,
+            &protocol::register_header(peer, local_id),
+            protocol::peer_register_message::Data::Request(protocol::PeerRegisterRequest {
+                cookie: 1,
+            }),
+            protocol::REGISTER_MIN,
+        )
+        .unwrap();
+        let mut packet = buffer.as_ref().to_vec();
+        discovery.receive_direct(&socket, &mut buffer, endpoint, &mut packet, Instant::now());
+    };
+    introduce(&mut discovery, 1, [1; 16]);
+    let discovery = Arc::new(Mutex::new(discovery));
+    let mut state = ClientState::new();
+    state.discovery = Some(discovery.clone());
+    let packets = vec![vec![1], vec![2, 2], vec![3]];
+    let direct = [
+        None,
+        Some(DirectAuthorization {
+            peer,
+            pair: [1; 16],
+            endpoint,
+        }),
+        None,
+    ];
+    let mut batch = packets.clone();
+    state.commit_downlink(&mut batch, &direct, Some(&discovery));
+    assert_eq!(batch, packets);
+    assert_eq!(state.direct_bytes_received.load(Ordering::Relaxed), 2);
+
+    introduce(&mut discovery.lock().unwrap(), 2, [2; 16]);
+    state.commit_downlink(&mut batch, &direct, Some(&discovery));
+    assert_eq!(batch, [vec![1], vec![3]]);
+
+    let current = [
+        None,
+        Some(DirectAuthorization {
+            peer,
+            pair: [2; 16],
+            endpoint,
+        }),
+        None,
+    ];
+    state.network_changed();
+    let mut batch = packets;
+    state.commit_downlink(&mut batch, &current, Some(&discovery));
+    assert_eq!(batch, [vec![1], vec![3]]);
+    assert_eq!(state.direct_bytes_received.load(Ordering::Relaxed), 2);
+    assert_eq!(state.bytes_received.load(Ordering::Relaxed), 8);
+    assert_eq!(state.packets_received.load(Ordering::Relaxed), 7);
 }

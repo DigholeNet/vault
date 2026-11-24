@@ -16,7 +16,7 @@ use ring::{
 };
 use tracing::debug;
 
-use crate::{Algorithm, AlgorithmType, EXTRA_LEN, TAG_LEN, buf::Buffer};
+use crate::{Algorithm, AlgorithmType, EXTRA_LEN, PeerId, TAG_LEN, buf::Buffer};
 
 /// Domain-separation label in the session-key HKDF info string, alongside
 /// both ephemeral public keys.
@@ -157,16 +157,24 @@ impl CryptoCore {
             role,
             pake_key,
         )?;
-        Ok(Self {
-            key: master_key,
+        Ok(Self::from_key(master_key, role))
+    }
+
+    fn from_key(key: LessSafeKey, role: Role) -> Self {
+        Self {
+            key,
             role,
             send_counter: AtomicU64::new(role.counter_flag()),
             recv_window: Mutex::new(ReplayWindow::new()),
-        })
+        }
     }
 
     /// Authenticate the outer wire type as AEAD associated data.
     pub fn encrypt(&self, buf: &mut Buffer, packet_type: u8) -> anyhow::Result<()> {
+        self.encrypt_with_aad(buf, &[packet_type])
+    }
+
+    pub(crate) fn encrypt_with_aad(&self, buf: &mut Buffer, aad: &[u8]) -> anyhow::Result<()> {
         let data_start = buf.get_start();
         let data_length = buf.len();
         assert!(buf.get_start() >= EXTRA_LEN);
@@ -195,7 +203,7 @@ impl CryptoCore {
 
         let tag = self
             .key
-            .seal_in_place_separate_tag(nonce, aead::Aad::from([packet_type]), data)
+            .seal_in_place_separate_tag(nonce, aead::Aad::from(aad), data)
             .map_err(|_| anyhow::anyhow!("AEAD seal failed"))?;
         tag_space.clone_from_slice(tag.as_ref());
         Ok(())
@@ -214,6 +222,14 @@ impl CryptoCore {
         &self,
         payload: &'a mut [u8],
         packet_type: u8,
+    ) -> anyhow::Result<&'a mut [u8]> {
+        self.decrypt_with_aad(payload, &[packet_type])
+    }
+
+    pub(crate) fn decrypt_with_aad<'a>(
+        &self,
+        payload: &'a mut [u8],
+        aad: &[u8],
     ) -> anyhow::Result<&'a mut [u8]> {
         // Return an error instead of panicking: this buffer can contain
         // arbitrary network input, and a panic here kills the client's run
@@ -253,7 +269,7 @@ impl CryptoCore {
         let crypto_nonce = aead::Nonce::assume_unique_for_key(nonce);
         let plaintext = self
             .key
-            .open_in_place(crypto_nonce, aead::Aad::from([packet_type]), data_and_tag)
+            .open_in_place(crypto_nonce, aead::Aad::from(aad), data_and_tag)
             .map_err(|e| anyhow::anyhow!(e))?;
 
         // Mark the counter only after successful authentication so forged
@@ -307,6 +323,74 @@ impl CryptoCore {
         // network handshake, and a panic would kill the whole process.
         .map_err(|_| anyhow::anyhow!("ECDH failed: invalid peer public key"))?;
         Ok(key)
+    }
+}
+
+/// Reject X25519 public keys that produce an all-zero shared value.
+pub fn valid_peer_public_key(public_key: [u8; 32]) -> bool {
+    use curve25519_dalek::montgomery::MontgomeryPoint;
+    // A fixed clamped scalar suffices to test for low-order points.
+    MontgomeryPoint(public_key).mul_clamped([0; 32]).to_bytes() != [0; 32]
+}
+
+pub(crate) struct PeerKeyPair {
+    private: zeroize::Zeroizing<[u8; 32]>,
+    pub public: [u8; 32],
+}
+
+impl PeerKeyPair {
+    pub fn generate() -> anyhow::Result<Self> {
+        use curve25519_dalek::montgomery::MontgomeryPoint;
+        use ring::rand::SecureRandom;
+
+        let mut private = zeroize::Zeroizing::new([0; 32]);
+        SystemRandom::new()
+            .fill(private.as_mut())
+            .map_err(|_| anyhow::anyhow!("could not generate peer key"))?;
+        let public = MontgomeryPoint::mul_base_clamped(*private).to_bytes();
+        Ok(Self { private, public })
+    }
+
+    pub fn derive(
+        &self,
+        pair_id: [u8; 16],
+        local: (PeerId, u64),
+        peer: (PeerId, u64, [u8; 32]),
+    ) -> anyhow::Result<CryptoCore> {
+        use curve25519_dalek::montgomery::MontgomeryPoint;
+        let shared = zeroize::Zeroizing::new(
+            MontgomeryPoint(peer.2)
+                .mul_clamped(*self.private)
+                .to_bytes(),
+        );
+        anyhow::ensure!(*shared != [0; 32] && local.0 != peer.0, "invalid peer key");
+        let encode = |id: PeerId, epoch: u64, key: [u8; 32]| {
+            let mut context = [0; 56];
+            context[..16].copy_from_slice(&id.0);
+            context[16..24].copy_from_slice(&epoch.to_be_bytes());
+            context[24..].copy_from_slice(&key);
+            context
+        };
+        let local_info = encode(local.0, local.1, self.public);
+        let peer_info = encode(peer.0, peer.1, peer.2);
+        let (first, second, role) = if local.0.0 < peer.0.0 {
+            (&local_info, &peer_info, Role::Initiator)
+        } else {
+            (&peer_info, &local_info, Role::Responder)
+        };
+        let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, &pair_id);
+        let prk = salt.extract(shared.as_ref());
+        let info: [&[u8]; 3] = [b"vault peer data key v2\0", first, second];
+        let algorithm = &aead::CHACHA20_POLY1305;
+        let okm = prk
+            .expand(&info, algorithm)
+            .map_err(|_| anyhow::anyhow!("peer HKDF expand"))?;
+        let mut key = zeroize::Zeroizing::new([0; 32]);
+        okm.fill(key.as_mut())
+            .map_err(|_| anyhow::anyhow!("peer HKDF fill"))?;
+        let key = UnboundKey::new(algorithm, key.as_ref())
+            .map_err(|_| anyhow::anyhow!("invalid peer AEAD key length"))?;
+        Ok(CryptoCore::from_key(LessSafeKey::new(key), role))
     }
 }
 

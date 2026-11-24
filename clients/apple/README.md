@@ -12,6 +12,18 @@ not for establishing an iOS VPN tunnel. See Apple’s
 [Network Extension configuration](https://developer.apple.com/documentation/xcode/configuring-network-extensions/)
 and [supported iOS capabilities](https://developer.apple.com/help/account/reference/supported-capabilities-ios).
 
+## Peer-to-peer traffic
+
+The app requires a protocol v2 Supernode. The packet tunnel provider binds
+the UDP socket to the selected physical interface for both the Supernode
+session and direct peer traffic. Eligible VPN peers use relay until they
+verify an encrypted direct path, and return to relay if the path fails. The
+app can offer LAN candidates on Wi-Fi and Ethernet.
+
+On a network change or reconnect, the provider resolves the configured
+Supernode again and refreshes its route exclusions. A network change or wake
+invalidates old peer paths. See the [P2P design](../../docs/p2p.md).
+
 ## Project structure
 
 ```text

@@ -10,7 +10,8 @@ to the mobile clients of the [Vault VPN](../../README.md) system. Shared by:
   `clients/apple/VaultCore/Scripts/build-xcframework.sh`, together with the
   UniFFI-generated Swift bindings.
 
-VPN session logic (handshake, heartbeat, reconnect, crypto and data pump) and
+VPN session logic (handshake, peer discovery, path verification, relay fallback,
+heartbeat, reconnect, crypto and data pump) and
 the diagnostic engine/transport live in [`vault-core`](../../core). This crate
 exports them through UniFFI and implements platform glue: shared file logging,
 TUN fd blocking mode, Apple interface binding and Android VPN Network binding.
@@ -20,7 +21,7 @@ See the [shared diagnostics contract](../../docs/diagnostics-engine.md).
 
 - `RustEdge` — client session handle (connect, network-change notification,
   connection status, write packets, close)
-- `EdgeCallbacks` — packet delivery, status and error callbacks into the app
+- `EdgeCallbacks` — packet delivery, transport resolution, TUN setup and error callbacks into the app
 - `ConnectionStatus`, `TrafficStats`, `VpnError` — connection snapshots, statistics and errors
 - `EdgeSettings`, `ValidatedEdgeSettings`, `SettingsError` — shared configuration validation
 - `TunnelAssignment` — validated IPv4/IPv6 assignments, DNS selection, IPv6 network and MTU calculations
@@ -38,19 +39,21 @@ See the [shared diagnostics contract](../../docs/diagnostics-engine.md).
 
 ## Client/platform boundary
 
-The core resolves and orders candidates, races IPv4/IPv6 handshakes, detects
-transport failure, coalesces OS network-change events and retries with backoff. `on_ip_assigned` supplies a
-core-validated `TunnelAssignment` and a one-shot `RustTunnelSetup` after a
-successful handshake. The platform completes setup after applying the TUN,
-routes and DNS. Connection status and packet delivery wait for that
-acknowledgment. A completion from a cancelled attempt is ignored. Reconnects
-with the same confirmed address, mask and prefix keep the existing TUN.
+The core orders IPv4/IPv6 candidates, races handshakes, detects transport
+failure, coalesces OS network-change events and retries with backoff. In
+managed transport mode, `resolve_transport` supplies the resolved candidates,
+physical network binding and generation. After the handshake,
+`on_transport_assigned` supplies the validated `TunnelAssignment`,
+`MobileRoutes` and a one-shot `RustTunnelSetup`. The platform completes setup
+after applying the TUN, routes and DNS. Connection status and packet delivery
+wait for completion. A cancelled attempt's completion is ignored. Reconnects
+can reuse setup when the assignment and transport routes both match.
 
 Android and Apple own UI, settings storage, OS tunnel lifecycle, routes/DNS,
-socket protection, TUN I/O and physical-network notifications. Before enabling
-the tunnel they call `resolve_server_candidates` on a worker to install route
-exclusions without routing their own DNS lookups through a disconnected VPN.
-They pass all returned candidates to the core without choosing a family or host. `is_connected` is the
+socket protection, TUN I/O and physical-network notifications. They keep the
+configured hostname and resolve it on reconnect. The bridge binds the
+Supernode socket to the selected physical network and the shared core reuses
+that socket for direct peer traffic. `is_connected` is the
 source for recovery presentation. `get_connection_status` also supplies a core-owned
 attempt generation, read atomically with readiness, so diagnostics can reject
 results spanning a same-IP reconnect. Errors are informational and IP assignment

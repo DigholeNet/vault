@@ -93,6 +93,13 @@ storage = "./tmp/storage.dat"
     }
 
     #[test]
+    fn removed_peer_options() {
+        for key in ["peer_discovery", "peer_lan"] {
+            assert!(toml::from_str::<EdgeConfig>(&format!("{VALID_TOML}\n{key} = false")).is_err());
+        }
+    }
+
+    #[test]
     fn missing_field_fails() {
         let toml_str = r#"
 password = "secret"

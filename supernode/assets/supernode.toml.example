@@ -1,3 +1,4 @@
+# Use protocol v2 clients. LAN introductions are automatic for eligible peers.
 password="change-me-to-a-strong-password"
 port=9527
 iface="vpn"

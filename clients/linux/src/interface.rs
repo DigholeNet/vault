@@ -14,6 +14,8 @@ use serde::Deserialize;
 pub struct Interface {
     name: String,
     addresses: Vec<IpAddr>,
+    prefixes: Vec<String>,
+    ipv4_direct: bool,
     gateway: Option<IpAddr>,
 }
 #[cfg(target_os = "linux")]
@@ -21,6 +23,18 @@ impl Interface {
     pub fn name(&self) -> &str {
         &self.name
     }
+    pub fn addresses(&self) -> &[IpAddr] {
+        &self.addresses
+    }
+
+    pub fn prefixes(&self) -> &[String] {
+        &self.prefixes
+    }
+
+    pub fn ipv4_direct(&self) -> bool {
+        self.ipv4_direct
+    }
+
     pub fn gateway_ipv4(&self) -> Option<Ipv4Addr> {
         match self.gateway {
             Some(IpAddr::V4(ip)) => Some(ip),
@@ -102,9 +116,30 @@ pub fn get_default_physical_interface(server: IpAddr, tun: &str) -> anyhow::Resu
         .unwrap();
     let mut addresses: Vec<_> = iface.ips.iter().map(|ip| ip.ip()).collect();
     addresses.sort();
+    let mut prefixes: Vec<_> = iface
+        .ips
+        .iter()
+        .filter(|net| net.ip().is_ipv4() == server.is_ipv4())
+        .map(|net| format!("{}/{}", net.network(), net.prefix()))
+        .collect();
+    prefixes.sort_unstable();
+    prefixes.dedup();
+    let policy = |name| -> Option<u8> {
+        std::fs::read_to_string(format!("/proc/sys/net/ipv4/conf/{name}/rp_filter"))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    };
+    let ipv4_direct = server.is_ipv4()
+        && policy("all")
+            .zip(policy(&iface.name))
+            .is_some_and(|(all, iface)| matches!(all.max(iface), 0 | 2));
     Ok(Interface {
         name: iface.name.clone(),
         addresses,
+        prefixes,
+        ipv4_direct,
         gateway: route.gateway,
     })
 }

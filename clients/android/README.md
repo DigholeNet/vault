@@ -2,7 +2,8 @@
 
 The Android client of the [Vault VPN](../../README.md) system — a secure,
 high-performance VPN app built with Kotlin and modern Android architecture.
-All protocol logic (handshake, heartbeat, reconnect, crypto, data pump, diagnostics)
+All protocol logic (handshake, peer discovery, path verification, heartbeat,
+reconnect, crypto, data pump and diagnostics)
 lives in the shared Rust core ([`vault-core`](../../core/) via
 [`vault-bridge`](../bridge/), loaded through UniFFI/JNA). Kotlin provides UI,
 configuration storage, Android lifecycle and VPN interface/socket callbacks. Diagnostic network binding lives in the Rust bridge.
@@ -12,7 +13,8 @@ This is a device installation requirement, separate from the build SDK.
 
 Features:
 
-- Encrypted client-to-server tunnels (SPAKE2 PAKE handshake, X25519 key exchange, AEAD ciphers); the supernode decrypts and relays traffic
+- Encrypted Supernode sessions with SPAKE2, X25519 and AEAD
+- Automatic encrypted UDP direct paths to eligible VPN peers, with Supernode relay during discovery and after direct-path failure
 - Automatic reconnection on network changes
 - IPv4 and IPv6 support
 - Displays tunnel addresses and the server-observed public/egress IP on the status screen
@@ -163,11 +165,16 @@ survive tab switches, rotation, and language changes.
 
 ## Network recovery
 
-Once connected, the VPN keeps its TUN interface and native session through long
-offline periods. The Rust core retries with exponential backoff until recovery
-or explicit teardown. A debounced network change also wakes
-an already recovering session, bypassing the current retry delay. Repeated
-watchdog checks remain deduplicated so they do not interrupt handshakes.
+The client requires a protocol v2 Supernode. It resolves the configured host
+on the selected non-VPN network and protects and binds the UDP socket to that
+network. The same socket carries Supernode traffic and direct traffic. The
+app can offer LAN candidates on Wi-Fi and Ethernet.
+
+The Rust core keeps retrying with exponential backoff through offline periods.
+A debounced network change wakes a recovering session and invalidates its old
+direct paths. On reconnect, the app refreshes Supernode route exclusions for
+the selected network and replaces the TUN configuration when needed. The
+Supernode can relay traffic again after setup succeeds.
 
 The UI stays in the reconnecting state until a fresh handshake configures the
 tunnel and TUN I/O is ready. Traffic counters are preserved. User disconnect,
@@ -180,7 +187,7 @@ Connection issues:
 
 | Symptom | Possible cause | Solution |
 |---|---|---|
-| "Handshake failed" | Wrong password | Verify server password |
+| "Handshake failed" | Wrong password or protocol mismatch | Verify the password and use a v2 Supernode |
 | "Cannot resolve host" | DNS issue | Try IP address instead of hostname |
 | "Apply IP failed" | Server unreachable | Check network and firewall |
 
@@ -188,6 +195,8 @@ Latency and repeated reconnection should be investigated with Diagnostics and
 Runtime Logs. The app does not expose a cipher-selection setting.
 
 ## Documentation
+
+- [P2P design](../../docs/p2p.md) — direct discovery, routing and fallback
 
 - [Shared diagnostics](../../docs/diagnostics-engine.md) — workflow, transport, trust and verification
 - [Protocol specification](../../docs/protocol.md) — wire format, handshake, encryption

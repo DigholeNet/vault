@@ -258,6 +258,17 @@ impl<T: TimeSource> IpManager<T> {
         Ok(())
     }
 
+    #[cfg(target_os = "linux")]
+    pub fn remaining_lease(&self, id: &PeerId) -> std::time::Duration {
+        let seconds = self.storage.find_by_id(id).map_or(0, |lease| {
+            lease
+                .gmt_modify
+                .saturating_add(IP_LEASE_TIMEOUT)
+                .saturating_sub(T::now())
+        });
+        std::time::Duration::from_secs(seconds.max(0) as u64)
+    }
+
     pub fn update(&self, id: &PeerId) -> anyhow::Result<()> {
         self.storage.update(id)
     }

@@ -115,6 +115,24 @@ including when the resolver file is already bind-mounted. On replacement, Edge
 exits and systemd restarts it with a fresh writable mount.
 Edge never changes NetworkManager's physical-interface connection settings.
 
+### Peer-to-peer traffic
+
+Eligible peers on the same v2 Supernode begin on relay and switch to direct
+encrypted UDP after verifying the path. Edge reuses its Supernode socket and
+marks it for a separate physical routing table. If direct routing or probing
+fails, peer traffic uses the Supernode. Internet traffic also uses the Supernode.
+
+IPv4 direct routing requires an effective physical-interface `rp_filter` of
+`0` or `2`. Linux uses the larger of `conf/all/rp_filter` and the interface
+value. Edge uses relay when the effective value is `1` or cannot be read, and
+leaves the physical-interface setting to the administrator. IPv6 direct routing
+uses its own physical route and probes.
+
+Edge discovers public and eligible LAN candidates automatically. Direct and
+relayed paths both require protocol v2 on the client and server. Remove
+`peer_discovery` or `peer_lan` entries from configurations made for earlier
+test builds. See the [P2P design](../../docs/p2p.md).
+
 ## Usage and deployment
 
 ### Run directly (requires root)

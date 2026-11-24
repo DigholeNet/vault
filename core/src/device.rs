@@ -359,6 +359,10 @@ impl TunTapDevice {
     /// encrypt run past the backing buffer and panic.
     const MAX_SAFE_MTU: usize = 65535 - 128 - crate::EXTRA_LEN - crate::TAG_LEN;
 
+    pub fn mtu(&self) -> io::Result<usize> {
+        get_device_mtu(&self.ifname)
+    }
+
     fn set_mtu(&self, value: Option<usize>) -> anyhow::Result<()> {
         let value = match value {
             Some(value) => value,

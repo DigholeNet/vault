@@ -26,6 +26,7 @@ use crate::limiter::InitLimiter;
 use crate::network::{
     NetworkSetup, SystemBackend, configure_udp_buffers, recv_batch, udp_socket_sample,
 };
+use crate::p2p::Directory;
 
 /// Peers idle longer than this are dropped from the routing tables; the IP
 /// lease (300s) survives so a reconnecting peer reuses its old address.
@@ -62,6 +63,7 @@ pub struct SuperNode<TS: TimeSource> {
     device: Arc<TunTapDevice>,
     ip_manager: IpManager<TS>,
     peers: Peers<TS>,
+    directory: Directory,
     /// Handshakes answered but not yet confirmed by an encrypted client
     /// packet, keyed by source address.
     pending: HashMap<SocketAddr, PendingHandshake>,
@@ -229,6 +231,7 @@ impl<TS: TimeSource> SuperNode<TS> {
             .map(|metadata| metadata.ino());
         let metrics = ForwardingMetrics::new(socket_inode.and_then(udp_socket_sample));
 
+        let directory = Directory::new();
         Ok(Self {
             config,
             signal,
@@ -236,6 +239,7 @@ impl<TS: TimeSource> SuperNode<TS> {
             device,
             ip_manager,
             peers: Default::default(),
+            directory,
             pending: HashMap::new(),
             init_limiter: InitLimiter::default(),
             replay: HandshakeReplay::default(),
@@ -249,10 +253,12 @@ impl<TS: TimeSource> SuperNode<TS> {
     }
 
     pub fn run(mut self) -> anyhow::Result<()> {
-        let waiter = WaitImpl::new(self.socket.as_raw_fd(), self.device.as_raw_fd(), 1000)
+        let poll_ms = 100;
+        let waiter = WaitImpl::new(self.socket.as_raw_fd(), self.device.as_raw_fd(), poll_ms)
             .map_err(|e| anyhow::anyhow!("Failed to setup poll: {}", e))?;
 
         let mut buffer = Buffer::new(128);
+        let mut next_introduction_check = Instant::now();
         for evt in waiter {
             // HOT PATH
             match evt {
@@ -289,6 +295,7 @@ impl<TS: TimeSource> SuperNode<TS> {
                 self.init_limiter.sweep();
                 // Peer routing entries expire fast; IP leases last 300s.
                 for peer in self.peers.remove_inactive_peers(PEER_IDLE_TIMEOUT_SECS) {
+                    self.directory.remove(*peer.id());
                     self.metrics.remove(peer.id());
                     info!(
                         target: "client",
@@ -309,6 +316,11 @@ impl<TS: TimeSource> SuperNode<TS> {
                 // Include sampling/reporting; if the report reset the window,
                 // this completed maintenance cycle belongs to the next one.
                 self.metrics.maintained(started.elapsed());
+            }
+            let now = Instant::now();
+            if now >= next_introduction_check {
+                next_introduction_check = now + std::time::Duration::from_millis(poll_ms as u64);
+                self.send_introductions(&mut buffer, now);
             }
         }
         self.metrics
@@ -396,6 +408,8 @@ impl<TS: TimeSource> SuperNode<TS> {
                                 &pake_key,
                             )?;
 
+                            let registration = self.directory.registration(&r, addr);
+                            let epoch = registration.as_ref().map_or(0, |r| r.epoch);
                             let reservation = self.ip_manager.reserve(&r.id)?;
                             let (ipv4, ipv6) = (reservation.ipv4, reservation.ipv6);
                             let response = protocol::build_handshake_response(
@@ -413,14 +427,12 @@ impl<TS: TimeSource> SuperNode<TS> {
                                     .get_ipv6()
                                     .as_ref()
                                     .map_or(0, |ip| ip.prefix_len() as i32),
-                                if r.request_public_ip {
-                                    addr.ip().to_canonical().to_string()
-                                } else {
-                                    String::new()
-                                },
+                                addr.ip(),
+                                epoch,
                                 TS::now(),
                                 &r.public_key_data,
                                 &pake_key,
+                                buffer.as_ref(),
                             );
                             let response = match response {
                                 Ok(response) => response,
@@ -437,16 +449,15 @@ impl<TS: TimeSource> SuperNode<TS> {
                                     {
                                         error!("Cancel IP reservation error: {:?}", e);
                                     }
-                                    self.pending.insert(
-                                        addr,
-                                        PendingHandshake::new(
-                                            &r,
-                                            request_key,
-                                            crypto,
-                                            reservation,
-                                            TS::now(),
-                                        ),
+                                    let mut pending = PendingHandshake::new(
+                                        &r,
+                                        request_key,
+                                        crypto,
+                                        reservation,
+                                        TS::now(),
                                     );
+                                    pending.registration = registration;
+                                    self.pending.insert(addr, pending);
                                     info!(
                                         target: "client",
                                         "{},{},{}, Handshake response sent; client not yet authenticated. {:?}/{:?}",
@@ -585,6 +596,48 @@ impl<TS: TimeSource> SuperNode<TS> {
                     debug!("Peer not found: {}, must be reinitialized.", addr);
                 }
             }
+            protocol::FIND_PEER => {
+                if let Some(peer) = self.peers.find_peer_by_socket(&addr) {
+                    match protocol::parse_find_peer(buffer, peer.crypto())? {
+                        protocol::find_peer_message::Data::Request(request) => {
+                            let response = self.directory.query(
+                                *peer.id(),
+                                request,
+                                |ip| {
+                                    let target = self.peers.find_peer_by_ip(&ip)?;
+                                    let remaining = self
+                                        .ip_manager
+                                        .remaining_lease(peer.id())
+                                        .min(self.ip_manager.remaining_lease(target.id()));
+                                    Some((*target.id(), remaining))
+                                },
+                                Instant::now(),
+                            )?;
+                            if let Some(response) = response {
+                                protocol::build_find_peer(buffer, peer.crypto(), response)?;
+                                peer.send_to(buffer.as_ref())?;
+                            }
+                        }
+                        protocol::find_peer_message::Data::Response(response) => {
+                            self.directory.acknowledge(*peer.id(), response);
+                        }
+                        protocol::find_peer_message::Data::Punch(notice) => {
+                            if let Some((recipient, notice)) =
+                                self.directory.punch(*peer.id(), notice, Instant::now())
+                                && let Some(target) = self.peers.find_peer_by_socket(&recipient)
+                            {
+                                protocol::build_find_peer(buffer, target.crypto(), notice)?;
+                                target.send_to(buffer.as_ref())?;
+                            }
+                        }
+                        protocol::find_peer_message::Data::PunchPeer(_) => {}
+                        protocol::find_peer_message::Data::Mapping(mapping) => {
+                            self.directory
+                                .update_mapping(*peer.id(), mapping, Instant::now());
+                        }
+                    }
+                }
+            }
             protocol::CLOSE => {
                 if let Some(peer) = self.peers.find_peer_by_socket(&addr) {
                     // Only trust CLOSE if it decrypts with the peer's key
@@ -599,6 +652,7 @@ impl<TS: TimeSource> SuperNode<TS> {
                                 client_label(peer.device_name()),
                                 addr
                             );
+                            self.directory.remove(*peer.id());
                             self.metrics.remove(peer.id());
                             self.peers.remove_peer_by_socket(&addr);
                         }
@@ -711,8 +765,19 @@ impl<TS: TimeSource> SuperNode<TS> {
         );
         // create_peer also replaces a different device id reusing this endpoint.
         if let Some(previous) = self.peers.find_peer_by_socket(addr) {
+            self.directory.remove(*previous.id());
             self.metrics.remove(previous.id());
         }
+        self.directory.confirm(
+            pending.id,
+            *addr,
+            [
+                pending.reservation.ipv4.map(Into::into),
+                pending.reservation.ipv6.map(Into::into),
+            ],
+            pending.registration,
+            Instant::now(),
+        );
         self.metrics.register(pending.id, *addr);
         self.peers.create_peer(
             pending.id,
@@ -726,6 +791,17 @@ impl<TS: TimeSource> SuperNode<TS> {
             pending.platform,
         );
         self.peers.find_peer_by_socket(addr)
+    }
+
+    fn send_introductions(&mut self, buffer: &mut Buffer, now: Instant) {
+        for (addr, data) in self.directory.due_introductions(now) {
+            if let Some(peer) = self.peers.find_peer_by_socket(&addr)
+                && let Err(error) = protocol::build_find_peer(buffer, peer.crypto(), data)
+                    .and_then(|()| peer.send_to(buffer.as_ref()).map_err(Into::into))
+            {
+                debug!("Could not send P2P introduction to {addr}: {error}");
+            }
+        }
     }
 
     fn handle_device_data(&mut self, buffer: &mut Buffer) {

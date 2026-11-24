@@ -66,6 +66,8 @@ async fn handshake_heartbeat_data() {
             id: PeerId([1u8; 16]),
             device_name: "test-device".to_string(),
             platform: "linux".to_string(),
+            managed_transport: false,
+            peer_socket_setup: None,
             socket_protect: None,
         },
         callbacks,
@@ -144,6 +146,8 @@ async fn late_setup() {
             id: PeerId([6; 16]),
             device_name: String::new(),
             platform: "test".into(),
+            managed_transport: false,
+            peer_socket_setup: None,
             socket_protect: None,
         },
         Arc::new(HoldSetup(tx)),
@@ -193,6 +197,8 @@ async fn failed_config_never_activates() {
             id: PeerId([2; 16]),
             device_name: String::new(),
             platform: "linux".into(),
+            managed_transport: false,
+            peer_socket_setup: None,
             socket_protect: None,
         },
         Arc::new(RejectConfiguration { errors: tx }),
@@ -227,6 +233,8 @@ async fn reconnect_session() {
             id: PeerId([3; 16]),
             device_name: String::new(),
             platform: "test".into(),
+            managed_transport: false,
+            peer_socket_setup: None,
             socket_protect: None,
         },
         Arc::new(TestCallbacks { events: tx }),
@@ -258,8 +266,17 @@ async fn reconnect_session() {
     let bytes = session.traffic_stats().bytes_sent;
     let mut generation = session.connection_status().generation;
     assert!(generation > 0);
-    for _ in 0..2 {
-        session.reconnect().unwrap();
+    session.reconnect().unwrap();
+    for pause in [false, true] {
+        if pause {
+            session.pause_transport().unwrap();
+            assert!(!session.is_active());
+            assert!(matches!(
+                session.write_packet(b"paused".to_vec()),
+                Err(vault_core::client::ClientError::NotConnected)
+            ));
+            session.resume_transport().unwrap();
+        }
         // Each authenticated session resumes data without another IP callback.
         assert!(matches!(
             timeout(Duration::from_secs(5), rx.recv()).await.unwrap(),
@@ -297,6 +314,8 @@ async fn handshake_race_fallback() {
             id: PeerId([4u8; 16]),
             device_name: "test-device".to_string(),
             platform: "test".to_string(),
+            managed_transport: false,
+            peer_socket_setup: None,
             socket_protect: None,
         },
         callbacks,
@@ -336,6 +355,8 @@ async fn reconnect_reports_changed_lease() {
             id: PeerId([5; 16]),
             device_name: String::new(),
             platform: "test".into(),
+            managed_transport: false,
+            peer_socket_setup: None,
             socket_protect: None,
         },
         Arc::new(TestCallbacks { events: tx }),
@@ -368,4 +389,116 @@ async fn reconnect_reports_changed_lease() {
     session.shutdown().unwrap();
     handle.abort();
     let _ = handle.await;
+}
+
+#[tokio::test]
+async fn routes_after_reconnect() {
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use vault_core::client::{PeerSocket, TransportPath, TransportRoutes};
+    use vault_core::test_utils::run_mock_server_sessions;
+
+    struct Platform {
+        generation: AtomicU64,
+        binds: Arc<AtomicUsize>,
+        routes: UnboundedSender<TransportRoutes>,
+        data: UnboundedSender<()>,
+    }
+    impl ClientCallbacks for Platform {
+        fn resolve_transport(
+            &self,
+        ) -> Option<Result<TransportPath, vault_core::client::ClientError>> {
+            let binds = self.binds.clone();
+            Some(Ok(TransportPath {
+                hosts: vec!["127.0.0.1".into()],
+                generation: self.generation.load(Ordering::Acquire),
+                prepare_socket: Arc::new(move |_, _, _| {
+                    binds.fetch_add(1, Ordering::Relaxed);
+                    Some(PeerSocket {
+                        mtu: Arc::new(AtomicUsize::new(1427)),
+                        lan_endpoint: None,
+                        allow_lan: Arc::new(|_| false),
+                        gateway: None,
+                    })
+                }),
+            }))
+        }
+
+        fn on_transport_assigned(
+            &self,
+            assignment: vault_core::settings::TunnelAssignment,
+            routes: Option<TransportRoutes>,
+            setup: Arc<TunnelSetup>,
+        ) {
+            assert_eq!(assignment.ipv4.unwrap().address.to_string(), "10.0.0.2");
+            self.routes.send(routes.unwrap()).unwrap();
+            setup.complete(Ok(()));
+        }
+
+        fn on_ip_assigned(&self, _: vault_core::settings::TunnelAssignment, _: Arc<TunnelSetup>) {
+            panic!("managed transports need route metadata");
+        }
+
+        fn on_packets(&self, _: Vec<Vec<u8>>) {
+            self.data.send(()).unwrap();
+        }
+
+        fn on_error(&self, error: String) {
+            panic!("{error}");
+        }
+    }
+
+    let (server, handle) = run_mock_server_sessions("test-password", 3).await;
+    let (routes, mut route_events) = tokio::sync::mpsc::unbounded_channel();
+    let (data, mut data_events) = tokio::sync::mpsc::unbounded_channel();
+    let platform = Arc::new(Platform {
+        generation: AtomicU64::new(1),
+        binds: Arc::new(AtomicUsize::new(0)),
+        routes,
+        data,
+    });
+    let session = ClientSession::start(
+        ClientConfig {
+            password: "test-password".into(),
+            hosts: vec!["unresolvable.invalid".into()],
+            port: server.port(),
+            id: PeerId([4; 16]),
+            device_name: String::new(),
+            platform: "test".into(),
+            managed_transport: true,
+            peer_socket_setup: None,
+            socket_protect: None,
+        },
+        platform.clone(),
+    )
+    .unwrap();
+    for generation in [1, 2] {
+        if generation == 2 {
+            platform.generation.store(generation, Ordering::Release);
+            session.reconnect().unwrap();
+        }
+        let routes = timeout(Duration::from_secs(5), route_events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(routes.generation, generation);
+        assert_eq!(routes.addresses, ["127.0.0.1"]);
+        timeout(Duration::from_secs(5), data_events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    // A retry on the same physical generation still binds the replacement
+    // socket, while the applied routes can be reused.
+    session.reconnect().unwrap();
+    timeout(Duration::from_secs(5), data_events.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(route_events.try_recv().is_err());
+    assert_eq!(platform.binds.load(Ordering::Relaxed), 3);
+    session.shutdown().unwrap();
+    timeout(Duration::from_secs(5), handle)
+        .await
+        .unwrap()
+        .unwrap();
 }

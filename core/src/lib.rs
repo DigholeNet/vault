@@ -6,6 +6,8 @@ mod buf;
 pub mod client;
 mod crypto;
 pub mod diagnostics;
+mod discovery;
+mod gateway;
 // TUN device and epoll are used on Linux/Android only (supernode and the
 // Linux edge client); excluded on Apple platforms.
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -18,6 +20,7 @@ pub mod logger;
 pub mod metrics;
 pub mod pake;
 mod peer;
+mod peer_path;
 pub mod protocol;
 pub mod settings;
 mod signal;
@@ -33,6 +36,7 @@ pub use crypto::Role;
 pub use crypto::create_ecdh_keypair;
 pub use crypto::select_algorithm;
 pub use crypto::supported_algorithms;
+pub use crypto::valid_peer_public_key;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use epoll::EpollWait as WaitImpl;
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -48,7 +52,7 @@ pub use signal::SysSignal;
 /// Wire protocol version carried in handshake requests; the supernode
 /// rejects anything else.
 // Pre-release wire format; rebuild all peers after protocol changes.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 pub const TAG_LEN: usize = 16;
 pub const EXTRA_LEN: usize = 8;
@@ -148,7 +152,8 @@ pub struct HandshakeRequest {
     pub version: u32,
     pub device_name: String,
     pub platform: String,
-    pub request_public_ip: bool,
+    pub peer_public_key: Vec<u8>,
+    pub peer_lan_endpoint: Option<pb::Endpoint>,
 }
 
 pub struct HandshakeResponse {
@@ -164,6 +169,7 @@ pub struct HandshakeResponse {
     pub request_public_key: Vec<u8>,
     pub confirm_mac: Vec<u8>,
     pub public_ip: String,
+    pub peer_session_epoch: u64,
 }
 
 pub struct Ping {
@@ -197,7 +203,8 @@ impl TryFrom<pb::HandshakeRequest> for HandshakeRequest {
             version: value.version,
             device_name: value.device_name,
             platform: value.platform,
-            request_public_ip: value.request_public_ip,
+            peer_public_key: value.peer_public_key,
+            peer_lan_endpoint: value.peer_lan_endpoint,
         })
     }
 }
@@ -228,6 +235,7 @@ impl TryFrom<pb::HandshakeResponse> for HandshakeResponse {
             request_public_key: value.request_public_key,
             confirm_mac: value.confirm_mac,
             public_ip: value.public_ip,
+            peer_session_epoch: value.peer_session_epoch,
         })
     }
 }
@@ -263,7 +271,8 @@ mod tests {
             version: 0,
             device_name: String::new(),
             platform: String::new(),
-            request_public_ip: false,
+            peer_public_key: vec![],
+            peer_lan_endpoint: None,
         }
     }
 
@@ -291,6 +300,7 @@ mod tests {
             timestamp: 0,
             request_public_key: vec![],
             confirm_mac: vec![],
+            peer_session_epoch: 0,
             public_ip: String::new(),
         };
         assert!(HandshakeResponse::try_from(response).is_err());

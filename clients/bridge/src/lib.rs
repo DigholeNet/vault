@@ -8,13 +8,13 @@
 
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
 use vault_core::PeerId;
 use vault_core::client::{
-    ClientCallbacks, ClientConfig, ClientError, ClientSession, TrafficStats as CoreTrafficStats,
-    TunnelSetup,
+    ClientCallbacks, ClientConfig, ClientError, ClientSession, Gateway, PeerSocket,
+    TrafficStats as CoreTrafficStats, TransportPath, TransportRoutes, TunnelSetup,
 };
 use vault_core::logger::shared;
 
@@ -212,6 +212,24 @@ impl From<ClientError> for VpnError {
     }
 }
 
+/// Resolver results and the physical network identity are captured together.
+#[derive(uniffi::Record)]
+pub struct MobileTransport {
+    pub addresses: Vec<String>,
+    /// Android Network handle or Apple interface index.
+    pub network: u64,
+    pub generation: u64,
+    pub gateway_ipv4: Option<String>,
+    /// Interface addresses with prefix lengths, supplied only on Wi-Fi or Ethernet.
+    pub lan_addresses: Vec<String>,
+}
+
+#[derive(uniffi::Record)]
+pub struct MobileRoutes {
+    pub addresses: Vec<String>,
+    pub generation: u64,
+}
+
 #[uniffi::export(callback_interface)]
 pub trait EdgeCallbacks: Send + Sync {
     /// Delivers several decrypted packets in one call. Crosses the FFI
@@ -220,6 +238,13 @@ pub trait EdgeCallbacks: Send + Sync {
     fn on_data_batch(&self, packets: Vec<Vec<u8>>);
     /// Configure the TUN initially or when addresses change, never for same-IP reconnects.
     fn on_ip_assigned(&self, assignment: settings::TunnelAssignment, setup: Arc<RustTunnelSetup>);
+    fn resolve_transport(&self) -> Option<MobileTransport>;
+    fn on_transport_assigned(
+        &self,
+        assignment: settings::TunnelAssignment,
+        routes: MobileRoutes,
+        setup: Arc<RustTunnelSetup>,
+    );
     fn on_error(&self, error: String);
     /// Android `VpnService.protect(fd)` hook, invoked once per (re)connect.
     /// Apple platforms do not need it (traffic from the Network Extension
@@ -244,6 +269,7 @@ impl RustTunnelSetup {
 
 /// Adapts the UniFFI `EdgeCallbacks` to vault-core's `ClientCallbacks`.
 struct CallbackAdapter {
+    peer_mtu: Arc<AtomicUsize>,
     inner: Arc<Box<dyn EdgeCallbacks>>,
 }
 
@@ -292,6 +318,100 @@ impl ClientCallbacks for CallbackAdapter {
         }
     }
 
+    fn resolve_transport(&self) -> Option<Result<TransportPath, ClientError>> {
+        let result = catch_unwind(AssertUnwindSafe(|| self.inner.resolve_transport()));
+        let transport = match result {
+            Ok(Some(transport)) => transport,
+            Ok(None) => return None,
+            Err(payload) => {
+                return Some(Err(ClientError::DnsFailed(
+                    panic_payload_message(&payload).into(),
+                )));
+            }
+        };
+        if transport.network == 0
+            || transport.addresses.is_empty()
+            || transport
+                .addresses
+                .iter()
+                .any(|ip| ip.parse::<std::net::IpAddr>().is_err())
+        {
+            return Some(Err(ClientError::DnsFailed(
+                "invalid physical network resolver result".into(),
+            )));
+        }
+        let mtu = self.peer_mtu.clone();
+        let network = transport.network;
+        let gateway = transport
+            .gateway_ipv4
+            .as_deref()
+            .and_then(|gateway| gateway.parse::<std::net::Ipv4Addr>().ok());
+        let callbacks = self.inner.clone();
+        let lan = network::LanAddresses::new(&transport.lan_addresses);
+        Some(Ok(TransportPath {
+            hosts: transport.addresses,
+            generation: transport.generation,
+            prepare_socket: Arc::new(move |fd, addr, bound| {
+                bind_mobile_socket(network, fd, addr.is_ipv6())
+                    .inspect_err(|error| {
+                        tracing::warn!(%addr, %error, "Could not bind mobile transport socket");
+                    })
+                    .ok()?;
+                let lan_endpoint = lan.endpoint(addr, bound.port(), |probe_fd| {
+                    if !callbacks.protect_socket(probe_fd) {
+                        return Err(std::io::ErrorKind::PermissionDenied.into());
+                    }
+                    bind_mobile_socket(network, probe_fd, addr.is_ipv6())
+                });
+                let lan = lan.clone();
+                Some(PeerSocket {
+                    mtu: mtu.clone(),
+                    lan_endpoint,
+                    allow_lan: Arc::new(move |remote| {
+                        lan_endpoint.is_some_and(|local| {
+                            remote.port() != 0 && lan.allows(local.ip(), remote.ip())
+                        })
+                    }),
+                    gateway: gateway.map(|gateway| {
+                        let callbacks = callbacks.clone();
+                        Gateway::new(gateway, move |fd| {
+                            if !callbacks.protect_socket(fd) {
+                                return Err(std::io::ErrorKind::PermissionDenied.into());
+                            }
+                            bind_mobile_socket(network, fd, false)
+                        })
+                    }),
+                })
+            }),
+        }))
+    }
+
+    fn on_transport_assigned(
+        &self,
+        assignment: vault_core::settings::TunnelAssignment,
+        routes: Option<TransportRoutes>,
+        setup: Arc<TunnelSetup>,
+    ) {
+        let Some(routes) = routes else {
+            return self.on_ip_assigned(assignment, setup);
+        };
+        let setup = Arc::new(RustTunnelSetup(setup));
+        let routes = MobileRoutes {
+            addresses: routes.addresses,
+            generation: routes.generation,
+        };
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
+            self.inner
+                .on_transport_assigned(assignment.into(), routes, setup.clone());
+        })) {
+            let message = panic_payload_message(&payload);
+            tracing::error!("EdgeCallbacks::on_transport_assigned panicked: {message}");
+            setup.complete(Some(format!(
+                "on_transport_assigned callback panicked: {message}"
+            )));
+        }
+    }
+
     fn on_error(&self, error: String) {
         if let Err(payload) = catch_unwind(AssertUnwindSafe(|| self.inner.on_error(error))) {
             tracing::error!(
@@ -299,6 +419,25 @@ impl ClientCallbacks for CallbackAdapter {
                 panic_payload_message(&payload)
             );
         }
+    }
+}
+
+fn bind_mobile_socket(network: u64, fd: i32, ipv6: bool) -> std::io::Result<()> {
+    #[cfg(target_os = "android")]
+    {
+        use vault_core::diagnostics::transport::NetworkBinding;
+        crate::network::AndroidNetwork(network).bind(fd, ipv6)
+    }
+    #[cfg(target_vendor = "apple")]
+    {
+        use vault_core::diagnostics::transport::NetworkBinding;
+        let index = u32::try_from(network).map_err(std::io::Error::other)?;
+        crate::network::InterfaceNetwork(index).bind(fd, ipv6)
+    }
+    #[cfg(not(any(target_os = "android", target_vendor = "apple")))]
+    {
+        let _ = (network, fd, ipv6);
+        Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
     }
 }
 
@@ -343,6 +482,8 @@ pub struct RustEdge {
     callbacks: Arc<Box<dyn EdgeCallbacks>>,
     session: Mutex<Option<ClientSession>>,
     closing: AtomicBool,
+    managed_transport: AtomicBool,
+    peer_mtu: Arc<AtomicUsize>,
 }
 
 #[uniffi::export]
@@ -378,7 +519,18 @@ impl RustEdge {
             callbacks: Arc::new(callbacks),
             session: Mutex::new(None),
             closing: AtomicBool::new(false),
+            managed_transport: AtomicBool::new(false),
+            peer_mtu: Arc::new(AtomicUsize::new(0)),
         }))
+    }
+
+    /// Enable network-aware mobile transport before connect().
+    pub fn enable_managed_transport(&self) {
+        self.managed_transport.store(true, Ordering::Release);
+    }
+
+    pub fn set_peer_mtu(&self, mtu: u32) {
+        self.peer_mtu.store(mtu as usize, Ordering::Release);
     }
 
     pub fn connect(&self) -> Result<(), VpnError> {
@@ -394,6 +546,7 @@ impl RustEdge {
         let socket_protect: Arc<dyn Fn(i32) -> bool + Send + Sync> =
             Arc::new(move |fd| callbacks.protect_socket(fd));
 
+        let managed_transport = self.managed_transport.load(Ordering::Acquire);
         let config = ClientConfig {
             password: self.password.clone(),
             hosts: self.hosts.clone(),
@@ -401,9 +554,12 @@ impl RustEdge {
             id: self.id,
             device_name: self.device_name.clone(),
             platform: self.platform.clone(),
+            managed_transport,
+            peer_socket_setup: None,
             socket_protect: Some(socket_protect),
         };
         let callbacks: Arc<dyn ClientCallbacks> = Arc::new(CallbackAdapter {
+            peer_mtu: self.peer_mtu.clone(),
             inner: self.callbacks.clone(),
         });
 
@@ -528,6 +684,18 @@ mod tests {
 
     impl EdgeCallbacks for ReentrantCallbacks {
         fn on_data_batch(&self, _: Vec<Vec<u8>>) {}
+        fn resolve_transport(&self) -> Option<MobileTransport> {
+            None
+        }
+        fn on_transport_assigned(
+            &self,
+            assignment: settings::TunnelAssignment,
+            _: MobileRoutes,
+            setup: Arc<RustTunnelSetup>,
+        ) {
+            self.on_ip_assigned(assignment, setup);
+        }
+
         fn on_error(&self, _: String) {}
         fn protect_socket(&self, _: i32) -> bool {
             true

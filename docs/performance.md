@@ -15,12 +15,14 @@ These values describe implementation behavior, not measured performance:
 | Encrypted packet framing | 25 bytes: 1 type byte + 8 counter bytes + 16 AEAD tag bytes |
 | Outer network overhead | UDP adds 8 bytes; IP adds at least 20 bytes for IPv4 or 40 for IPv6 |
 | Heartbeat interval | 10 seconds |
-| Downstream inactivity timeout | 30 seconds without an authenticated data packet or pong |
+| Supernode inactivity timeout | 30 seconds without authenticated Supernode data or a pong |
+| Active direct path | Probe every 2 seconds while sending traffic, return to relay after 3 unanswered probes |
 | Automatic retry delay | Exponential backoff from 1 to 60 seconds |
 
 The 60-second value limits the retry delay, not total reconnection time. DNS,
 handshake attempts, network availability and platform lifecycle also affect
 recovery. OS network-change notifications can interrupt the retry delay.
+Direct peer traffic does not refresh Supernode liveness.
 
 ## Measuring an actual deployment
 
@@ -143,8 +145,12 @@ Linux metrics use the `metrics` target; normal and warning records go only to
 | I/O `socket_rx_drops_delta`, `socket_rx_queue_bytes`, `socket_tx_queue_bytes` | This UDP socket's Linux drop-counter delta and sampled queue memory; unavailable/reset samples are `None`, not zero |
 | I/O `handler_*_ms`, `maintenance_*_ms` | Handling/maintenance wall time, including sampling/reporting but excluding poll waits; not process CPU time |
 
-Peer records cover all traffic for one client; I/O records cover the entire
-server. UDP send success means kernel acceptance, not client delivery. Kernel
+Peer records cover traffic handled by the Supernode for one client. Direct
+peer payloads bypass these counters. I/O records cover the entire server.
+Linux Edge logs cumulative `direct_up_bytes`, `direct_down_bytes`,
+`relay_up_bytes` and `relay_down_bytes` in `VPN path traffic totals`.
+Compare these with the server's relay counters during a peer transfer.
+UDP send success means kernel acceptance, not client delivery. Kernel
 drops are sampled at the reporting cadence, and queue sizes are not peaks.
 Maintenance is counted when it finishes; a cycle that emits a report is included
 in the next window.

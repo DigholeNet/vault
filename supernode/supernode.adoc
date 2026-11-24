@@ -10,11 +10,17 @@ supernode - Vault VPN server
 *supernode* -s quit
 
 == Description
-supernode is the Vault VPN server. It accepts encrypted tunnels from
+supernode is the Vault protocol v2 server. It accepts encrypted tunnels from
 edge clients over UDP (SPAKE2 password-authenticated handshake, X25519 ECDH
 key exchange, AEAD encryption), assigns each client an address from the configured pools,
-relays traffic between clients and the public internet (NAT), and answers
-heartbeat pings.
+relays peer and internet traffic (NAT), and answers heartbeat pings. It also
+introduces confirmed, P2P-capable clients so they can verify and use direct
+encrypted UDP paths. Direct traffic bypasses this server's forwarding rules
+and relay counters.
+
+Upgrade or roll back clients and Supernode together. Remove the
+*p2p_pairs* array of tables from earlier test configurations. LAN introductions
+are automatic when both clients meet the candidate requirements.
 
 == Host network setup
 The server automatically enables *net.ipv4.ip_forward=1* for an IPv4 pool and

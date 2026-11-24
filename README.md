@@ -4,7 +4,7 @@
 [![Release](https://github.com/DigholeNet/vault/actions/workflows/release.yml/badge.svg)](https://github.com/DigholeNet/vault/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Vault is a cross-platform VPN system: a **single Rust protocol core**, **three client platforms** (Apple / Android / Linux), and a **Linux server** (supernode). Star topology — traffic entering a VPN tunnel is relayed through the server over an encrypted UDP connection.
+Vault is a cross-platform VPN system with a **single Rust protocol core**, **three client platforms** (Apple / Android / Linux), and a **Linux server** (Supernode). The Supernode authenticates clients, assigns VPN addresses, and relays traffic. Eligible VPN peers can send encrypted UDP traffic directly once they verify a path, with automatic fallback to relay.
 
 ## Screenshots
 
@@ -68,7 +68,7 @@ English interfaces on Android, iOS and macOS. Expand each gallery to see all pag
                         │         supernode          │
                         │        (supernode/)        │
                         │ handshake · IP assignment  │
-                        │      · traffic relay       │
+                        │ peer discovery · relay     │
                         └─────────────┬──────────────┘
                                       │  encrypted UDP tunnels
             ┌─────────────────────────┼─────────────────────────┐
@@ -78,6 +78,11 @@ English interfaces on Android, iOS and macOS. Expand each gallery to see all pag
    │ (clients/apple) │      │(clients/android)│       │ (clients/linux) │
    └─────────────────┘      └─────────────────┘       └─────────────────┘
 ```
+
+Each client keeps an encrypted session with the Supernode. For traffic to another
+assigned VPN address, eligible peers start with relay and switch to direct UDP
+after a full-size probe succeeds. Internet traffic continues through the
+Supernode. See the [P2P design](docs/p2p.md) for path selection and fallback.
 
 ### Design principles
 
@@ -96,14 +101,14 @@ The core also owns settings validation, peer-ID encoding, server-candidate resol
 Both mobile platforms share a single bridge crate (`clients/bridge/`): one UniFFI interface definition generates both the Kotlin and Swift bindings.
 
 **3. The server is Linux-only by design.**
-The supernode reuses the core's epoll, TUN, peer management and protocol implementation; it only adds the address pool (CIDR allocation with leases and recycling), NAT/forwarding setup, and the relay loop.
+The Supernode reuses the core's epoll, TUN, peer management and protocol implementation. It manages address leases, introduces eligible peers, configures NAT and forwarding, and runs the relay loop.
 
 ### Module map
 
 | Directory | Package | Role |
 |---|---|---|
 | `core/` | vault-core | Protocol, crypto, client session, TUN/epoll/peer primitives |
-| `supernode/` | supernode | Linux server: handshake handling, IP assignment, traffic relay |
+| `supernode/` | supernode | Linux server for authentication, IP assignment, peer introductions and relay |
 | `clients/apple/` | — | iOS/macOS app (SwiftUI + NetworkExtension) |
 | `clients/bridge/` | vault-bridge | Mobile UniFFI bridge (shared by Android + Apple) |
 | `clients/android/` | — | Android app (Kotlin + VpnService) |
@@ -127,12 +132,16 @@ report possible bypass, but is not an enforcement mechanism. Application-scope
 diagnostic probes use the app process's default routing; see
 [diagnostic scopes](docs/diagnostics-engine.md#execution-scopes).
 
+Direct peer traffic bypasses the Supernode's forwarding rules and traffic
+monitoring. See the [Linux P2P routing requirements](clients/linux/README.md#peer-to-peer-traffic)
+and the [security model](SECURITY.md#security-model).
+
 ## Quick start
 
 ### For users — prebuilt artifacts
 
 Download packages from [GitHub Releases](https://github.com/DigholeNet/vault/releases).
-The `0.1.1` release includes:
+The planned `0.1.1` release artifacts are:
 
 - Linux client (`edge`) and server (`supernode`): Debian and RPM packages plus minimal static musl binary tar.gz archives for amd64 and arm64.
 - Android: signed APK for API 36 or newer.
@@ -144,6 +153,12 @@ Its Ad Hoc IPA is built in CI for validation but is not publicly distributed.
 
 The setup below applies to release packages and locally packaged builds.
 Minimal setup: one Linux server as the supernode, one client.
+
+Protocol v2 requires a v2 Supernode and v2 clients, including relay-only
+clients. Upgrade or roll back both sides together. If you used a Supernode
+test build with `[[p2p_pairs]]` entries, remove those blocks from the
+configuration before starting this version. Remove `peer_discovery` and
+`peer_lan` from any Linux Edge test configuration that includes them.
 
 **1. Server (Linux)** — install the supernode DEB or RPM package and write
 `/etc/vault/supernode.toml`:

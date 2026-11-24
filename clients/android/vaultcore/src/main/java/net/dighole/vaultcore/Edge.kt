@@ -7,6 +7,8 @@ import android.os.Build
 import android.util.Log
 import net.dighole.vaultcore.uniffi.ConnectionStatus
 import net.dighole.vaultcore.uniffi.EdgeCallbacks
+import net.dighole.vaultcore.uniffi.MobileRoutes
+import net.dighole.vaultcore.uniffi.MobileTransport
 import net.dighole.vaultcore.uniffi.RustEdge
 import net.dighole.vaultcore.uniffi.RustTunnelSetup
 import net.dighole.vaultcore.uniffi.TrafficStats
@@ -43,7 +45,9 @@ class Edge(
     private val onPackets: (List<ByteArray>) -> Unit,
     private val onIpAssigned: (TunnelAssignment, RustTunnelSetup) -> Unit,
     private val pendingCompletion: (Throwable?) -> Unit,
-    private val protectSocket: ((Int) -> Boolean)? = null
+    private val protectSocket: ((Int) -> Boolean)? = null,
+    private val resolveTransport: (() -> MobileTransport?)? = null,
+    private val onTransportAssigned: ((TunnelAssignment, MobileRoutes, RustTunnelSetup) -> Unit)? = null
 ) {
     private var rustEdge: RustEdge?
 
@@ -55,6 +59,19 @@ class Edge(
 
             override fun onIpAssigned(assignment: TunnelAssignment, setup: RustTunnelSetup) {
                 this@Edge.onIpAssigned(assignment, setup)
+            }
+
+            override fun resolveTransport(): MobileTransport? =
+                this@Edge.resolveTransport?.invoke()
+
+            override fun onTransportAssigned(
+                assignment: TunnelAssignment,
+                routes: MobileRoutes,
+                setup: RustTunnelSetup
+            ) {
+                val callback = this@Edge.onTransportAssigned
+                if (callback == null) this@Edge.onIpAssigned(assignment, setup)
+                else callback(assignment, routes, setup)
             }
 
             override fun onError(error: String) {
@@ -75,7 +92,7 @@ class Edge(
             deviceName.ifEmpty { "unknown" },
             "android",
             callbacks
-        )
+        ).also { if (resolveTransport != null) it.enableManagedTransport() }
     }
 
     suspend fun connect() = withContext(Dispatchers.IO) {
@@ -98,11 +115,15 @@ class Edge(
         }
     }
 
-    /** Used on network changes. */
-    suspend fun reconnect() = withContext(Dispatchers.IO) {
-        synchronized(this@Edge) {
-            rustEdge?.reconnect() ?: throw VpnException.NotConnected("Edge is closed")
-        }
+    /** Invalidate the old transport synchronously when Android reports a path change. */
+    @Synchronized
+    fun reconnect() {
+        rustEdge?.reconnect() ?: throw VpnException.NotConnected("Edge is closed")
+    }
+
+    @Synchronized
+    fun setPeerMtu(mtu: Int) {
+        rustEdge?.setPeerMtu(mtu.toUInt())
     }
 
     companion object {

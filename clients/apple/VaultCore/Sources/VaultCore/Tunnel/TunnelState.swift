@@ -54,7 +54,7 @@ public struct TunnelSettingsState {
         let current = pending ?? applying?.configuration ?? applied
         return enqueue(TunnelConfiguration(
             ipv4: current.ipv4, mask: current.mask, ipv6: current.ipv6,
-            prefix: current.prefix, mtu: mtu, dns: current.dns
+            prefix: current.prefix, mtu: mtu, dns: current.dns, serverCandidates: current.serverCandidates
         ))
     }
 

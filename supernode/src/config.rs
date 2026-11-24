@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::ip::{Ipv4Cidr, Ipv6Cidr, deserialize_ipv4_cidr, deserialize_ipv6_cidr};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SuperNodeConfig {
     password: String,
@@ -54,6 +54,9 @@ ipv_6 = "fd00::/96"
         assert!(error.to_string().contains("unknown field `ipv_6`"));
         let valid = config.replace("ipv_6", "ipv6");
         let parsed: SuperNodeConfig = toml::from_str(&valid).unwrap();
+        let legacy = format!("{valid}\n[[p2p_pairs]]\nlan = false\n");
+        let error = toml::from_str::<SuperNodeConfig>(&legacy).unwrap_err();
+        assert!(error.to_string().contains("unknown field `p2p_pairs`"));
         assert_eq!(parsed.get_password(), "secret");
         assert_eq!(parsed.get_iface(), "vpn");
         assert_eq!(parsed.get_port(), 9527);

@@ -10,6 +10,8 @@ mod dns;
 mod edge;
 #[cfg(any(target_os = "linux", test))]
 mod interface;
+#[cfg(target_os = "linux")]
+mod peer_routes;
 #[cfg(any(target_os = "linux", test))]
 mod routes;
 #[cfg(target_os = "linux")]
