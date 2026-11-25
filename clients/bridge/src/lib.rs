@@ -432,13 +432,13 @@ fn bind_mobile_socket(network: u64, fd: i32, ipv6: bool) -> std::io::Result<()> 
     #[cfg(target_os = "android")]
     {
         use vault_core::diagnostics::transport::NetworkBinding;
-        crate::network::AndroidNetwork(network).bind(fd, ipv6)
+        crate::network::AndroidNetworkBinding(network).bind(fd, ipv6)
     }
     #[cfg(target_vendor = "apple")]
     {
         use vault_core::diagnostics::transport::NetworkBinding;
         let index = u32::try_from(network).map_err(std::io::Error::other)?;
-        crate::network::InterfaceNetwork(index).bind(fd, ipv6)
+        crate::network::AppleInterfaceBinding(index).bind(fd, ipv6)
     }
 }
 

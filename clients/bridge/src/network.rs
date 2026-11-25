@@ -106,9 +106,9 @@ unsafe extern "C" {
 }
 
 #[cfg(target_os = "android")]
-pub struct AndroidNetwork(pub u64);
+pub struct AndroidNetworkBinding(pub u64);
 #[cfg(target_os = "android")]
-impl NetworkBinding for AndroidNetwork {
+impl NetworkBinding for AndroidNetworkBinding {
     fn bind(&self, fd: i32, _: bool) -> io::Result<()> {
         // SAFETY: the caller owns the live socket; handle is supplied by Android.
         if unsafe { android_setsocknetwork(self.0, fd) } == 0 {
@@ -120,9 +120,9 @@ impl NetworkBinding for AndroidNetwork {
 }
 
 #[cfg(target_vendor = "apple")]
-pub struct InterfaceNetwork(pub u32);
+pub struct AppleInterfaceBinding(pub u32);
 #[cfg(target_vendor = "apple")]
-impl NetworkBinding for InterfaceNetwork {
+impl NetworkBinding for AppleInterfaceBinding {
     fn bind(&self, fd: i32, ipv6: bool) -> io::Result<()> {
         #[cfg(target_vendor = "apple")]
         {

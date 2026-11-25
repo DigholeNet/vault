@@ -451,7 +451,7 @@ impl DiagnosticTransport {
                 {
                     let address = address.parse().map_err(input)?;
                     let index = crate::network::tunnel_interface(address).map_err(input)?;
-                    Box::new(crate::network::InterfaceNetwork(index))
+                    Box::new(crate::network::AppleInterfaceBinding(index))
                 }
                 #[cfg(not(target_vendor = "apple"))]
                 {
@@ -475,7 +475,7 @@ impl DiagnosticTransport {
                 return Err(input("VPN network handle must not be zero"));
             }
             Ok(Arc::new(Self {
-                network: Box::new(crate::network::AndroidNetwork(network_handle)),
+                network: Box::new(crate::network::AndroidNetworkBinding(network_handle)),
                 cancellation: core::transport::Cancellation::default(),
             }))
         }
