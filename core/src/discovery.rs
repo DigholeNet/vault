@@ -23,6 +23,7 @@ use crate::{
 
 const MAX_PENDING: usize = 8;
 const MAX_KNOWN: usize = 64;
+const MAX_RETIRED: usize = 64;
 const MAX_NEGATIVE: usize = 64;
 const RETRIES: [Duration; 3] = [
     Duration::ZERO,
@@ -40,6 +41,20 @@ pub(crate) struct DirectAuthorization {
     pub endpoint: SocketAddr,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DirectSend {
+    Sent,
+    Suspend,
+    Relay,
+    Discard,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Fallback {
+    Replay(IpAddr),
+    Discard(IpAddr),
+}
+
 pub(crate) struct Discovery {
     assignment: TunnelAssignment,
     local_id: PeerId,
@@ -53,6 +68,7 @@ pub(crate) struct Discovery {
     by_ip: HashMap<IpAddr, PeerId>,
     by_endpoint: HashMap<SocketAddr, PeerId>,
     negative: HashMap<IpAddr, Instant>,
+    fallbacks: Vec<Fallback>,
     next_id: u64,
     socket: Option<crate::client::PeerSocket>,
     wire_size: usize,
@@ -81,6 +97,7 @@ struct Introduction {
     refresh_at: Instant,
     path: Option<PeerPath>,
     retired: bool,
+    retired_at: Option<Instant>,
     last_uplink: Option<Instant>,
     punch_sent: bool,
 }
@@ -106,6 +123,7 @@ impl Discovery {
             by_ip: HashMap::new(),
             by_endpoint: HashMap::new(),
             negative: HashMap::new(),
+            fallbacks: Vec::new(),
             next_id: 0,
             socket: None,
             wire_size: 0,
@@ -125,6 +143,11 @@ impl Discovery {
         self.by_ip.clear();
         self.by_endpoint.clear();
         self.pending.clear();
+        self.fallbacks.clear();
+    }
+
+    pub fn take_fallbacks(&mut self) -> Vec<Fallback> {
+        std::mem::take(&mut self.fallbacks)
     }
 
     fn update_mtu(&mut self, now: Instant) {
@@ -140,20 +163,59 @@ impl Discovery {
             self.wire_size = size;
             for entry in self.known.values_mut() {
                 if let Some(path) = &mut entry.path {
+                    let selected = path.selected.is_some();
                     path.update_mtu(size, increased, now);
+                    if selected && path.selected.is_none() {
+                        note_fallback(&mut self.fallbacks, &entry.ips);
+                    }
                 }
             }
         }
     }
 
-    fn expire(&mut self) -> Option<u64> {
+    fn expire(&mut self, now: Instant) -> Option<u64> {
         let clock = (self.clock)();
         for (&id, entry) in &mut self.known {
-            if clock.is_none_or(|clock| clock >= entry.expires) {
-                entry.retire(id, &mut self.by_endpoint);
+            if !entry.retired && clock.is_none_or(|clock| clock >= entry.expires) {
+                entry.retire(id, &mut self.by_endpoint, &mut self.fallbacks, now);
             }
         }
+        self.prune_retired();
         clock
+    }
+
+    fn prune_retired(&mut self) {
+        let mut retired: Vec<_> = self
+            .known
+            .iter()
+            .filter_map(|(&id, entry)| entry.retired_at.map(|at| (id, at)))
+            .collect();
+        let excess = retired.len().saturating_sub(MAX_RETIRED);
+        if excess == 0 {
+            return;
+        }
+        retired.sort_unstable_by_key(|(_, at)| *at);
+        let mut removed = 0;
+        for (id, _) in retired {
+            if removed == excess {
+                break;
+            }
+            if self
+                .known
+                .get(&id)
+                .is_some_and(|entry| entry.ips.iter().any(|ip| self.pending.contains_key(ip)))
+            {
+                continue;
+            }
+            if let Some(entry) = self.known.remove(&id) {
+                for ip in entry.ips {
+                    if self.by_ip.get(&ip) == Some(&id) {
+                        self.by_ip.remove(&ip);
+                    }
+                }
+                removed += 1;
+            }
+        }
     }
 
     pub fn confirm(&mut self) {
@@ -281,7 +343,7 @@ impl Discovery {
         if !self.confirmed || !self.enabled {
             return Vec::new();
         }
-        self.expire();
+        self.expire(now);
         self.negative.retain(|_, expires| now < *expires);
         let mut due = Vec::new();
         let mut expired = Vec::new();
@@ -368,7 +430,7 @@ impl Discovery {
                             .iter_mut()
                             .filter(|(_, entry)| entry.pair_id() == id)
                         {
-                            entry.retire(peer, &mut self.by_endpoint);
+                            entry.retire(peer, &mut self.by_endpoint, &mut self.fallbacks, now);
                         }
                     } else {
                         self.deny(ip, now);
@@ -407,7 +469,7 @@ impl Discovery {
             "invalid peer authorization"
         );
         let lease_now = self
-            .expire()
+            .expire(now)
             .ok_or_else(|| anyhow::anyhow!("peer lease clock unavailable"))?;
         let expires = lease_now
             .checked_add(u64::from(info.valid_for_ms) * 1_000_000)
@@ -479,6 +541,14 @@ impl Discovery {
             return Ok(false);
         }
 
+        if self
+            .known
+            .get(&peer_id)
+            .is_none_or(|previous| previous.retired)
+            && self.known.values().filter(|entry| !entry.retired).count() >= MAX_KNOWN
+        {
+            return Ok(false);
+        }
         if let Some(previous) = self.known.get_mut(&peer_id) {
             if info.revision < previous.info.revision {
                 return Ok(false);
@@ -509,8 +579,6 @@ impl Discovery {
             } else if info.revision == previous.info.revision {
                 return Ok(false);
             }
-        } else if self.known.len() >= MAX_KNOWN {
-            return Ok(false);
         }
 
         let key = info.peer_public_key.as_slice().try_into()?;
@@ -540,7 +608,7 @@ impl Discovery {
         });
         debug!(%peer_id, revision = info.revision, "Accepted peer introduction");
         if let Some(previous) = self.known.get_mut(&peer_id) {
-            previous.retire(peer_id, &mut self.by_endpoint);
+            previous.retire(peer_id, &mut self.by_endpoint, &mut self.fallbacks, now);
             for ip in &previous.ips {
                 if self.by_ip.get(ip) == Some(&peer_id) {
                     self.by_ip.remove(ip);
@@ -551,7 +619,7 @@ impl Discovery {
             if let Some(old_id) = self.by_ip.insert(ip, peer_id)
                 && let Some(previous) = self.known.get_mut(&old_id)
             {
-                previous.retire(old_id, &mut self.by_endpoint);
+                previous.discard(old_id, &mut self.by_endpoint, &mut self.fallbacks, now);
             }
         }
         self.known.insert(
@@ -563,6 +631,7 @@ impl Discovery {
                 refresh_at,
                 path,
                 retired: false,
+                retired_at: None,
                 last_uplink: target.map(|_| now),
                 punch_sent: false,
             },
@@ -579,7 +648,7 @@ impl Discovery {
         if !self.enabled || self.socket.is_none() {
             return Vec::new();
         }
-        let Some(lease_now) = self.expire() else {
+        let Some(lease_now) = self.expire(now) else {
             return Vec::new();
         };
         self.update_mtu(now);
@@ -637,8 +706,9 @@ impl Discovery {
                 active = active - usize::from(was_validating)
                     + usize::from(keep && path.validating(now));
                 if !keep {
-                    entry.retire(id, &mut self.by_endpoint);
+                    entry.retire(id, &mut self.by_endpoint, &mut self.fallbacks, now);
                 } else if selected && path.selected.is_none() {
+                    note_fallback(&mut self.fallbacks, &entry.ips);
                     info!(peer = %id, "Peer path timed out, relaying");
                 }
                 if sent_probe
@@ -686,9 +756,12 @@ impl Discovery {
         packet: &[u8],
         ip: IpAddr,
         now: Instant,
-    ) -> bool {
+    ) -> DirectSend {
+        if self.fallbacks.contains(&Fallback::Discard(ip)) {
+            return DirectSend::Discard;
+        }
         if !self.enabled || self.socket.is_none() {
-            return false;
+            return DirectSend::Relay;
         }
         self.update_mtu(now);
         let wire_size = packet.len().saturating_add(protocol::DATA_OVERHEAD);
@@ -696,51 +769,55 @@ impl Discovery {
             || self.wire_size > protocol::REGISTER_MAX
             || !source(packet).is_some_and(|ip| self.is_local(ip))
         {
-            return false;
+            return DirectSend::Relay;
         }
         let Some(&id) = self.by_ip.get(&ip) else {
-            return false;
+            return DirectSend::Relay;
         };
         let Some(entry) = self.known.get_mut(&id) else {
-            return false;
+            return DirectSend::Relay;
         };
         if (self.clock)().is_none_or(|time| time >= entry.expires) {
-            entry.retire(id, &mut self.by_endpoint);
-            return false;
+            entry.retire(id, &mut self.by_endpoint, &mut self.fallbacks, now);
+            return DirectSend::Relay;
         }
         let Some(path) = &mut entry.path else {
-            return false;
+            return DirectSend::Relay;
         };
         let Some(index) = path.selected else {
-            return false;
+            return DirectSend::Relay;
         };
+        if path.suspending() {
+            return DirectSend::Suspend;
+        }
         buffer.clear();
         use std::io::Write;
         if buffer.write_all(packet).is_err()
             || protocol::build_data_interface(buffer, &path.crypto).is_err()
         {
-            return false;
+            return DirectSend::Relay;
         }
         let endpoint = path.candidates[index].endpoint;
         if (self.clock)()
             .is_none_or(|time| time >= entry.expires || path.mapping_expired(endpoint, time))
         {
-            return false;
+            return DirectSend::Relay;
         }
         let endpoint = wire_endpoint(endpoint, self.supernode);
         match socket.try_send_to(buffer.as_ref(), endpoint) {
             Ok(_) => {
                 path.on_direct_traffic(now, wire_size);
-                true
+                DirectSend::Sent
             }
             Err(error) => {
                 if error.kind() != std::io::ErrorKind::WouldBlock {
                     let mtu_failure =
                         (error.raw_os_error() == Some(libc::EMSGSIZE)).then_some(self.wire_size);
                     path.fallback(now, mtu_failure);
+                    note_fallback(&mut self.fallbacks, &entry.ips);
                     info!(peer = %id, %error, "Peer send failed, relaying");
                 }
-                false
+                DirectSend::Relay
             }
         }
     }
@@ -799,7 +876,7 @@ impl Discovery {
             }
             let entry = self.known.get_mut(&id).unwrap();
             if (self.clock)().is_none_or(|time| time >= entry.expires) {
-                entry.retire(id, &mut self.by_endpoint);
+                entry.retire(id, &mut self.by_endpoint, &mut self.fallbacks, now);
                 return None;
             }
             let path = entry.path.as_mut().unwrap();
@@ -839,6 +916,7 @@ impl Discovery {
                 }
                 let previous = candidate.endpoint;
                 remove_endpoint(&mut self.by_endpoint, previous, id);
+                note_fallback(&mut self.fallbacks, &entry.ips);
                 path.rebind(index, from, now);
                 debug!(peer = %id, %previous, endpoint = %from, "Learned peer UDP endpoint");
             }
@@ -888,7 +966,7 @@ impl Discovery {
         let &id = self.by_endpoint.get(&from)?;
         let entry = self.known.get_mut(&id)?;
         let Some(lease_now) = (self.clock)().filter(|&time| time < entry.expires) else {
-            entry.retire(id, &mut self.by_endpoint);
+            entry.retire(id, &mut self.by_endpoint, &mut self.fallbacks, now);
             return None;
         };
         let path = entry.path.as_mut().unwrap();
@@ -907,7 +985,7 @@ impl Discovery {
         let destination = destination(plain);
         let len = plain.len();
         let Some(lease_now) = (self.clock)().filter(|&time| time < entry.expires) else {
-            entry.retire(id, &mut self.by_endpoint);
+            entry.retire(id, &mut self.by_endpoint, &mut self.fallbacks, now);
             return None;
         };
         if path.mapping_expired(from, lease_now) {
@@ -962,12 +1040,60 @@ impl Introduction {
         self.info.pair_id.as_slice().try_into().unwrap()
     }
 
-    fn retire(&mut self, id: PeerId, endpoints: &mut HashMap<SocketAddr, PeerId>) {
+    fn retire(
+        &mut self,
+        id: PeerId,
+        endpoints: &mut HashMap<SocketAddr, PeerId>,
+        fallbacks: &mut Vec<Fallback>,
+        now: Instant,
+    ) {
+        if self.retired {
+            return;
+        }
+        note_fallback(fallbacks, &self.ips);
+        self.retire_inner(id, endpoints, now);
+    }
+
+    fn discard(
+        &mut self,
+        id: PeerId,
+        endpoints: &mut HashMap<SocketAddr, PeerId>,
+        fallbacks: &mut Vec<Fallback>,
+        now: Instant,
+    ) {
+        for &ip in &self.ips {
+            let event = Fallback::Discard(ip);
+            if !fallbacks.contains(&event) {
+                fallbacks.push(event);
+            }
+        }
+        self.retire_inner(id, endpoints, now);
+    }
+
+    fn retire_inner(
+        &mut self,
+        id: PeerId,
+        endpoints: &mut HashMap<SocketAddr, PeerId>,
+        now: Instant,
+    ) {
+        if self.retired {
+            return;
+        }
         self.retired = true;
+        self.retired_at = Some(now);
         if let Some(path) = self.path.take() {
             for candidate in path.candidates {
                 remove_endpoint(endpoints, candidate.endpoint, id);
             }
+        }
+    }
+}
+
+fn note_fallback(fallbacks: &mut Vec<Fallback>, ips: &[IpAddr]) {
+    for &ip in ips {
+        let event = Fallback::Replay(ip);
+        if !fallbacks.contains(&event) {
+            fallbacks.push(event);
         }
     }
 }
@@ -1055,6 +1181,7 @@ mod tests {
         assert!(discovery.install(older, Some(ip), now).unwrap());
         assert_eq!(discovery.by_ip[&ip], PeerId([2; 16]));
         assert!(discovery.known[&PeerId([3; 16])].retired);
+        assert_eq!(discovery.take_fallbacks(), [Fallback::Discard(ip)]);
     }
 
     #[tokio::test]
@@ -1454,12 +1581,18 @@ mod tests {
         assert!(discovery.authorizes(authorization));
         packet[12..20].copy_from_slice(&[10, 0, 0, 2, 10, 0, 0, 3]);
         let destination = "10.0.0.3".parse().unwrap();
-        assert!(discovery.send_direct(&socket, &mut buffer, &packet, destination, now));
+        assert_eq!(
+            discovery.send_direct(&socket, &mut buffer, &packet, destination, now),
+            DirectSend::Sent
+        );
 
         // Advance only the lease clock, as when the device wakes from sleep.
         discovery.clock = || Some(2_500_000_000);
         assert!(!discovery.authorizes(authorization));
-        assert!(!discovery.send_direct(&socket, &mut buffer, &packet, destination, now));
+        assert_eq!(
+            discovery.send_direct(&socket, &mut buffer, &packet, destination, now),
+            DirectSend::Relay
+        );
         let mut packet = make_packet(&mut buffer);
         assert!(
             discovery
@@ -1490,6 +1623,296 @@ mod tests {
                 observed_address
             );
         }
+    }
+
+    #[test]
+    fn retired_capacity() {
+        let (mut discovery, template) = setup();
+        let now = Instant::now();
+        let peer = |host: u8| PeerInfo {
+            peer_id: vec![host; 16],
+            pair_id: vec![host; 16],
+            revision: u64::from(host),
+            peer_vpn_ips: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, host)).into()],
+            ..template.clone()
+        };
+        for host in 3..=66 {
+            assert!(discovery.install(peer(host), None, now).unwrap());
+        }
+        assert!(!discovery.install(peer(100), None, now).unwrap());
+
+        let first = PeerId([3; 16]);
+        discovery.known.get_mut(&first).unwrap().expires = 0;
+        discovery.expire(now);
+        assert!(discovery.install(peer(100), None, now).unwrap());
+        let extra = PeerId([100; 16]);
+        discovery.known.get_mut(&extra).unwrap().expires = 0;
+        discovery.expire(now + Duration::from_millis(1));
+
+        for host in 101..=170 {
+            let tick = now + Duration::from_millis(u64::from(host));
+            assert!(discovery.install(peer(host), None, tick).unwrap());
+            let id = PeerId([host; 16]);
+            discovery.known.get_mut(&id).unwrap().expires = 0;
+            discovery.expire(tick);
+        }
+        assert!(discovery.known.len() <= MAX_KNOWN + MAX_RETIRED);
+        assert!(
+            discovery
+                .known
+                .values()
+                .filter(|entry| entry.retired)
+                .count()
+                <= MAX_RETIRED
+        );
+        assert!(!discovery.known.contains_key(&first));
+        assert!(!discovery.by_ip.contains_key(&"10.0.0.3".parse().unwrap()));
+
+        let latest = PeerId([170; 16]);
+        let latest_ip = "10.0.0.170".parse().unwrap();
+        discovery.observe(latest_ip, now);
+        assert!(matches!(
+            discovery.pending.get(&latest_ip).map(|query| query.kind),
+            Some(QueryKind::Replace(pair)) if pair == [170; 16]
+        ));
+        assert!(discovery.known.contains_key(&latest));
+    }
+
+    fn receive_pending(
+        discovery: &mut Discovery,
+        socket: &UdpSocket,
+        buffer: &mut Buffer,
+        now: Instant,
+        delivered: &mut Vec<Vec<u8>>,
+    ) {
+        let mut wire = [0; protocol::REGISTER_MAX];
+        loop {
+            match socket.try_recv_from(&mut wire) {
+                Ok((len, from)) => {
+                    let mut packet = wire[..len].to_vec();
+                    if let Some(authorization) =
+                        discovery.receive_direct(socket, buffer, from, &mut packet, now)
+                    {
+                        assert!(discovery.authorizes(authorization));
+                        delivered.push(packet);
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(error) => panic!("peer receive failed: {error}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn direct_fallback() {
+        use crate::client::PeerSocket;
+        use std::sync::{Arc, atomic::AtomicUsize};
+
+        let a_id = PeerId([1; 16]);
+        let b_id = PeerId([2; 16]);
+        let a_vpn = Ipv4Addr::new(10, 0, 0, 2);
+        let b_vpn = Ipv4Addr::new(10, 0, 0, 3);
+        let a_key = PeerKeyPair::generate().unwrap();
+        let b_key = PeerKeyPair::generate().unwrap();
+        let a_public = a_key.public;
+        let b_public = b_key.public;
+        let supernode = "192.0.2.1:9527".parse().unwrap();
+        let mut a = Discovery::new(
+            TunnelAssignment::new("10.0.0.2", "255.255.255.0", "", 0).unwrap(),
+            a_id,
+            1,
+            a_key,
+            supernode,
+        );
+        let mut b = Discovery::new(
+            TunnelAssignment::new("10.0.0.3", "255.255.255.0", "", 0).unwrap(),
+            b_id,
+            2,
+            b_key,
+            supernode,
+        );
+        a.clock = test_clock;
+        b.clock = test_clock;
+        let a_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let b_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let a_endpoint = a_socket.local_addr().unwrap();
+        let b_endpoint = b_socket.local_addr().unwrap();
+        for discovery in [&mut a, &mut b] {
+            discovery.enable_direct(PeerSocket {
+                mtu: Arc::new(AtomicUsize::new(1427)),
+                lan_endpoint: None,
+                allow_lan: Arc::new(|_| false),
+                gateway: None,
+            });
+            discovery.confirm();
+        }
+
+        fn introduction(
+            local_epoch: u64,
+            peer_epoch: u64,
+            peer: PeerId,
+            public: [u8; 32],
+            ip: Ipv4Addr,
+            endpoint: SocketAddr,
+        ) -> PeerInfo {
+            PeerInfo {
+                pair_id: vec![5; 16],
+                revision: 1,
+                local_session_epoch: local_epoch,
+                peer_session_epoch: peer_epoch,
+                peer_id: peer.0.to_vec(),
+                peer_public_key: public.to_vec(),
+                peer_vpn_ips: vec![IpAddr::V4(ip).into()],
+                observed_endpoint: Some(endpoint.into()),
+                lan_endpoint: None,
+                valid_for_ms: 10_000,
+                ..Default::default()
+            }
+        }
+        let now = Instant::now();
+        assert!(
+            a.install(
+                introduction(1, 2, b_id, b_public, b_vpn, b_endpoint),
+                Some(IpAddr::V4(b_vpn)),
+                now,
+            )
+            .unwrap()
+        );
+        assert!(
+            b.install(
+                introduction(2, 1, a_id, a_public, a_vpn, a_endpoint),
+                Some(IpAddr::V4(a_vpn)),
+                now,
+            )
+            .unwrap()
+        );
+
+        let mut a_buffer = Buffer::new(crate::EXTRA_LEN + protocol::REGISTER_HEADER);
+        let mut b_buffer = Buffer::new(crate::EXTRA_LEN + protocol::REGISTER_HEADER);
+        let mut a_packets = Vec::new();
+        let mut b_packets = Vec::new();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let now = Instant::now();
+                a.poll_paths(&a_socket, &mut a_buffer, now);
+                b.poll_paths(&b_socket, &mut b_buffer, now);
+                receive_pending(&mut a, &a_socket, &mut a_buffer, now, &mut a_packets);
+                receive_pending(&mut b, &b_socket, &mut b_buffer, now, &mut b_packets);
+                if a.known[&b_id].path.as_ref().unwrap().selected.is_some()
+                    && b.known[&a_id].path.as_ref().unwrap().selected.is_some()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("peers did not validate full-size direct paths");
+
+        let packet = |source: Ipv4Addr, destination: Ipv4Addr| {
+            let mut packet = vec![source.octets()[3]; 1427];
+            packet[0] = 0x45;
+            let size = packet.len() as u16;
+            packet[2..4].copy_from_slice(&size.to_be_bytes());
+            packet[12..16].copy_from_slice(&source.octets());
+            packet[16..20].copy_from_slice(&destination.octets());
+            packet
+        };
+        let a_to_b = packet(a_vpn, b_vpn);
+        assert_eq!(
+            a.send_direct(
+                &a_socket,
+                &mut a_buffer,
+                &a_to_b,
+                IpAddr::V4(b_vpn),
+                Instant::now(),
+            ),
+            DirectSend::Sent
+        );
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while b_packets.is_empty() {
+                receive_pending(
+                    &mut b,
+                    &b_socket,
+                    &mut b_buffer,
+                    Instant::now(),
+                    &mut b_packets,
+                );
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("direct A-to-B packet was not delivered");
+        assert_eq!(b_packets, std::slice::from_ref(&a_to_b));
+
+        let b_to_a = packet(b_vpn, a_vpn);
+        assert_eq!(
+            b.send_direct(
+                &b_socket,
+                &mut b_buffer,
+                &b_to_a,
+                IpAddr::V4(a_vpn),
+                Instant::now(),
+            ),
+            DirectSend::Sent
+        );
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while a_packets.is_empty() {
+                receive_pending(
+                    &mut a,
+                    &a_socket,
+                    &mut a_buffer,
+                    Instant::now(),
+                    &mut a_packets,
+                );
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("direct B-to-A packet was not delivered");
+        assert_eq!(a_packets, [b_to_a]);
+
+        a.fallbacks.push(Fallback::Discard(IpAddr::V4(b_vpn)));
+        assert_eq!(
+            a.send_direct(
+                &a_socket,
+                &mut a_buffer,
+                &a_to_b,
+                IpAddr::V4(b_vpn),
+                Instant::now(),
+            ),
+            DirectSend::Discard
+        );
+        a.take_fallbacks();
+
+        drop(b_socket);
+        let failed_at = Instant::now();
+        for step in 1..=4 {
+            let tick = failed_at + Duration::from_secs(2 * step);
+            a.observe(IpAddr::V4(b_vpn), tick);
+            a.poll_paths(&a_socket, &mut a_buffer, tick);
+            if step == 2 {
+                assert_eq!(
+                    a.send_direct(&a_socket, &mut a_buffer, &a_to_b, IpAddr::V4(b_vpn), tick,),
+                    DirectSend::Suspend
+                );
+            }
+        }
+        assert!(a.known[&b_id].path.as_ref().unwrap().selected.is_none());
+        assert_eq!(
+            a.send_direct(
+                &a_socket,
+                &mut a_buffer,
+                &a_to_b,
+                IpAddr::V4(b_vpn),
+                failed_at + Duration::from_secs(8),
+            ),
+            DirectSend::Relay
+        );
+        assert!(
+            a.take_fallbacks()
+                .contains(&Fallback::Replay(IpAddr::V4(b_vpn)))
+        );
     }
 
     #[test]

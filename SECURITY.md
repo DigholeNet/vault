@@ -146,7 +146,7 @@ known limitations of the current protocol:
    VPN addresses and public key, so a malicious Supernode could substitute a
    key and impersonate a peer. Direct traffic bypasses the Supernode's Linux
    forwarding rules, rate limits and relay audit. Those controls apply only
-   to traffic the Supernode handles. See the [P2P trust model](docs/p2p.md#身份和转发边界).
+   to traffic the Supernode handles.
 
 ## Security Best Practices for Users
 

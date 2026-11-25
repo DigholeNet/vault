@@ -82,7 +82,8 @@ English interfaces on Android, iOS and macOS. Expand each gallery to see all pag
 Each client keeps an encrypted session with the Supernode. For traffic to another
 assigned VPN address, eligible peers start with relay and switch to direct UDP
 after a full-size probe succeeds. Internet traffic continues through the
-Supernode. See the [P2P design](docs/p2p.md) for path selection and fallback.
+Supernode. Path selection and fallback are implemented in `core/src/discovery.rs`
+and `core/src/peer_path.rs`.
 
 ### Design principles
 

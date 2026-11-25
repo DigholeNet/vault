@@ -13,8 +13,9 @@
 //! - downlink packets are delivered in opportunistic batches (drain without
 //!   waiting, so no latency is added) to amortize FFI callback costs.
 
+use std::collections::{HashMap, VecDeque};
 use std::io::Write;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -33,7 +34,7 @@ mod tests;
 pub use crate::gateway::Gateway;
 use crate::{
     crypto::PeerKeyPair,
-    discovery::{DirectAuthorization, Discovery, destination},
+    discovery::{DirectAuthorization, DirectSend, Discovery, Fallback, destination},
 };
 
 use crate::metrics::transport::{
@@ -802,6 +803,215 @@ impl ClientState {
     }
 }
 
+const PEER_BUFFER_BYTES: usize = 256 * 1024;
+const TOTAL_BUFFER_BYTES: usize = 2 * 1024 * 1024;
+const PEER_BUFFER_PACKETS: usize = 256;
+const TOTAL_BUFFER_PACKETS: usize = 2048;
+const RECENT_DIRECT: Duration = Duration::from_secs(6);
+const SUSPEND_TIMEOUT: Duration = Duration::from_secs(8);
+
+struct BufferedPacket {
+    data: Vec<u8>,
+    at: Instant,
+}
+
+#[derive(Default)]
+struct PeerBuffers {
+    pending: VecDeque<BufferedPacket>,
+    recent: VecDeque<BufferedPacket>,
+    bytes: usize,
+    packets: usize,
+}
+
+impl PeerBuffers {
+    fn is_empty(&self) -> bool {
+        self.pending.is_empty() && self.recent.is_empty()
+    }
+}
+
+#[derive(Default)]
+struct PathBuffers {
+    peers: HashMap<IpAddr, PeerBuffers>,
+    relay: VecDeque<BufferedPacket>,
+    bytes: usize,
+    packets: usize,
+}
+
+impl PathBuffers {
+    fn fits(&self, ip: IpAddr, len: usize) -> bool {
+        let peer = self.peers.get(&ip);
+        self.bytes + len <= TOTAL_BUFFER_BYTES
+            && self.packets < TOTAL_BUFFER_PACKETS
+            && peer.is_none_or(|peer| {
+                peer.bytes + len <= PEER_BUFFER_BYTES && peer.packets < PEER_BUFFER_PACKETS
+            })
+    }
+
+    fn suspend(&mut self, ip: IpAddr, data: Vec<u8>, now: Instant) -> Result<(), Vec<u8>> {
+        if !self.fits(ip, data.len()) {
+            return Err(data);
+        }
+        self.bytes += data.len();
+        self.packets += 1;
+        let peer = self.peers.entry(ip).or_default();
+        peer.bytes += data.len();
+        peer.packets += 1;
+        peer.pending.push_back(BufferedPacket { data, at: now });
+        Ok(())
+    }
+
+    fn evict_recent(&mut self, ip: IpAddr, len: usize) {
+        while !self.fits(ip, len) {
+            let per_peer_full = self.peers.get(&ip).is_some_and(|peer| {
+                peer.bytes + len > PEER_BUFFER_BYTES || peer.packets >= PEER_BUFFER_PACKETS
+            });
+            let oldest = if per_peer_full {
+                Some(ip)
+            } else {
+                self.peers
+                    .iter()
+                    .filter_map(|(&ip, peer)| peer.recent.front().map(|packet| (ip, packet.at)))
+                    .min_by_key(|(_, at)| *at)
+                    .map(|(ip, _)| ip)
+            };
+            let Some(oldest) = oldest else {
+                break;
+            };
+            let Some(packet) = self
+                .peers
+                .get_mut(&oldest)
+                .and_then(|peer| peer.recent.pop_front())
+            else {
+                break;
+            };
+            self.bytes -= packet.data.len();
+            self.packets -= 1;
+            let peer = self.peers.get_mut(&oldest).unwrap();
+            peer.bytes -= packet.data.len();
+            peer.packets -= 1;
+            if peer.is_empty() {
+                self.peers.remove(&oldest);
+            }
+        }
+    }
+
+    fn record_direct(&mut self, ip: IpAddr, data: Vec<u8>, now: Instant) {
+        self.evict_recent(ip, data.len());
+        if !self.fits(ip, data.len()) {
+            return;
+        }
+        self.bytes += data.len();
+        self.packets += 1;
+        let peer = self.peers.entry(ip).or_default();
+        peer.bytes += data.len();
+        peer.packets += 1;
+        peer.recent.push_back(BufferedPacket { data, at: now });
+    }
+
+    fn has_pending(&self, ip: IpAddr) -> bool {
+        self.peers
+            .get(&ip)
+            .is_some_and(|peer| !peer.pending.is_empty())
+    }
+
+    fn pending_ips(&self) -> Vec<IpAddr> {
+        self.peers
+            .iter()
+            .filter(|(_, peer)| !peer.pending.is_empty())
+            .map(|(&ip, _)| ip)
+            .collect()
+    }
+
+    fn pop_pending(&mut self, ip: IpAddr) -> Option<BufferedPacket> {
+        let peer = self.peers.get_mut(&ip)?;
+        let packet = peer.pending.pop_front()?;
+        self.bytes -= packet.data.len();
+        self.packets -= 1;
+        peer.bytes -= packet.data.len();
+        peer.packets -= 1;
+        if peer.is_empty() {
+            self.peers.remove(&ip);
+        }
+        Some(packet)
+    }
+
+    fn push_pending_front(&mut self, ip: IpAddr, packet: BufferedPacket) {
+        self.bytes += packet.data.len();
+        self.packets += 1;
+        let peer = self.peers.entry(ip).or_default();
+        peer.bytes += packet.data.len();
+        peer.packets += 1;
+        peer.pending.push_front(packet);
+    }
+
+    fn fallback(&mut self, ip: IpAddr) {
+        if let Some(peer) = self.peers.remove(&ip) {
+            self.relay.extend(peer.recent);
+            self.relay.extend(peer.pending);
+        }
+    }
+
+    fn discard(&mut self, ip: IpAddr) {
+        if let Some(peer) = self.peers.remove(&ip) {
+            self.bytes -= peer.bytes;
+            self.packets -= peer.packets;
+        }
+        let mut bytes = 0;
+        let mut packets = 0;
+        self.relay.retain(|packet| {
+            if destination(&packet.data) == Some(ip) {
+                bytes += packet.data.len();
+                packets += 1;
+                false
+            } else {
+                true
+            }
+        });
+        self.bytes -= bytes;
+        self.packets -= packets;
+    }
+
+    fn push_relay(&mut self, packet: BufferedPacket) {
+        self.bytes += packet.data.len();
+        self.packets += 1;
+        self.relay.push_back(packet);
+    }
+
+    fn pop_relay(&mut self) -> Option<BufferedPacket> {
+        let packet = self.relay.pop_front()?;
+        self.bytes -= packet.data.len();
+        self.packets -= 1;
+        Some(packet)
+    }
+
+    fn prune(&mut self, now: Instant) {
+        for peer in self.peers.values_mut() {
+            while peer
+                .recent
+                .front()
+                .is_some_and(|packet| now.saturating_duration_since(packet.at) >= RECENT_DIRECT)
+            {
+                let packet = peer.recent.pop_front().unwrap();
+                self.bytes -= packet.data.len();
+                self.packets -= 1;
+                peer.bytes -= packet.data.len();
+                peer.packets -= 1;
+            }
+            while peer
+                .pending
+                .front()
+                .is_some_and(|packet| now.saturating_duration_since(packet.at) >= SUSPEND_TIMEOUT)
+            {
+                let packet = peer.pending.pop_front().unwrap();
+                peer.bytes -= packet.data.len();
+                peer.packets -= 1;
+                self.relay.push_back(packet);
+            }
+        }
+        self.peers.retain(|_, peer| !peer.is_empty());
+    }
+}
+
 struct HandshakeTransport {
     socket: Arc<UdpSocket>,
     crypto: Arc<CryptoCore>,
@@ -812,6 +1022,128 @@ struct HandshakeTransport {
 }
 
 type HandshakeAttempts = JoinSet<(usize, SocketAddr, Result<HandshakeTransport, ClientError>)>;
+
+fn apply_fallbacks(discovery: &SharedDiscovery, buffers: &mut PathBuffers) -> bool {
+    let fallbacks = discovery
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take_fallbacks();
+    let changed = !fallbacks.is_empty();
+    for event in fallbacks {
+        match event {
+            Fallback::Replay(ip) => buffers.fallback(ip),
+            Fallback::Discard(ip) => buffers.discard(ip),
+        }
+    }
+    changed
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn relay_packet(
+    socket: &UdpSocket,
+    crypto: &CryptoCore,
+    remote_addr: SocketAddr,
+    counters: &UplinkCounters,
+    report: &mut UplinkReport,
+    discovery: Option<&SharedDiscovery>,
+    buf: &mut Buffer,
+    data: Vec<u8>,
+) {
+    buf.clear();
+    if data.len() > 65_507 - EXTRA_LEN - 1 - crate::TAG_LEN
+        || buf.write_all(&data).is_err()
+        || protocol::build_data_interface(buf, crypto).is_err()
+    {
+        counters.build_failures.fetch_add(1, Ordering::Relaxed);
+        report.build_failure();
+        return;
+    }
+    match socket.send_to(buf.as_ref(), remote_addr).await {
+        Ok(_) => {
+            counters
+                .bytes_sent
+                .fetch_add(data.len() as u64, Ordering::Relaxed);
+            counters.packets_sent.fetch_add(1, Ordering::Relaxed);
+            report.sent(data.len());
+            if let Some(discovery) = discovery
+                && let Some(ip) = destination(&data)
+            {
+                discovery
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .observe(ip, Instant::now());
+            }
+        }
+        Err(error) => {
+            counters.send_failures.fetch_add(1, Ordering::Relaxed);
+            report.send_error(&error);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn flush_buffers(
+    socket: &UdpSocket,
+    crypto: &CryptoCore,
+    remote_addr: SocketAddr,
+    counters: &UplinkCounters,
+    report: &mut UplinkReport,
+    discovery: &SharedDiscovery,
+    buffers: &mut PathBuffers,
+    buf: &mut Buffer,
+) {
+    apply_fallbacks(discovery, buffers);
+    buffers.prune(Instant::now());
+    for ip in buffers.pending_ips() {
+        while let Some(packet) = buffers.pop_pending(ip) {
+            let now = Instant::now();
+            let result = discovery
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .send_direct(socket, buf, &packet.data, ip, now);
+            match result {
+                DirectSend::Sent => {
+                    discovery
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .observe(ip, now);
+                    counters
+                        .bytes_sent
+                        .fetch_add(packet.data.len() as u64, Ordering::Relaxed);
+                    counters
+                        .direct_bytes_sent
+                        .fetch_add(packet.data.len() as u64, Ordering::Relaxed);
+                    counters.packets_sent.fetch_add(1, Ordering::Relaxed);
+                    report.sent(packet.data.len());
+                    buffers.record_direct(ip, packet.data, now);
+                }
+                DirectSend::Suspend => {
+                    buffers.push_pending_front(ip, packet);
+                    break;
+                }
+                DirectSend::Relay => {
+                    apply_fallbacks(discovery, buffers);
+                    buffers.push_relay(packet);
+                }
+                DirectSend::Discard => {}
+            }
+        }
+    }
+    apply_fallbacks(discovery, buffers);
+    while let Some(packet) = buffers.pop_relay() {
+        relay_packet(
+            socket,
+            crypto,
+            remote_addr,
+            counters,
+            report,
+            Some(discovery),
+            buf,
+            packet.data,
+        )
+        .await;
+    }
+}
 
 impl ClientInner {
     async fn run(
@@ -1368,51 +1700,113 @@ impl ClientInner {
     ) {
         let mut buf = Buffer::new(EXTRA_LEN + 1);
         let mut report = UplinkReport::new(queue_metrics.clone(), remote_addr, generation);
+        let mut buffers = PathBuffers::default();
+        let mut flush_tick = interval(Duration::from_millis(100));
         let mut ticker = maintenance_interval();
         loop {
             tokio::select! {
                 packet = rx.recv() => {
-                    let Some(data) = packet else { break; };
+                    let Some(mut data) = packet else { break; };
                     queue_metrics.queue.observe(rx.len().saturating_add(1));
                     if let Some(discovery) = &discovery
                         && let Some(ip) = destination(&data)
                     {
                         let now = Instant::now();
-                        let mut discovery = discovery.lock().unwrap_or_else(|e| e.into_inner());
-                        if discovery.send_direct(&socket, &mut buf, &data, ip, now) {
-                            discovery.observe(ip, now);
-                            counters.bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
-                            counters.direct_bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
-                            counters.packets_sent.fetch_add(1, Ordering::Relaxed);
-                            report.sent(data.len());
-                            continue;
+                        if apply_fallbacks(discovery, &mut buffers) {
+                            flush_buffers(
+                                &socket,
+                                &crypto,
+                                remote_addr,
+                                &counters,
+                                &mut report,
+                                discovery,
+                                &mut buffers,
+                                &mut buf,
+                            )
+                            .await;
                         }
-                    }
-                    buf.clear();
-                    // Bound both the fixed backing buffer and IPv4 UDP's
-                    // maximum payload before copying/encrypting FFI input.
-                    if data.len() > 65_507 - EXTRA_LEN - 1 - crate::TAG_LEN
-                        || buf.write_all(&data).is_err()
-                        || protocol::build_data_interface(&mut buf, &crypto).is_err() {
-                        counters.build_failures.fetch_add(1, Ordering::Relaxed);
-                        report.build_failure();
-                        continue;
-                    }
-                    match socket.send_to(buf.as_ref(), remote_addr).await {
-                        Ok(_) => {
-                            counters.bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
-                            counters.packets_sent.fetch_add(1, Ordering::Relaxed);
-                            report.sent(data.len());
-                            if let Some(discovery) = &discovery
-                                && let Some(ip) = destination(&data)
-                            {
-                                discovery.lock().unwrap_or_else(|e| e.into_inner()).observe(ip, Instant::now());
+                        if buffers.has_pending(ip) {
+                            match buffers.suspend(ip, data, now) {
+                                Ok(()) => continue,
+                                Err(returned) => data = returned,
+                            }
+                        } else {
+                            let result = discovery
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .send_direct(&socket, &mut buf, &data, ip, now);
+                            match result {
+                                DirectSend::Sent => {
+                                    discovery
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .observe(ip, now);
+                                    counters.bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
+                                    counters.direct_bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
+                                    counters.packets_sent.fetch_add(1, Ordering::Relaxed);
+                                    report.sent(data.len());
+                                    buffers.record_direct(ip, data, now);
+                                    continue;
+                                }
+                                DirectSend::Suspend => {
+                                    match buffers.suspend(ip, data, now) {
+                                        Ok(()) => continue,
+                                        Err(returned) => data = returned,
+                                    }
+                                }
+                                DirectSend::Relay => {}
+                                DirectSend::Discard => continue,
                             }
                         }
-                        Err(error) => {
-                            counters.send_failures.fetch_add(1, Ordering::Relaxed);
-                            report.send_error(&error);
-                        }
+                        flush_buffers(
+                            &socket,
+                            &crypto,
+                            remote_addr,
+                            &counters,
+                            &mut report,
+                            discovery,
+                            &mut buffers,
+                            &mut buf,
+                        )
+                        .await;
+                        relay_packet(
+                            &socket,
+                            &crypto,
+                            remote_addr,
+                            &counters,
+                            &mut report,
+                            Some(discovery),
+                            &mut buf,
+                            data,
+                        )
+                        .await;
+                        continue;
+                    }
+                    relay_packet(
+                        &socket,
+                        &crypto,
+                        remote_addr,
+                        &counters,
+                        &mut report,
+                        discovery.as_ref(),
+                        &mut buf,
+                        data,
+                    )
+                    .await;
+                }
+                _ = flush_tick.tick(), if discovery.is_some() => {
+                    if let Some(discovery) = &discovery {
+                        flush_buffers(
+                            &socket,
+                            &crypto,
+                            remote_addr,
+                            &counters,
+                            &mut report,
+                            discovery,
+                            &mut buffers,
+                            &mut buf,
+                        )
+                        .await;
                     }
                 }
                 _ = ticker.tick() => {
@@ -1746,6 +2140,62 @@ impl ClientInner {
     }
 }
 
+const MAPPING_IDLE: Duration = Duration::from_secs(30);
+const MAPPING_WITHDRAWALS: u8 = 3;
+
+#[derive(Default)]
+struct MappingState {
+    needed_since: Option<tokio::time::Instant>,
+    idle_since: Option<tokio::time::Instant>,
+    revision: u64,
+    announced: bool,
+    withdrawals_left: u8,
+}
+
+impl MappingState {
+    fn update(&mut self, needed: bool, now: tokio::time::Instant) {
+        if needed {
+            self.needed_since.get_or_insert(now);
+            self.idle_since = None;
+        } else {
+            self.needed_since = None;
+            self.idle_since.get_or_insert(now);
+        }
+    }
+
+    fn acquire_due(&self, now: tokio::time::Instant, retry_at: tokio::time::Instant) -> bool {
+        now >= retry_at
+            && self
+                .needed_since
+                .is_some_and(|since| now - since >= Duration::from_secs(2))
+    }
+
+    fn release_due(&self, now: tokio::time::Instant) -> bool {
+        self.idle_since
+            .is_some_and(|since| now - since >= MAPPING_IDLE)
+    }
+
+    fn withdraw(&mut self) {
+        if self.announced && self.withdrawals_left == 0 {
+            self.withdrawals_left = MAPPING_WITHDRAWALS;
+        }
+    }
+
+    fn should_announce(&self, mapped: bool) -> bool {
+        mapped || self.withdrawals_left > 0
+    }
+
+    fn record_announcement(&mut self, port: u16) {
+        if port == 0 {
+            self.announced = false;
+            self.withdrawals_left = self.withdrawals_left.saturating_sub(1);
+        } else {
+            self.announced = true;
+            self.withdrawals_left = 0;
+        }
+    }
+}
+
 async fn run_gateway_mapping(
     gateway: Gateway,
     local_port: u16,
@@ -1761,10 +2211,9 @@ async fn run_gateway_mapping(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut lease: Option<crate::gateway::Lease> = None;
     let mut retry_at = tokio::time::Instant::now();
-    let mut needed_since = None;
+    let mut state = MappingState::default();
     let mut next_announcement = retry_at;
     let mut renew_at = retry_at;
-    let mut revision = 0;
     let mut buffer = Buffer::new(EXTRA_LEN + 1);
     loop {
         tick.tick().await;
@@ -1776,15 +2225,8 @@ async fn run_gateway_mapping(
                 discovery.accepts_mapping(),
             )
         };
-        if !needed {
-            needed_since = None;
-        } else {
-            needed_since.get_or_insert(now);
-        }
-        if lease.is_none()
-            && now >= retry_at
-            && needed_since.is_some_and(|since| now - since >= Duration::from_secs(2))
-        {
+        state.update(needed, now);
+        if lease.is_none() && state.acquire_due(now, retry_at) {
             match gateway.map(local_port, public_ip).await {
                 Ok(mapped) => {
                     info!(local_port, endpoint = ?mapped.advertised(), "Acquired gateway UDP mapping");
@@ -1798,7 +2240,8 @@ async fn run_gateway_mapping(
                 }
             }
         }
-        if let Some(mapped) = lease.as_mut()
+        if needed
+            && let Some(mapped) = lease.as_mut()
             && now >= renew_at
         {
             if mapped.renew().await.is_ok() {
@@ -1808,26 +2251,31 @@ async fn run_gateway_mapping(
                 debug!("Gateway UDP mapping renewal failed");
                 lease = None;
                 retry_at = now + Duration::from_secs(30);
+                state.withdraw();
                 next_announcement = now;
             }
         }
-        if can_announce && now >= next_announcement && (lease.is_some() || revision != 0) {
-            let (port, lifetime_ms) = lease
-                .as_ref()
-                .and_then(|mapped| mapped.advertised())
-                .unwrap_or_default();
-            revision += 1;
+        if state.release_due(now) && (lease.is_some() || state.announced) {
+            lease = None;
+            state.withdraw();
+            next_announcement = now;
+        }
+        let advertised = lease.as_ref().and_then(|mapped| mapped.advertised());
+        if can_announce && now >= next_announcement && state.should_announce(advertised.is_some()) {
+            let (port, lifetime_ms) = advertised.unwrap_or_default();
+            state.revision += 1;
             send_find_peer(
                 &mut buffer,
                 crypto,
                 socket,
                 remote,
                 Data::Mapping(PeerMapping {
-                    revision,
+                    revision: state.revision,
                     port: u32::from(port),
                     lifetime_ms,
                 }),
             );
+            state.record_announcement(port);
             next_announcement = now + Duration::from_secs(10);
         }
     }

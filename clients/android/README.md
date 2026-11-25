@@ -196,8 +196,6 @@ Runtime Logs. The app does not expose a cipher-selection setting.
 
 ## Documentation
 
-- [P2P design](../../docs/p2p.md) — direct discovery, routing and fallback
-
 - [Shared diagnostics](../../docs/diagnostics-engine.md) — workflow, transport, trust and verification
 - [Protocol specification](../../docs/protocol.md) — wire format, handshake, encryption
 - [Performance](../../docs/performance.md) — protocol costs, timers and measurement guidance

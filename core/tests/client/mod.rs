@@ -490,3 +490,209 @@ async fn udp_send_failure() {
     assert_eq!(counters.packets_sent.load(Ordering::Relaxed), 0);
     assert_eq!(counters.send_failures.load(Ordering::Relaxed), 1);
 }
+
+#[test]
+fn mapping_lifecycle() {
+    let start = tokio::time::Instant::now();
+    let mut state = MappingState::default();
+    state.update(true, start);
+    assert!(!state.acquire_due(start, start));
+    assert!(state.acquire_due(start + Duration::from_secs(2), start));
+    state.record_announcement(40_000);
+
+    state.update(false, start + Duration::from_secs(3));
+    state.update(true, start + Duration::from_secs(10));
+    assert!(!state.release_due(start + Duration::from_secs(100)));
+    state.update(false, start + Duration::from_secs(11));
+    assert!(!state.release_due(start + Duration::from_secs(40)));
+    assert!(state.release_due(start + Duration::from_secs(41)));
+
+    state.withdraw();
+    assert!(state.should_announce(false));
+    for remaining in [2, 1, 0] {
+        state.record_announcement(0);
+        assert_eq!(state.withdrawals_left, remaining);
+        state.withdraw();
+        assert_eq!(state.withdrawals_left, remaining);
+    }
+    assert!(!state.should_announce(false));
+
+    state.update(true, start + Duration::from_secs(42));
+    assert!(!state.acquire_due(start + Duration::from_secs(43), start));
+    assert!(state.acquire_due(start + Duration::from_secs(44), start));
+}
+
+#[test]
+fn fallback_replay() {
+    let now = Instant::now();
+    let ip = "10.0.0.3".parse().unwrap();
+    let mut buffers = PathBuffers::default();
+    buffers.record_direct(ip, vec![1], now);
+    buffers.suspend(ip, vec![2], now).unwrap();
+    buffers.fallback(ip);
+    assert_eq!(buffers.pop_relay().unwrap().data, [1]);
+    assert_eq!(buffers.pop_relay().unwrap().data, [2]);
+    assert!(buffers.pop_relay().is_none());
+    assert_eq!((buffers.bytes, buffers.packets), (0, 0));
+}
+
+#[test]
+fn buffer_limits() {
+    let now = Instant::now();
+    let ip = "10.0.0.3".parse().unwrap();
+    let mut buffers = PathBuffers::default();
+    for value in 0..PEER_BUFFER_PACKETS {
+        buffers.suspend(ip, vec![value as u8; 20], now).unwrap();
+    }
+    assert!(buffers.suspend(ip, vec![9; 20], now).is_err());
+    let packets = buffers.packets;
+    buffers.record_direct(ip, vec![9; 20], now);
+    assert_eq!(buffers.packets, packets);
+
+    let mut index = 0;
+    while buffers.packets < TOTAL_BUFFER_PACKETS {
+        let other = format!("10.1.{}.1", index / PEER_BUFFER_PACKETS)
+            .parse()
+            .unwrap();
+        buffers.suspend(other, vec![0; 20], now).unwrap();
+        index += 1;
+    }
+    assert!(
+        buffers
+            .suspend("10.2.0.1".parse().unwrap(), vec![0; 20], now)
+            .is_err()
+    );
+
+    let mut buffers = PathBuffers::default();
+    buffers.record_direct(ip, vec![1], now);
+    buffers.suspend(ip, vec![2], now).unwrap();
+    buffers.prune(now + RECENT_DIRECT + Duration::from_secs(1));
+    assert_eq!(buffers.packets, 1);
+    assert!(buffers.peers[&ip].recent.is_empty());
+    buffers.prune(now + SUSPEND_TIMEOUT + Duration::from_secs(1));
+    assert!(buffers.peers.is_empty());
+    assert_eq!(buffers.pop_relay().unwrap().data, [2]);
+    assert_eq!((buffers.bytes, buffers.packets), (0, 0));
+}
+
+fn test_ip_packet(destination: u8, payload: u8) -> Vec<u8> {
+    let mut packet = vec![payload; 20];
+    packet[0] = 0x45;
+    packet[2..4].copy_from_slice(&20u16.to_be_bytes());
+    packet[12..16].copy_from_slice(&[10, 0, 0, 2]);
+    packet[16..20].copy_from_slice(&[10, 0, 0, destination]);
+    packet
+}
+
+#[test]
+fn recent_eviction() {
+    let now = Instant::now();
+    let ip = "10.0.0.3".parse().unwrap();
+    let mut buffers = PathBuffers::default();
+    for index in 0..PEER_BUFFER_PACKETS {
+        buffers.record_direct(
+            ip,
+            test_ip_packet(3, index as u8),
+            now + Duration::from_millis(index as u64),
+        );
+    }
+    buffers.record_direct(ip, test_ip_packet(3, 99), now + Duration::from_secs(1));
+    assert_eq!(buffers.packets, PEER_BUFFER_PACKETS);
+    buffers.fallback(ip);
+    let packets: Vec<_> = std::iter::from_fn(|| buffers.pop_relay()).collect();
+    assert_eq!(packets.first().unwrap().data, test_ip_packet(3, 1));
+    assert_eq!(packets.last().unwrap().data, test_ip_packet(3, 99));
+
+    let mut buffers = PathBuffers::default();
+    for index in 0..TOTAL_BUFFER_PACKETS {
+        let ip = format!("10.1.{}.1", index / PEER_BUFFER_PACKETS)
+            .parse()
+            .unwrap();
+        buffers.record_direct(
+            ip,
+            test_ip_packet(3, (index % PEER_BUFFER_PACKETS) as u8),
+            now + Duration::from_millis(index as u64),
+        );
+    }
+    let first_ip = "10.1.0.1".parse().unwrap();
+    buffers.record_direct(
+        "10.2.0.1".parse().unwrap(),
+        test_ip_packet(3, 99),
+        now + Duration::from_secs(1),
+    );
+    assert_eq!(buffers.packets, TOTAL_BUFFER_PACKETS);
+    assert_eq!(buffers.bytes, TOTAL_BUFFER_PACKETS * 20);
+    let first = &buffers.peers[&first_ip];
+    assert_eq!(first.recent.len(), PEER_BUFFER_PACKETS - 1);
+    assert_eq!(first.recent.front().unwrap().data, test_ip_packet(3, 1));
+    let latest = &buffers.peers[&"10.2.0.1".parse().unwrap()];
+    assert_eq!(latest.recent.front().unwrap().data, test_ip_packet(3, 99));
+}
+
+#[test]
+fn discard_owner() {
+    let now = Instant::now();
+    let ip = "10.0.0.3".parse().unwrap();
+    let mut buffers = PathBuffers::default();
+    buffers.record_direct(ip, test_ip_packet(3, 1), now);
+    buffers.fallback(ip);
+    buffers.record_direct(ip, test_ip_packet(3, 2), now);
+    buffers.suspend(ip, test_ip_packet(3, 3), now).unwrap();
+    buffers.discard(ip);
+    assert!(buffers.pop_relay().is_none());
+    assert!(buffers.peers.is_empty());
+    assert_eq!((buffers.bytes, buffers.packets), (0, 0));
+}
+
+#[tokio::test]
+async fn relay_flush() {
+    let center = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let remote = center.local_addr().unwrap();
+    let (sender, receiver) = crypto_pair();
+    let crypto = Arc::new(sender);
+    let discovery = Arc::new(Mutex::new(Discovery::new(
+        crate::settings::TunnelAssignment::new("10.0.0.2", "255.255.255.0", "", 0).unwrap(),
+        PeerId([1; 16]),
+        1,
+        PeerKeyPair::generate().unwrap(),
+        remote,
+    )));
+    let counters = Arc::new(UplinkCounters::default());
+    let (queue_tx, _queue_rx) = mpsc::channel(1);
+    let queue_metrics = Arc::new(UplinkQueueMetrics::new(&queue_tx));
+    let mut report = UplinkReport::new(queue_metrics, remote, 1);
+    let mut buffers = PathBuffers::default();
+    let ip = "10.0.0.3".parse().unwrap();
+    let now = Instant::now();
+    for payload in 1..=3 {
+        buffers
+            .suspend(ip, test_ip_packet(3, payload), now)
+            .unwrap();
+    }
+    let mut buf = Buffer::new(EXTRA_LEN + 1);
+    flush_buffers(
+        &socket,
+        &crypto,
+        remote,
+        &counters,
+        &mut report,
+        &discovery,
+        &mut buffers,
+        &mut buf,
+    )
+    .await;
+
+    for payload in 1..=3 {
+        let mut packet = vec![0; 1500];
+        let (len, _) = tokio::time::timeout(Duration::from_secs(1), center.recv_from(&mut packet))
+            .await
+            .unwrap()
+            .unwrap();
+        packet.truncate(len);
+        decrypt_packet(&receiver, &mut packet).unwrap();
+        assert_eq!(packet, test_ip_packet(3, payload));
+    }
+    assert_eq!((buffers.bytes, buffers.packets), (0, 0));
+    assert_eq!(counters.packets_sent.load(Ordering::Relaxed), 3);
+}

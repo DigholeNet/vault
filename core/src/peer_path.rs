@@ -72,6 +72,7 @@ pub(crate) struct PeerPath {
     validation: Validation,
     retries: usize,
     misses: u8,
+    suspect: bool,
     need_full: bool,
     repeat_small_probe: bool,
 }
@@ -111,9 +112,14 @@ impl PeerPath {
             validation: Validation::Ready,
             retries: 0,
             misses: 0,
+            suspect: false,
             need_full: false,
             repeat_small_probe: false,
         }
+    }
+
+    pub fn suspending(&self) -> bool {
+        self.selected.is_some() && self.suspect
     }
 
     pub fn update_mtu(&mut self, size: usize, increased: bool, now: Instant) {
@@ -127,6 +133,9 @@ impl PeerPath {
             if increased {
                 candidate.validated_size = 0;
             }
+        }
+        if increased {
+            self.suspect = false;
         }
         if increased && self.selected.take().is_some() {
             self.misses = 0;
@@ -212,6 +221,7 @@ impl PeerPath {
 
     pub fn rebind(&mut self, index: usize, endpoint: SocketAddr, now: Instant) {
         self.candidates[index] = Candidate::new(endpoint);
+        self.suspect = false;
         if self.selected == Some(index) {
             self.selected = None;
             self.misses = 0;
@@ -238,6 +248,7 @@ impl PeerPath {
         self.due = now + VALIDATION_ROUND;
         self.validation = Validation::Waiting;
         self.misses = 0;
+        self.suspect = false;
         self.need_full = false;
     }
 
@@ -387,6 +398,7 @@ impl PeerPath {
                 candidate.small_probe_confirmed = false;
             }
             self.selected = None;
+            self.suspect = false;
             self.validation = Validation::Waiting;
             self.last_direct = now;
             return true;
@@ -410,6 +422,7 @@ impl PeerPath {
             if let Some(previous) = candidate.waiting.take() {
                 self.need_full |= previous.size == size;
                 self.misses += 1;
+                self.suspect = true;
                 if self.misses >= 3 {
                     self.fallback(now, None);
                     return true;
@@ -551,12 +564,14 @@ impl PeerPath {
         }
         if self.selected == Some(index) {
             self.misses = 0;
+            self.suspect = false;
         }
         if probe.size == size && candidate.mtu_failure != Some(size) {
             candidate.validated_size = probe.size;
             if self.selected.is_none() || (self.is_lan(index) && self.selected != Some(index)) {
                 self.selected = Some(index);
                 self.misses = 0;
+                self.suspect = false;
                 self.due = now
                     + if !self.is_lan(index) && self.has_lan() {
                         VALIDATION_RETRY

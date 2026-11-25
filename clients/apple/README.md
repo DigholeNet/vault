@@ -22,7 +22,7 @@ app can offer LAN candidates on Wi-Fi and Ethernet.
 
 On a network change or reconnect, the provider resolves the configured
 Supernode again and refreshes its route exclusions. A network change or wake
-invalidates old peer paths. See the [P2P design](../../docs/p2p.md).
+invalidates old peer paths.
 
 ## Project structure
 

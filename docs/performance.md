@@ -16,7 +16,7 @@ These values describe implementation behavior, not measured performance:
 | Outer network overhead | UDP adds 8 bytes; IP adds at least 20 bytes for IPv4 or 40 for IPv6 |
 | Heartbeat interval | 10 seconds |
 | Supernode inactivity timeout | 30 seconds without authenticated Supernode data or a pong |
-| Active direct path | Probe every 2 seconds while sending traffic, return to relay after 3 unanswered probes |
+| Active direct path | Probe every 2 seconds while sending traffic; the first miss suspends new direct sends, and 3 misses trigger relay replay |
 | Automatic retry delay | Exponential backoff from 1 to 60 seconds |
 
 The 60-second value limits the retry delay, not total reconnection time. DNS,

@@ -138,8 +138,14 @@ starts with a 64-byte authenticated probe. Once the expected endpoint
 acknowledges it, the edge sends a maximum-size probe. Its acknowledgement
 allows that direction to send direct data up to the sender's TUN MTU.
 Receivers use the same 1472-byte UDP payload ceiling for peer probes and
-direct data, independent of their own TUN MTU. The edge resumes relaying
-after a path failure.
+direct data, independent of their own TUN MTU. The first unanswered probe
+suspends new direct sends and buffers them while later probes continue. After
+three unanswered probes, the edge resumes relaying and replays up to six
+seconds of recent direct packets followed by the waiting queue. Buffers are
+bounded and waiting packets expire to relay after eight seconds. Replayed
+packets can therefore arrive more than once. When a VPN address changes to a
+different owner, buffered packets for the previous owner are discarded instead
+of being relayed to the new owner.
 An authenticated registration can reveal a changed source port on the
 introduced address. The edge acknowledges requests at their actual source
 and validates the new port before moving outgoing traffic to it.
@@ -165,7 +171,8 @@ physical network changes.
 When ordinary IPv4 probes have not verified a direct path, Linux, Android,
 iOS, and macOS can request a short PCP or NAT-PMP UDP lease on the physical
 gateway for their current tunnel port. The lease is renewed before expiry
-and released on transport shutdown when the gateway is still reachable.
+while it is needed, and released after 30 seconds without demand or on
+transport shutdown when the gateway is still reachable.
 The edge checks the mapped public IPv4 address against its authenticated
 Supernode observation. An authenticated `PeerMapping` update can advertise
 an extra port on that address or withdraw it. Supported Supernodes forward
@@ -173,8 +180,6 @@ the extra candidate to the current pair using `PeerInfo`, with a lifetime
 bounded by the remaining pair and gateway leases. It goes through the same
 authenticated probes as the observed endpoint. Peers check the mapping expiry
 before using the endpoint and preserve a verified route on same-port renewal.
-
-For the full wire format and timeout behavior, see [the P2P design](p2p.md).
 
 ## Encryption format
 
@@ -209,7 +214,7 @@ the dispatched type for both established sessions and pending-handshake
 confirmation; authentication failures do not advance the replay window.
 Peer probes use a 33-byte associated-data header with the type and both
 `PeerId`s, and share counters and replay state with direct data. See
-the [peer registration format](p2p.md).
+the peer registration implementation in `core/src/protocol.rs`.
 
 Supernode sessions support AES-128-GCM, AES-256-GCM and ChaCha20-Poly1305. Both
 sides measure their own per-algorithm speeds, the client offers its list in

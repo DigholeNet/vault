@@ -131,7 +131,7 @@ uses its own physical route and probes.
 Edge discovers public and eligible LAN candidates automatically. Direct and
 relayed paths both require protocol v2 on the client and server. Remove
 `peer_discovery` or `peer_lan` entries from configurations made for earlier
-test builds. See the [P2P design](../../docs/p2p.md).
+test builds.
 
 ## Usage and deployment
 

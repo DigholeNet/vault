@@ -70,8 +70,7 @@ before startup.
 
 Validate Supernode relay, encrypted direct peer traffic, and fallback to
 relay on the release build. To test relay-only operation, use a path where
-peer UDP is blocked and the Supernode remains reachable. See the
-[P2P acceptance scenarios](p2p.md#6-实施和验收).
+peer UDP is blocked and the Supernode remains reachable.
 
 ## Android version-code policy
 

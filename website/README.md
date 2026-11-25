@@ -37,7 +37,7 @@ Keep the site aligned with these repository sources:
 - `README.md`, `CHANGELOG.md`: development status and release availability.
 - `clients/apple/Vault.xcodeproj/project.pbxproj`, `clients/android/gradle/libs.versions.toml`: actual app OS requirements, distinct from shared-package requirements.
 - `Cargo.toml`, component READMEs: build toolchain and deployment prerequisites.
-- `core/src/client.rs`, `docs/protocol.md`, `docs/p2p.md`, `SECURITY.md`: wire compatibility, direct paths and relay, heartbeat/retry behavior and trust.
+- `core/src/client.rs`, `core/src/discovery.rs`, `core/src/peer_path.rs`, `docs/protocol.md`, `SECURITY.md`: wire compatibility, direct paths and relay, heartbeat/retry behavior and trust.
 - `supernode/src/network.rs`, `supernode/README.md`: host-wide forwarding and RA changes persist after shutdown.
 - `PRIVACY.md`, `docs/diagnostics-engine.md`: handshake metadata, server operator visibility and diagnostic probe scopes.
 - `docs/performance.md`: implementation timings are not throughput or recovery guarantees.
