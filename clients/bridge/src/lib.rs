@@ -13,9 +13,11 @@ use std::sync::{Arc, Mutex, Once};
 
 use vault_core::PeerId;
 use vault_core::client::{
-    ClientCallbacks, ClientConfig, ClientError, ClientSession, Gateway, PeerSocket,
-    TrafficStats as CoreTrafficStats, TransportPath, TransportRoutes, TunnelSetup,
+    ClientCallbacks, ClientConfig, ClientError, ClientSession, TrafficStats as CoreTrafficStats,
+    TunnelSetup,
 };
+#[cfg(any(target_os = "android", target_vendor = "apple"))]
+use vault_core::client::{Gateway, PeerSocket, TransportPath, TransportRoutes};
 use vault_core::logger::shared;
 
 pub mod diagnostics;
@@ -269,6 +271,7 @@ impl RustTunnelSetup {
 
 /// Adapts the UniFFI `EdgeCallbacks` to vault-core's `ClientCallbacks`.
 struct CallbackAdapter {
+    #[cfg(any(target_os = "android", target_vendor = "apple"))]
     peer_mtu: Arc<AtomicUsize>,
     inner: Arc<Box<dyn EdgeCallbacks>>,
 }
@@ -318,6 +321,7 @@ impl ClientCallbacks for CallbackAdapter {
         }
     }
 
+    #[cfg(any(target_os = "android", target_vendor = "apple"))]
     fn resolve_transport(&self) -> Option<Result<TransportPath, ClientError>> {
         let result = catch_unwind(AssertUnwindSafe(|| self.inner.resolve_transport()));
         let transport = match result {
@@ -386,6 +390,7 @@ impl ClientCallbacks for CallbackAdapter {
         }))
     }
 
+    #[cfg(any(target_os = "android", target_vendor = "apple"))]
     fn on_transport_assigned(
         &self,
         assignment: vault_core::settings::TunnelAssignment,
@@ -422,6 +427,7 @@ impl ClientCallbacks for CallbackAdapter {
     }
 }
 
+#[cfg(any(target_os = "android", target_vendor = "apple"))]
 fn bind_mobile_socket(network: u64, fd: i32, ipv6: bool) -> std::io::Result<()> {
     #[cfg(target_os = "android")]
     {
@@ -433,11 +439,6 @@ fn bind_mobile_socket(network: u64, fd: i32, ipv6: bool) -> std::io::Result<()> 
         use vault_core::diagnostics::transport::NetworkBinding;
         let index = u32::try_from(network).map_err(std::io::Error::other)?;
         crate::network::InterfaceNetwork(index).bind(fd, ipv6)
-    }
-    #[cfg(not(any(target_os = "android", target_vendor = "apple")))]
-    {
-        let _ = (network, fd, ipv6);
-        Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
     }
 }
 
@@ -524,7 +525,7 @@ impl RustEdge {
         }))
     }
 
-    /// Enable network-aware mobile transport before connect().
+    /// Enable network-aware transport on Android and Apple before connecting.
     pub fn enable_managed_transport(&self) {
         self.managed_transport.store(true, Ordering::Release);
     }
@@ -546,7 +547,8 @@ impl RustEdge {
         let socket_protect: Arc<dyn Fn(i32) -> bool + Send + Sync> =
             Arc::new(move |fd| callbacks.protect_socket(fd));
 
-        let managed_transport = self.managed_transport.load(Ordering::Acquire);
+        let managed_transport = cfg!(any(target_os = "android", target_vendor = "apple"))
+            && self.managed_transport.load(Ordering::Acquire);
         let config = ClientConfig {
             password: self.password.clone(),
             hosts: self.hosts.clone(),
@@ -559,6 +561,7 @@ impl RustEdge {
             socket_protect: Some(socket_protect),
         };
         let callbacks: Arc<dyn ClientCallbacks> = Arc::new(CallbackAdapter {
+            #[cfg(any(target_os = "android", target_vendor = "apple"))]
             peer_mtu: self.peer_mtu.clone(),
             inner: self.callbacks.clone(),
         });

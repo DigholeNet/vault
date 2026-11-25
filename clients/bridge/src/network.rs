@@ -98,43 +98,6 @@ fn usable_lan_ip(ip: IpAddr) -> bool {
         }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lan_prefixes() {
-        let addresses = LanAddresses::new(
-            &[
-                "192.168.1.99/25",
-                "192.168.1.110/25",
-                "fd00:1::99/64",
-                "fe80::99%en0/64",
-                "10.0.0.1/0",
-            ]
-            .map(String::from),
-        );
-        let ipv4 = "192.168.1.99".parse().unwrap();
-        assert!(addresses.allows(ipv4, "192.168.1.107".parse().unwrap()));
-        for remote in [
-            "192.168.1.110",
-            "192.168.1.128",
-            "192.168.1.0",
-            "192.168.1.127",
-            "222.210.167.234",
-            "224.0.0.1",
-            "fd00:1::107",
-        ] {
-            assert!(!addresses.allows(ipv4, remote.parse().unwrap()), "{remote}");
-        }
-        let ipv6 = "fd00:1::99".parse().unwrap();
-        assert!(addresses.allows(ipv6, "fd00:1::107".parse().unwrap()));
-        assert!(!addresses.allows(ipv6, "fd00:2::107".parse().unwrap()));
-        assert!(!addresses.allows("fe80::99".parse().unwrap(), "fe80::107".parse().unwrap()));
-        assert!(!addresses.allows("10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap()));
-    }
-}
-
 // Android's NDK equivalent of Network.bindSocket; only tunnel requests use it.
 #[cfg(target_os = "android")]
 #[link(name = "android")]
@@ -249,4 +212,41 @@ pub fn tunnel_interface(address: IpAddr) -> io::Result<u32> {
         io::ErrorKind::NotFound,
         "current tunnel interface unavailable",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lan_prefixes() {
+        let addresses = LanAddresses::new(
+            &[
+                "192.168.1.99/25",
+                "192.168.1.110/25",
+                "fd00:1::99/64",
+                "fe80::99%en0/64",
+                "10.0.0.1/0",
+            ]
+            .map(String::from),
+        );
+        let ipv4 = "192.168.1.99".parse().unwrap();
+        assert!(addresses.allows(ipv4, "192.168.1.107".parse().unwrap()));
+        for remote in [
+            "192.168.1.110",
+            "192.168.1.128",
+            "192.168.1.0",
+            "192.168.1.127",
+            "222.210.167.234",
+            "224.0.0.1",
+            "fd00:1::107",
+        ] {
+            assert!(!addresses.allows(ipv4, remote.parse().unwrap()), "{remote}");
+        }
+        let ipv6 = "fd00:1::99".parse().unwrap();
+        assert!(addresses.allows(ipv6, "fd00:1::107".parse().unwrap()));
+        assert!(!addresses.allows(ipv6, "fd00:2::107".parse().unwrap()));
+        assert!(!addresses.allows("fe80::99".parse().unwrap(), "fe80::107".parse().unwrap()));
+        assert!(!addresses.allows("10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap()));
+    }
 }
