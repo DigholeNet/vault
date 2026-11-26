@@ -2,7 +2,6 @@
 //  IosConfigureView.swift
 //  Vault
 //
-//
 
 import SwiftUI
 import VaultCore
@@ -11,210 +10,235 @@ import VaultCore
 
 struct IosConfigureView: View {
     @Binding var selectedTab: Int
+    let vpnManager: VpnManager
+    @EnvironmentObject var appData: AppData
     @EnvironmentObject var config: VaultConfig
     @EnvironmentObject var languageManager: LanguageManager
 
-    @State private var isSecured: Bool = true
+    @State private var isSecured = true
     @State private var draft = ConnectionDraft()
-    @State private var savedDraft: ConnectionDraft?
-    @State private var loaded = false
+    @State private var originalName: String?
+    @State private var isEditing = false
+    @State private var feedback: String?
+    @State private var confirmDelete = false
+    @State private var pendingProfileSwitch: String?
 
     private var validationError: String? { draft.validationError() }
+    private var isActiveProfile: Bool {
+        originalName.map { vpnManager.isProfileActive($0) } ?? false
+    }
 
-    private func retryPasswordStorage() {
-        let unchanged = draft.password == config.password
-        config.retryPasswordStorage()
-        if unchanged, config.passwordStorageError == nil {
-            draft.password = config.password
-        }
+    private func edit(_ name: String?) {
+        originalName = name
+        draft = name.map { config.draft(for: $0) } ?? ConnectionDraft()
+        feedback = nil
+        isEditing = true
     }
 
     private func save() {
-        guard config.save(draft) == nil else { return }
-        draft = config.connectionDraft
-        savedDraft = draft
+        if let originalName, draft.normalized.name != originalName, vpnManager.isProfileActive(originalName) {
+            feedback = "Disconnect before renaming or deleting the running profile."
+            return
+        }
+        if let error = config.saveProfile(draft, originalName: originalName) {
+            feedback = error
+            return
+        }
+        isEditing = false
+        feedback = nil
     }
 
     var body: some View {
-        ZStack {
-            Form {
-                Section {
-                    HStack {
-                        Image(systemName: "accessibility")
-                        TextField(
-                            "ID", text: $config.id, prompt: Text("ID")
-                        )
-                        .autocorrectionDisabled()
-                        .disabled(true)
+        Group {
+            if isEditing {
+                editor
+            } else {
+                profileList
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        .confirmationDialog(
+            languageManager.tr("Delete this profile?"),
+            isPresented: $confirmDelete,
+            titleVisibility: .visible
+        ) {
+            Button(languageManager.tr("Delete"), role: .destructive) {
+                if let originalName {
+                    if vpnManager.isProfileActive(originalName) {
+                        feedback = "Disconnect before renaming or deleting the running profile."
+                        return
                     }
+                    config.deleteProfile(originalName)
                 }
+                isEditing = false
+            }
+            Button(languageManager.tr("Cancel"), role: .cancel) {}
+        }
+        .confirmationDialog(
+            languageManager.tr("Switch Profile?"),
+            isPresented: Binding(
+                get: { pendingProfileSwitch != nil },
+                set: { if !$0 { pendingProfileSwitch = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let name = pendingProfileSwitch {
+                Button(languageManager.tr("Disconnect and Connect")) {
+                    pendingProfileSwitch = nil
+                    vpnManager.requestProfileSelection(name)
+                }
+            }
+            Button(languageManager.tr("Cancel"), role: .cancel) { pendingProfileSwitch = nil }
+        } message: {
+            if let name = pendingProfileSwitch {
+                Text(languageManager.tr("The current tunnel will disconnect before connecting to") + " \(name).")
+            }
+        }
+    }
 
-                Section {
+    private var profileList: some View {
+        Form {
+            Section {
+                if config.profiles.isEmpty {
+                    Text(languageManager.tr("Add a profile to configure a Supernode."))
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(config.profiles, id: \VaultProfile.name) { (profile: VaultProfile) in
                     HStack {
-                        Image(
-                            systemName:
-                            "externaldrive.connected.to.line.below"
-                        )
-                        TextField(
-                            languageManager.tr("Host"), text: $draft.host,
-                            prompt: Text(languageManager.tr("IP Address or domain"))
-                        ).autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                    }
-                    HStack {
-                        Image(systemName: "number.circle")
-                        TextField(
-                            languageManager.tr("Port"), text: $draft.port,
-                            prompt: Text("1-65535")
-                        )
-                        .keyboardType(.numberPad)
-                        .autocorrectionDisabled()
-                    }
-                    HStack {
-                        Group {
-                            if isSecured {
-                                HStack {
-                                    Image(systemName: "p.circle.fill")
-                                    SecureField(
-                                        languageManager.tr("Password"), text: $draft.password
-                                    )
-                                    .textInputAutocapitalization(
-                                        .never
-                                    )
+                        Button {
+                            edit(profile.name)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(profile.name).foregroundStyle(.primary)
+                                    Text(verbatim: "\(profile.host):\(profile.port)")
+                                        .font(.footnote).foregroundStyle(.secondary)
                                 }
-                            } else {
-                                HStack {
-                                    Image(systemName: "p.circle.fill")
-                                    TextField(
-                                        languageManager.tr("Password"), text: $draft.password
-                                    )
-                                    .autocorrectionDisabled()
-                                    .textInputAutocapitalization(
-                                        .never
-                                    )
-                                }
+                                Spacer()
                             }
                         }
-                        Button(action: {
-                            isSecured.toggle()
-
-                        }, label: {
-                            Image(
-                                systemName: self.isSecured
-                                    ? "eye.slash" : "eye"
-                            )
-                            .accentColor(.gray)
-                        })
-                    }
-                    HStack {
-                        Image(systemName: "arrow.up.arrow.down.circle")
-                        TextField(
-                            languageManager.tr("MTU"), text: $draft.mtu,
-                            prompt: Text("1280-1427")
-                        )
-                        .keyboardType(.numberPad)
-                        .autocorrectionDisabled()
-                    }
-                }
-
-                Section {
-                    HStack {
-                        Image(systemName: "network")
-                        TextField(
-                            languageManager.tr("IPv4 DNS"),
-                            text: $draft.dnsIpv4,
-                            prompt: Text("1.1.1.1, 8.8.8.8")
-                        )
-                        .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    }
-                    HStack {
-                        Image(systemName: "network")
-                        TextField(
-                            languageManager.tr("IPv6 DNS"),
-                            text: $draft.dnsIpv6,
-                            prompt: Text("2001:4860:4860::8888, 2001:4860:4860::8844")
-                        )
-                        .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    }
-                } footer: {
-                    Text(languageManager.tr("Leave empty for defaults. Only assigned tunnel families are used."))
-                }
-
-                Section {
-                    HStack {
-                        Image(systemName: "stethoscope")
-                        TextField(
-                            languageManager.tr("Probe Domains"), text: $draft.probeDomains,
-                            prompt: Text(languageManager.tr("Domains to probe"))
-                        )
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    }
-                } footer: {
-                    Text(languageManager.tr("Diagnostic probe domains, separated by commas. Leave empty to use defaults."))
-                }
-
-                Section {
-                    Picker(languageManager.tr("Language"), selection: $languageManager.language) {
-                        ForEach(AppLanguage.allCases) { language in
-                            Text(language.displayName).tag(language)
+                        .buttonStyle(.plain)
+                        if config.selectedProfileName == profile.name {
+                            Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                                .accessibilityLabel(languageManager.tr("Used for connection"))
+                        } else {
+                            Button(languageManager.tr("Use")) {
+                                if appData.vpnStatus == .disconnected || profile.name == vpnManager.activeProfileName {
+                                    config.selectProfile(profile.name)
+                                } else {
+                                    pendingProfileSwitch = profile.name
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.accentColor)
+                            .accessibilityLabel(languageManager.tr("Used for connection"))
                         }
                     }
-                }
-
-                if savedDraft == draft || validationError != nil || config.passwordStorageError != nil {
-                    Section {
-                        if savedDraft == draft {
-                            Text(languageManager.tr("Saved. Changes apply the next time you connect."))
-                                .font(.footnote)
-                        }
-                        if let error = validationError {
-                            Text(languageManager.tr(error))
-                                .foregroundColor(.red)
-                                .font(.footnote)
-                        }
-                        if let error = config.passwordStorageError {
-                            Text(languageManager.tr(error))
-                                .foregroundColor(.red)
-                                .font(.footnote)
-                            Button(languageManager.tr("Retry")) { retryPasswordStorage() }
-                        }
-                    }
-                }
-
-            }.formStyle(.grouped)
-
-        }.navigationBarBackButtonHidden(true)
-            .onAppear {
-                guard !loaded else { return }
-                loaded = true
-                draft = config.connectionDraft
-                savedDraft = nil
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(languageManager.tr("Save")) { save() }
-                        .disabled(validationError != nil)
-                }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: {
-                        selectedTab = 0
-                    }, label: {
-                        HStack {
-                            Image(systemName: "chevron.left")
-                        }
-                        .foregroundColor(.blue)
-                    })
                 }
             }
+            Section {
+                Picker(languageManager.tr("Language"), selection: $languageManager.language) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { edit(nil) } label: { Image(systemName: "plus") }
+                    .accessibilityLabel(languageManager.tr("Add Profile"))
+            }
+        }
     }
-}
 
-#Preview {
-    @Previewable @State var selectedTab: Int = 0
-    let config = VaultConfig()
-    IosConfigureView(selectedTab: $selectedTab).environmentObject(config)
-        .environmentObject(LanguageManager.shared)
+    private var editor: some View {
+        Form {
+            Section {
+                TextField(languageManager.tr("Profile Name"), text: $draft.name)
+                    .autocorrectionDisabled()
+                    .disabled(isActiveProfile)
+            }
+            Section {
+                HStack {
+                    Image(systemName: "accessibility")
+                    TextField("ID", text: $config.id).disabled(true)
+                }
+            }
+            Section {
+                HStack {
+                    Image(systemName: "externaldrive.connected.to.line.below")
+                    TextField(languageManager.tr("Host"), text: $draft.host)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                }
+                HStack {
+                    Image(systemName: "number.circle")
+                    TextField(languageManager.tr("Port"), text: Binding(
+                        get: { draft.port },
+                        set: { draft.port = String($0.filter { $0.isASCII && $0.isNumber }) }
+                    ))
+                    .keyboardType(.numberPad).autocorrectionDisabled()
+                }
+                HStack {
+                    Image(systemName: "p.circle.fill")
+                    Group {
+                        if isSecured {
+                            SecureField(languageManager.tr("Password"), text: $draft.password)
+                        } else {
+                            TextField(languageManager.tr("Password"), text: $draft.password)
+                                .autocorrectionDisabled()
+                        }
+                    }
+                    .textInputAutocapitalization(.never)
+                    Button { isSecured.toggle() } label: {
+                        Image(systemName: isSecured ? "eye.slash" : "eye")
+                    }
+                }
+            }
+            Section {
+                TextField(languageManager.tr("IPv4 DNS"), text: $draft.dnsIpv4)
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                TextField(languageManager.tr("IPv6 DNS"), text: $draft.dnsIpv6)
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+            } footer: {
+                Text(languageManager.tr("Leave empty for defaults. Only assigned tunnel families are used."))
+            }
+            Section {
+                TextField(languageManager.tr("MTU"), text: $draft.mtu)
+                    .keyboardType(.numberPad).autocorrectionDisabled()
+            }
+            if let feedback {
+                Section { Text(languageManager.tr(feedback)).foregroundStyle(.red) }
+            } else if let validationError {
+                Section { Text(languageManager.tr(validationError)).foregroundStyle(.red) }
+            }
+            if let error = config.passwordStorageError {
+                Section {
+                    Text(languageManager.tr(error)).foregroundStyle(.red)
+                    Button(languageManager.tr("Retry")) {
+                        config.retryPasswordStorage()
+                        draft = config.draft(for: originalName)
+                    }
+                }
+            }
+            if originalName != nil {
+                Section {
+                    Button(languageManager.tr("Delete Profile"), role: .destructive) {
+                        confirmDelete = true
+                    }
+                    .disabled(isActiveProfile)
+                }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button { isEditing = false } label: { Image(systemName: "chevron.left") }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(languageManager.tr("Save"), action: save).disabled(validationError != nil)
+            }
+        }
+    }
 }
 
 #endif

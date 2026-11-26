@@ -23,6 +23,8 @@ import kotlinx.coroutines.launch
 import net.dighole.vault.VaultVpnService.Companion.PREFS_NAME
 import net.dighole.vault.data.deviceId
 import net.dighole.vault.data.readVaultConfig
+import net.dighole.vault.data.readVaultProfiles
+import net.dighole.vault.data.selectVaultProfile
 
 class StatusFragment : Fragment() {
 
@@ -46,6 +48,7 @@ class StatusFragment : Fragment() {
     private var vpnState = VpnUiState()
     private var connectJob: Job? = null
     private var awaitingPermission = false
+    private var pendingConnectProfileName: String? = null
 
     private val vpnLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -63,12 +66,14 @@ class StatusFragment : Fragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         awaitingPermission = savedInstanceState?.getBoolean("awaitingPermission") ?: false
+        pendingConnectProfileName = savedInstanceState?.getString("pendingProfileName")
         Log.d("StatusFragment", "onCreate")
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean("awaitingPermission", awaitingPermission)
+        outState.putString("pendingProfileName", pendingConnectProfileName)
     }
 
     override fun onCreateView(
@@ -105,8 +110,10 @@ class StatusFragment : Fragment() {
                 connectVpn()
             }
         }
+        view.findViewById<View>(R.id.btnProfile).setOnClickListener { showProfileDialog() }
 
         restoreStateFromPrefs()
+        refreshProfiles()
         renderTrafficStats((requireContext().applicationContext as VaultApplication).latestTrafficStats)
 
         viewLifecycleOwner.lifecycleScope.launch {
@@ -123,6 +130,7 @@ class StatusFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         restoreStateFromPrefs()
+        refreshProfiles()
     }
 
     private fun restoreStateFromPrefs() {
@@ -134,6 +142,7 @@ class StatusFragment : Fragment() {
             vpnState.applying(event)
         } else {
             val connected = isVpnServiceRunning() && prefs.getBoolean("vpn_connected", false)
+            if (connected) app.activeProfileName = prefs.getString("vpn_profile_name", null)
             VpnUiState(
                 isConnected = connected,
                 ipv4 = if (connected) prefs.getString("vpn_assigned_ipv4", "").orEmpty() else "",
@@ -161,7 +170,12 @@ class StatusFragment : Fragment() {
     override fun onHiddenChanged(hidden: Boolean) {
         super.onHiddenChanged(hidden)
         if (view != null) {
-            if (hidden) stopDurationUpdates() else restoreStateFromPrefs()
+            if (hidden) {
+                stopDurationUpdates()
+            } else {
+                restoreStateFromPrefs()
+                refreshProfiles()
+            }
         }
     }
 
@@ -172,7 +186,7 @@ class StatusFragment : Fragment() {
                 val config = requireContext().readVaultConfig()
                 Log.d("StatusFragment", "Config loaded for connect")
 
-                if (config.host.isEmpty() || config.password.isEmpty()) {
+                if (config.name.isEmpty() || config.host.isEmpty() || config.password.isEmpty()) {
                     com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                         .setMessage(R.string.status_configure_first)
                         .setPositiveButton(R.string.nav_configure) { _, _ ->
@@ -181,6 +195,7 @@ class StatusFragment : Fragment() {
                     return@launch
                 }
 
+                pendingConnectProfileName = config.name
                 val intent = VpnService.prepare(requireContext())
                 if (intent != null) {
                     awaitingPermission = true
@@ -215,12 +230,80 @@ class StatusFragment : Fragment() {
         }
     }
 
-    private fun startVpnService() {
+    private fun refreshProfiles() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val store = requireContext().readVaultProfiles()
+                view?.findViewById<android.widget.Button>(R.id.btnProfile)?.text =
+                    store.selectedProfileName?.let { getString(R.string.profile_format, it) }
+                        ?: getString(R.string.add_profile)
+            } catch (_: Exception) {
+                view?.findViewById<android.widget.Button>(R.id.btnProfile)?.setText(R.string.config_load_failed)
+            }
+        }
+    }
+
+    private fun showProfileDialog() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            val store = try {
+                requireContext().readVaultProfiles()
+            } catch (_: Exception) {
+                return@launch
+            }
+            if (store.profiles.isEmpty()) {
+                (activity as? MainActivity)?.navigateTo(R.id.nav_configure)
+                return@launch
+            }
+            val names = store.profiles.map { it.name }.toTypedArray()
+            val selected = names.indexOf(store.selectedProfileName)
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.select_profile)
+                .setSingleChoiceItems(names, selected) { dialog, which ->
+                    dialog.dismiss()
+                    chooseProfile(names[which])
+                }
+                .setNegativeButton(R.string.cancel_description, null)
+                .show()
+        }
+    }
+
+    private fun chooseProfile(name: String) {
+        val app = requireContext().applicationContext as VaultApplication
+        val running = app.activeProfileName ?: app.requestedProfileName
+        if ((vpnState.isConnected || vpnState.isConnecting || running != null) && running != name) {
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.switch_profile)
+                .setMessage(getString(R.string.switch_profile_confirmation, name))
+                .setPositiveButton(R.string.disconnect_and_connect) { _, _ -> selectProfile(name, true) }
+                .setNegativeButton(R.string.cancel_description, null)
+                .show()
+        } else {
+            selectProfile(name, false)
+        }
+    }
+
+    private fun selectProfile(name: String, connect: Boolean) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                requireContext().selectVaultProfile(name)
+                pendingConnectProfileName = name
+                refreshProfiles()
+                if (connect) startVpnService(name)
+            } catch (_: Exception) {
+                (requireContext().applicationContext as VaultApplication)
+                    .emitVpnStatusEvent(VpnStatusEvent.Error(getString(R.string.config_save_failed)))
+            }
+        }
+    }
+
+    private fun startVpnService(profileName: String? = null) {
         try {
+            val target = profileName ?: pendingConnectProfileName ?: return
             val idBytes = requireContext().deviceId().bytes
             val serviceIntent = Intent(requireContext(), VaultVpnService::class.java).apply {
                 action = VaultVpnService.ACTION_CONNECT
                 putExtra(VaultVpnService.EXTRA_ID, idBytes)
+                putExtra(VaultVpnService.EXTRA_PROFILE_NAME, target)
             }
 
             ContextCompat.startForegroundService(requireContext(), serviceIntent)
@@ -235,12 +318,23 @@ class StatusFragment : Fragment() {
         updateUI()
     }
 
+    private fun statusDetailText(app: VaultApplication, active: Boolean): String? {
+        val error = app.currentVpnStatus as? VpnStatusEvent.Error
+        val runningProfile = if (active) app.activeProfileName ?: app.requestedProfileName else null
+        return when {
+            error != null -> getString(R.string.status_error_prefix, error.message.orEmpty())
+            runningProfile != null -> getString(R.string.running_profile_format, runningProfile)
+            else -> null
+        }
+    }
+
     private fun updateUI() {
         val root = view ?: return
         val app = requireContext().applicationContext as VaultApplication
         val preparing = awaitingPermission || connectJob?.isActive == true
         val active = vpnState.isConnected || vpnState.isConnecting
         val connected = vpnState.isConnected && !vpnState.isConnecting
+        root.findViewById<View>(R.id.btnProfile).visibility = if (active || preparing) View.GONE else View.VISIBLE
         tvStatus.setText(when {
             vpnState.isConnecting && vpnState.isConnected -> R.string.status_reconnecting
             vpnState.isConnecting || preparing -> R.string.status_connecting
@@ -252,9 +346,9 @@ class StatusFragment : Fragment() {
         btnToggleVpn.alpha = if (btnToggleVpn.isEnabled) 1f else 0.5f
         btnToggleVpn.contentDescription = getString(
             if (active) R.string.status_tap_to_disconnect else R.string.status_tap_to_connect)
-        val error = app.currentVpnStatus as? VpnStatusEvent.Error
-        tvStatusDetail.text = error?.let { getString(R.string.status_error_prefix, it.message.orEmpty()) }.orEmpty()
-        tvStatusDetail.visibility = if (error == null) View.GONE else View.VISIBLE
+        val detail = statusDetailText(app, active)
+        tvStatusDetail.text = detail.orEmpty()
+        tvStatusDetail.visibility = if (detail == null) View.GONE else View.VISIBLE
         duration.visibility = if (connected) View.VISIBLE else View.GONE
         if (connected) {
             renderDuration(app.ensureConnectionStarted())

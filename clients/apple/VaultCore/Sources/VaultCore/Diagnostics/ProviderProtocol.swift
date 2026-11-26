@@ -9,12 +9,17 @@ public struct ProviderStatus: Codable, Sendable {
     /// Addresses assigned by the supernode, "ipv4" or "ipv4/ipv6".
     public var ip: String
     public var publicIp: String?
+    public var profileName: String?
     public var stats: PacketStats.Stats
 
-    public init(ip: String, stats: PacketStats.Stats, session: String? = nil, publicIp: String? = nil) {
+    public init(
+        ip: String, stats: PacketStats.Stats, session: String? = nil,
+        publicIp: String? = nil, profileName: String? = nil
+    ) {
         self.session = session
         self.ip = ip
         self.publicIp = publicIp
+        self.profileName = profileName
         self.stats = stats
     }
 }

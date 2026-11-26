@@ -23,27 +23,62 @@ struct MacosMenuLabel: View {
 struct MacosMenuView: View {
     let vpnManager: VpnManager
     @EnvironmentObject var appData: AppData
+    @EnvironmentObject var config: VaultConfig
     @EnvironmentObject var languageManager: LanguageManager
     @Environment(\.dismiss) private var dismiss
     @State private var hoveringConnection = false
+    @State private var pendingProfileSwitch: String?
     private enum Action: CaseIterable { case connection, settings, diagnostics, quit }
     @State private var focusedAction: Action?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: appData.vpnStatus == .disconnected ? 8 : 12) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 MacosAppIcon(size: 20)
                 Text("Vault").font(.body.weight(.semibold))
                 Spacer()
-                if appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Circle().fill(appData.macStatusColor).frame(width: 7, height: 7)
+                Group {
+                    if appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Circle().fill(appData.macStatusColor).frame(width: 7, height: 7)
+                    }
                 }
+                .frame(width: 20, height: 20)
                 Text(languageManager.tr(appData.macStatusTitle)).font(.body)
                     .foregroundStyle(.secondary)
             }
+            .frame(height: 20)
             Divider()
+            if !config.profiles.isEmpty {
+                Menu {
+                    ForEach(config.profiles, id: \.name) { profile in
+                        Button {
+                            if appData.vpnStatus == .disconnected {
+                                vpnManager.requestProfileSelection(profile.name)
+                            } else if profile.name != vpnManager.activeProfileName {
+                                pendingProfileSwitch = profile.name
+                            }
+                        } label: {
+                            if config.selectedProfileName == profile.name {
+                                Label(profile.name, systemImage: "checkmark")
+                            } else {
+                                Text(profile.name)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text(config.selectedProfileName ?? "")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.up.chevron.down").font(.caption)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .disabled(appData.switchingProfileName != nil || appData.vpnStatus == .disconnecting)
+                Divider()
+            }
             connectionButton
             if let since = appData.connectedSince,
                appData.vpnStatus == .connected || (appData.vpnStatus == .connecting && appData.isRecovering) {
@@ -92,7 +127,7 @@ struct MacosMenuView: View {
         }
         .font(.body)
         .padding(.horizontal, 14)
-        .padding(.vertical, appData.vpnStatus == .disconnected ? 12 : 14)
+        .padding(.vertical, 14)
         .frame(width: 340)
         .fixedSize(horizontal: false, vertical: true)
         .macosKeyboardNavigation { [focus = $focusedAction] event in
@@ -129,6 +164,26 @@ struct MacosMenuView: View {
             if show {
                 appData.showConfigureGuide = false
                 open("configure")
+            }
+        }
+        .confirmationDialog(
+            languageManager.tr("Switch Profile?"),
+            isPresented: Binding(
+                get: { pendingProfileSwitch != nil },
+                set: { if !$0 { pendingProfileSwitch = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let name = pendingProfileSwitch {
+                Button(languageManager.tr("Disconnect and Connect")) {
+                    pendingProfileSwitch = nil
+                    vpnManager.requestProfileSelection(name)
+                }
+            }
+            Button(languageManager.tr("Cancel"), role: .cancel) { pendingProfileSwitch = nil }
+        } message: {
+            if let name = pendingProfileSwitch {
+                Text(languageManager.tr("The current tunnel will disconnect before connecting to") + " \(name).")
             }
         }
     }

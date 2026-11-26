@@ -61,26 +61,33 @@ The binary will be at `target/release/edge`.
 Create a configuration file at `/etc/vault/edge.toml`:
 
 ```toml
+iface="vpn0"
+storage="/var/lib/vault/storage.dat"
+default_profile="main"
+
+[profiles.main]
 password="your_password"
 port=9527
-iface="vpn0"
 host="your_server_ip"
 dns_ipv4=["1.1.1.1", "8.8.8.8"]
 dns_ipv6=["2001:4860:4860::8888", "2001:4860:4860::8844"]
-storage="/var/lib/vault/storage.dat"
 ```
 
 ### Configuration Options
 
-- `password`: Server password for authentication
-- `port`: Server port
+- `default_profile`: Profile used by systemd and by standalone runs without `--profile`;
+  required when more than one profile exists unless the command-line option is used.
 - `iface`: Unused TUN interface name (e.g., "vpn0"); Edge creates it.
-- `host`: VPN server IP address or hostname
-- `dns_ipv4`: IPv4 DNS server list; omitted or empty uses `1.1.1.1,8.8.8.8`
-- `dns_ipv6`: IPv6 DNS server list; omitted or empty uses Google IPv6 DNS
-  `2001:4860:4860::8888,2001:4860:4860::8844`
-- `storage`: Path to storage file for device ID
+- `storage`: Path to storage file for the installation-wide device ID.
+- `profiles.<name>.password`: Server password for authentication.
+- `profiles.<name>.port`: Server port.
+- `profiles.<name>.host`: VPN server IP address or hostname.
+- `profiles.<name>.dns_ipv4`: IPv4 DNS server list; omitted or empty uses `1.1.1.1,8.8.8.8`.
+- `profiles.<name>.dns_ipv6`: IPv6 DNS server list; omitted or empty uses Google IPv6 DNS
+  `2001:4860:4860::8888,2001:4860:4860::8844`.
 
+Use `edge --profile <name>` to select a profile; systemd uses `default_profile`.
+The old flat single-profile format must be rewritten with named profile sections.
 Only one Edge instance can run per network namespace. See [edge(1)](edge.adoc)
 for route recovery and legacy route cleanup.
 

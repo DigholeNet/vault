@@ -7,25 +7,29 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.doOnPreDraw
-import net.dighole.vaultcore.uniffi.DiagnosticProbe
-import net.dighole.vaultcore.uniffi.DiagnosticOperation
-import net.dighole.vaultcore.uniffi.DiagnosticStage
-import net.dighole.vaultcore.uniffi.DiagnosticState
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.tabs.TabLayout
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.flow.collectLatest
+import net.dighole.vault.data.readProbeDomains
+import net.dighole.vault.data.writeProbeDomains
+import net.dighole.vaultcore.uniffi.DiagnosticProbe
+import net.dighole.vaultcore.uniffi.DiagnosticOperation
+import net.dighole.vaultcore.uniffi.DiagnosticStage
+import net.dighole.vaultcore.uniffi.DiagnosticState
 
 class DiagnosticsFragment : Fragment() {
     private val model by lazy { androidx.lifecycle.ViewModelProvider(this)[DiagnosticsViewModel::class.java] }
@@ -35,6 +39,9 @@ class DiagnosticsFragment : Fragment() {
     private val logMutex = Mutex()
     private var clearingLogs = false
     private var logsRendered = false
+    private var storedProbeDomains: String? = null
+    private var savingProbeDomains = false
+    private var loadingProbeDomains = false
     private val expanded = mutableSetOf<String>()
     private val labels = linkedMapOf(
         DiagnosticStage.DNS to R.string.check_dns, DiagnosticStage.TCP to R.string.check_tcp,
@@ -61,6 +68,7 @@ class DiagnosticsFragment : Fragment() {
                 override fun onTabReselected(selected: TabLayout.Tab) = Unit
             })
         }
+        bindProbeDomains(view, state)
         view.findViewById<MaterialButton>(R.id.btnRunChecks).setOnClickListener { runChecks() }
         view.findViewById<MaterialButton>(R.id.btnClearLogs).setOnClickListener { clearLogs() }
         view.findViewById<MaterialButton>(R.id.btnCopyLogs).setOnClickListener {
@@ -89,6 +97,77 @@ class DiagnosticsFragment : Fragment() {
         }
         render()
         updateLogUpdates()
+    }
+
+    private fun bindProbeDomains(view: View, state: Bundle?) {
+        view.findViewById<EditText>(R.id.edtDiagnosticDomains).doAfterTextChanged {
+            if (!loadingProbeDomains) {
+                view.findViewById<TextView>(R.id.tvProbeStatus).visibility = View.GONE
+                updateProbeValidation()
+            }
+        }
+        view.findViewById<MaterialButton>(R.id.btnSaveProbeDomains).setOnClickListener { saveProbeDomains() }
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val stored = requireContext().readProbeDomains()
+                storedProbeDomains = stored
+                setProbeDraft(state?.getString("probeDraft") ?: stored)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                showProbeStatus(R.string.config_load_failed)
+            } finally {
+                updateProbeValidation()
+            }
+        }
+    }
+
+    private fun setProbeDraft(value: String) {
+        loadingProbeDomains = true
+        view?.findViewById<EditText>(R.id.edtDiagnosticDomains)?.setText(value)
+        loadingProbeDomains = false
+    }
+
+    private fun updateProbeValidation() {
+        val root = view ?: return
+        val value = root.findViewById<EditText>(R.id.edtDiagnosticDomains).text.toString()
+        val valid = SettingsValidation.domains(value.trim())
+        val stored = storedProbeDomains
+        root.findViewById<EditText>(R.id.edtDiagnosticDomains).isEnabled = stored != null && !savingProbeDomains
+        root.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.probeDomainsLayout).error =
+            if (valid) null else getString(R.string.error_probe)
+        root.findViewById<MaterialButton>(R.id.btnSaveProbeDomains).isEnabled =
+            stored != null && !savingProbeDomains && valid && value.trim() != stored
+    }
+
+    private fun saveProbeDomains() {
+        val root = view ?: return
+        val value = root.findViewById<EditText>(R.id.edtDiagnosticDomains).text.toString().trim()
+        if (!SettingsValidation.domains(value) || savingProbeDomains) return
+        savingProbeDomains = true
+        updateProbeValidation()
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                requireContext().writeProbeDomains(value)
+                storedProbeDomains = value
+                setProbeDraft(value)
+                showProbeStatus(R.string.probe_saved)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                showProbeStatus(R.string.config_save_failed)
+            } finally {
+                savingProbeDomains = false
+                updateProbeValidation()
+            }
+        }
+    }
+
+    private fun showProbeStatus(message: Int) {
+        view?.findViewById<TextView>(R.id.tvProbeStatus)?.apply {
+            setText(message)
+            visibility = View.VISIBLE
+        }
     }
 
     private fun connected(): Boolean =
@@ -248,10 +327,16 @@ class DiagnosticsFragment : Fragment() {
         logUpdates?.cancel()
         logUpdates = null
         logsRendered = false
+        storedProbeDomains = null
+        savingProbeDomains = false
+        loadingProbeDomains = false
         super.onDestroyView()
     }
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt("tab", tab)
+        if (storedProbeDomains != null) {
+            outState.putString("probeDraft", view?.findViewById<EditText>(R.id.edtDiagnosticDomains)?.text.toString())
+        }
     }
 }

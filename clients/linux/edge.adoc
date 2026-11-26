@@ -32,6 +32,9 @@ the physical-interface setting. Edge uses relay if the value is 1 or unavailable
 *--config* <FILE>::
     Read configuration options from the specified TOML file.
 
+*--profile* <NAME>::
+    Select a named profile from the configuration file. Overrides *default_profile*.
+
 *--log-dir* <DIR>::
     Write logs to this directory (default: /var/log/vault/). Logs are written
     only to files, including in foreground mode. Current log files have no date suffix (for example, default.log). On the
@@ -93,8 +96,9 @@ and confirm ownership before removing it manually.
 
 == Files
 */etc/vault/edge.toml*::
-    Configuration file. See *edge.toml.example* for the available options
-    (password, host, port, iface, dns_ipv4, dns_ipv6, storage).
+    Configuration file. Global *iface*, *storage* and *default_profile* options
+    are combined with named *[profiles.<name>]* sections containing password,
+    host, port and DNS options. The old flat single-profile format is rejected.
 
 */run/edge.socket*::
     Unix datagram socket used to deliver the quit signal to a running

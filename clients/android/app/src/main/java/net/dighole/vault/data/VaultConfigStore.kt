@@ -8,96 +8,152 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 
 internal object ConfigKeys {
+    val SELECTED_PROFILE = stringPreferencesKey("selected_profile")
+    val PROFILE_NAMES = stringSetPreferencesKey("profile_names")
+
     val MTU = stringPreferencesKey("mtu")
     val PROBE_DOMAINS = stringPreferencesKey("probe_domains")
     val HOST = stringPreferencesKey("host")
     val PORT = intPreferencesKey("port")
-    val DNS = stringPreferencesKey("dns") // Legacy combined field, removed after migration.
+    val DNS = stringPreferencesKey("dns")
     val DNS_IPV4 = stringPreferencesKey("dns_ipv4")
     val DNS_IPV6 = stringPreferencesKey("dns_ipv6")
     val ENCRYPTED_PASSWORD = stringPreferencesKey("password_encrypted")
     val PASSWORD = stringPreferencesKey("password")
     val PASSWORD_FALLBACK = booleanPreferencesKey("password_fallback")
+
+    val LEGACY = listOf(
+        MTU, HOST, PORT, DNS, DNS_IPV4, DNS_IPV6,
+        ENCRYPTED_PASSWORD, PASSWORD, PASSWORD_FALLBACK
+    )
 }
 
-/** One DataStore transaction owns the complete config, including encrypted credentials. */
+data class VaultProfiles(
+    val profiles: List<VaultConfig> = emptyList(),
+    val selectedProfileName: String? = null
+) {
+    val selected: VaultConfig? get() = profiles.firstOrNull { it.name == selectedProfileName }
+}
+
 internal class VaultConfigStore(
     private val dataStore: DataStore<Preferences>,
     private val encrypt: (String) -> String,
     private val decrypt: (String) -> String,
-    private val readLegacyPassword: () -> String?,
     private val clearLegacyPassword: () -> Unit
 ) {
-    suspend fun read(): VaultConfig {
-        var config = VaultConfig()
-        var hasCredential = false
+    suspend fun read(): VaultProfiles {
+        var result = VaultProfiles()
         dataStore.edit { prefs ->
-            val encrypted = prefs[ConfigKeys.ENCRYPTED_PASSWORD]
-            val plaintext = prefs[ConfigKeys.PASSWORD]
-            val password = when {
-                encrypted != null -> decrypt(encrypted)
-                plaintext != null && prefs[ConfigKeys.PASSWORD_FALLBACK] == true -> plaintext
-                else -> legacyOrPlaintext(plaintext)
+            ConfigKeys.LEGACY.forEach { key -> prefs.remove(key) }
+            val names = prefs[ConfigKeys.PROFILE_NAMES].orEmpty().sortedBy(String::lowercase)
+            val profiles = names.map { name -> readProfile(prefs, name) }
+            val selected = prefs[ConfigKeys.SELECTED_PROFILE].takeIf(names::contains) ?: names.firstOrNull()
+            if (selected != prefs[ConfigKeys.SELECTED_PROFILE]) {
+                if (selected == null) prefs.remove(ConfigKeys.SELECTED_PROFILE)
+                else prefs[ConfigKeys.SELECTED_PROFILE] = selected
             }
-            hasCredential = password != null
-            // Migration and fallback recovery run under the same transaction
-            // as reads/writes. A failed disk commit leaves the old record intact.
-            if (encrypted == null && password != null) storePassword(prefs, password)
-            migrateDns(prefs)
-            config = VaultConfig(
-                host = prefs[ConfigKeys.HOST] ?: "",
-                port = prefs[ConfigKeys.PORT] ?: VaultConfig().port,
-                dnsIpv4 = prefs[ConfigKeys.DNS_IPV4].orEmpty(),
-                dnsIpv6 = prefs[ConfigKeys.DNS_IPV6].orEmpty(),
-                mtu = prefs[ConfigKeys.MTU].orEmpty(),
-                probeDomains = prefs[ConfigKeys.PROBE_DOMAINS].orEmpty(),
-                password = password.orEmpty()
-            )
+            result = VaultProfiles(profiles, selected)
         }
-        if (hasCredential) clearLegacyPassword()
-        return config
+        clearLegacyPassword()
+        return result
     }
 
-    suspend fun write(config: VaultConfig) {
+    suspend fun write(config: VaultConfig, originalName: String? = null) {
         dataStore.edit { prefs ->
-            storePassword(prefs, config.password)
-            prefs[ConfigKeys.HOST] = config.host
-            prefs[ConfigKeys.PORT] = config.port
-            prefs[ConfigKeys.DNS_IPV4] = config.dnsIpv4
-            prefs[ConfigKeys.DNS_IPV6] = config.dnsIpv6
-            prefs.remove(ConfigKeys.DNS)
-            prefs[ConfigKeys.MTU] = config.mtu
-            prefs[ConfigKeys.PROBE_DOMAINS] = config.probeDomains
+            val names = prefs[ConfigKeys.PROFILE_NAMES].orEmpty()
+            require(config.name.isNotBlank()) { "Profile name is required" }
+            require(names.none { it.equals(config.name, ignoreCase = true) && it != originalName }) {
+                "A profile with this name already exists"
+            }
+            if (originalName != null) {
+                require(originalName in names) { "Profile does not exist" }
+                removeProfile(prefs, originalName)
+            }
+            writeProfile(prefs, config)
+            prefs[ConfigKeys.PROFILE_NAMES] = names.filter { it != originalName }.toSet() + config.name
+            val selected = prefs[ConfigKeys.SELECTED_PROFILE]
+            if (selected == null || selected == originalName) {
+                prefs[ConfigKeys.SELECTED_PROFILE] = config.name
+            }
+            ConfigKeys.LEGACY.forEach { key -> prefs.remove(key) }
         }
         clearLegacyPassword()
     }
 
-    private fun migrateDns(prefs: MutablePreferences) {
-        val legacy = prefs[ConfigKeys.DNS] ?: return
-        val (ipv4, ipv6) = splitLegacyDns(legacy)
-        if (prefs[ConfigKeys.DNS_IPV4] == null) prefs[ConfigKeys.DNS_IPV4] = ipv4
-        if (prefs[ConfigKeys.DNS_IPV6] == null) prefs[ConfigKeys.DNS_IPV6] = ipv6
-        prefs.remove(ConfigKeys.DNS)
+    suspend fun select(name: String) {
+        dataStore.edit { prefs ->
+            require(name in prefs[ConfigKeys.PROFILE_NAMES].orEmpty()) { "Profile does not exist" }
+            prefs[ConfigKeys.SELECTED_PROFILE] = name
+        }
+    }
+
+    suspend fun delete(name: String) {
+        dataStore.edit { prefs ->
+            val remaining = prefs[ConfigKeys.PROFILE_NAMES].orEmpty() - name
+            removeProfile(prefs, name)
+            prefs[ConfigKeys.PROFILE_NAMES] = remaining
+            if (prefs[ConfigKeys.SELECTED_PROFILE] == name) {
+                val next = remaining.minByOrNull(String::lowercase)
+                if (next == null) prefs.remove(ConfigKeys.SELECTED_PROFILE)
+                else prefs[ConfigKeys.SELECTED_PROFILE] = next
+            }
+        }
+    }
+
+    suspend fun readProbeDomains(): String = dataStore.data.first()[ConfigKeys.PROBE_DOMAINS].orEmpty()
+
+    suspend fun writeProbeDomains(domains: String) {
+        dataStore.edit { prefs -> prefs[ConfigKeys.PROBE_DOMAINS] = domains }
+    }
+
+    private fun readProfile(prefs: MutablePreferences, name: String): VaultConfig {
+        val encrypted = prefs[stringPreferencesKey(key(name, "password_encrypted"))]
+        val plaintext = prefs[stringPreferencesKey(key(name, "password"))]
+        val fallback = prefs[booleanPreferencesKey(key(name, "password_fallback"))] == true
+        val password = when {
+            encrypted != null -> decrypt(encrypted)
+            plaintext != null && fallback -> plaintext
+            else -> ""
+        }
+        if (encrypted == null && plaintext != null && fallback) storePassword(prefs, name, password)
+        return VaultConfig(
+            name = name,
+            host = prefs[stringPreferencesKey(key(name, "host"))].orEmpty(),
+            port = prefs[intPreferencesKey(key(name, "port"))] ?: VaultConfig().port,
+            dnsIpv4 = prefs[stringPreferencesKey(key(name, "dns_ipv4"))].orEmpty(),
+            dnsIpv6 = prefs[stringPreferencesKey(key(name, "dns_ipv6"))].orEmpty(),
+            mtu = prefs[stringPreferencesKey(key(name, "mtu"))].orEmpty(),
+            password = password
+        )
+    }
+
+    private fun writeProfile(prefs: MutablePreferences, config: VaultConfig) {
+        storePassword(prefs, config.name, config.password)
+        prefs[stringPreferencesKey(key(config.name, "host"))] = config.host
+        prefs[intPreferencesKey(key(config.name, "port"))] = config.port
+        prefs[stringPreferencesKey(key(config.name, "dns_ipv4"))] = config.dnsIpv4
+        prefs[stringPreferencesKey(key(config.name, "dns_ipv6"))] = config.dnsIpv6
+        prefs[stringPreferencesKey(key(config.name, "mtu"))] = config.mtu
+    }
+
+    private fun removeProfile(prefs: MutablePreferences, name: String) {
+        for (field in listOf(
+            "host", "port", "dns_ipv4", "dns_ipv6", "mtu", "probe_domains",
+            "password_encrypted", "password", "password_fallback"
+        )) {
+            prefs.remove(stringPreferencesKey(key(name, field)))
+            prefs.remove(intPreferencesKey(key(name, field)))
+            prefs.remove(booleanPreferencesKey(key(name, field)))
+        }
     }
 
     @Suppress("TooGenericExceptionCaught")
-    private fun legacyOrPlaintext(plaintext: String?): String? = try {
-        readLegacyPassword() ?: plaintext
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (error: Exception) {
-        // Do not turn an unreadable credential into an empty password or
-        // delete it. Old plaintext remains a recovery copy when available.
-        plaintext ?: throw error
-    }
-
-    @Suppress("TooGenericExceptionCaught")
-    private fun storePassword(prefs: MutablePreferences, password: String) {
-        // Encryption has no credential-file side effect. Only the DataStore
-        // commit publishes a new password together with its host/port/DNS.
+    private fun storePassword(prefs: MutablePreferences, name: String, password: String) {
         val ciphertext = try {
             encrypt(password)
         } catch (cancelled: CancellationException) {
@@ -105,14 +161,19 @@ internal class VaultConfigStore(
         } catch (_: Exception) {
             null
         }
+        val encryptedKey = stringPreferencesKey(key(name, "password_encrypted"))
+        val plaintextKey = stringPreferencesKey(key(name, "password"))
+        val fallbackKey = booleanPreferencesKey(key(name, "password_fallback"))
         if (ciphertext != null) {
-            prefs[ConfigKeys.ENCRYPTED_PASSWORD] = ciphertext
-            prefs.remove(ConfigKeys.PASSWORD)
-            prefs.remove(ConfigKeys.PASSWORD_FALLBACK)
+            prefs[encryptedKey] = ciphertext
+            prefs.remove(plaintextKey)
+            prefs.remove(fallbackKey)
         } else {
-            prefs.remove(ConfigKeys.ENCRYPTED_PASSWORD)
-            prefs[ConfigKeys.PASSWORD] = password
-            prefs[ConfigKeys.PASSWORD_FALLBACK] = true
+            prefs.remove(encryptedKey)
+            prefs[plaintextKey] = password
+            prefs[fallbackKey] = true
         }
     }
+
+    private fun key(name: String, field: String) = "profile.$name.$field"
 }

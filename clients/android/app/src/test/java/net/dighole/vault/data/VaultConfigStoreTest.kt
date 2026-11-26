@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
 import java.io.IOException
 import java.nio.file.Files
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,17 +26,14 @@ import org.junit.Test
 class VaultConfigStoreTest {
     private class Fixture {
         val dir = Files.createTempDirectory("vault-config-test").toFile()
-        private var scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         private fun open() = PreferenceDataStoreFactory.create(scope = scope) {
             dir.resolve("config.preferences_pb")
         }
         var disk = open()
-        var legacy: String? = null
         var failEncrypt = false
         var failDecrypt = false
-        var failLegacyRead = false
         var failCommit = false
-        var keepLegacy = false
         var pauseCommit = false
         val reachedCommit = CompletableDeferred<Unit>()
         val releaseCommit = CompletableDeferred<Unit>()
@@ -65,109 +63,133 @@ class VaultConfigStoreTest {
                     check(it.startsWith("cipher:"))
                     it.removePrefix("cipher:")
                 },
-                readLegacyPassword = {
-                    if (failLegacyRead) throw IOException("legacy Keystore locked")
-                    legacy
-                },
-                clearLegacyPassword = { if (!keepLegacy) legacy = null }
+                clearLegacyPassword = {}
             )
-        suspend fun reopen() {
-            scope.coroutineContext[Job]!!.cancelAndJoin()
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-            disk = open()
-        }
+
         suspend fun close() {
             scope.coroutineContext[Job]!!.cancelAndJoin()
             dir.deleteRecursively()
         }
     }
-    private val first = VaultConfig(host = "first.example", port = 1001, password = "first-password",
-        dnsIpv4 = "1.1.1.1", dnsIpv6 = "2001:4860:4860::8888")
-    private val second = VaultConfig(host = "second.example", port = 1002, password = "second-password",
-        dnsIpv4 = "8.8.8.8", dnsIpv6 = "2606:4700:4700::1111", mtu = "1380", probeDomains = "github.com,t.co")
 
-    @Test fun dnsMigration() = runBlocking {
+    private val first = VaultConfig(
+        name = "First", host = "first.example", port = 1001, password = "first-password",
+        dnsIpv4 = "1.1.1.1", dnsIpv6 = "2001:4860:4860::8888"
+    )
+    private val second = VaultConfig(
+        name = "Second", host = "second.example", port = 1002, password = "second-password",
+        dnsIpv4 = "8.8.8.8", dnsIpv6 = "2606:4700:4700::1001", mtu = "1380"
+    )
+
+    @Test
+    fun profileCrud() = runBlocking {
         val f = Fixture()
         try {
-            f.disk.edit { it[ConfigKeys.DNS] = "1.1.1.1, 2001:4860:4860::8888,8.8.8.8,2606:4700:4700::1111" }
-            val config = f.store.read()
-            assertEquals("1.1.1.1,8.8.8.8", config.dnsIpv4)
-            assertEquals("2001:4860:4860::8888,2606:4700:4700::1111", config.dnsIpv6)
-            assertNull(f.disk.data.first()[ConfigKeys.DNS])
-            f.reopen()
-            assertEquals(config, f.store.read())
-        } finally { f.close() }
+            f.store.write(first)
+            f.store.write(second)
+            assertEquals("First", f.store.read().selectedProfileName)
+            f.store.select("Second")
+            assertEquals(second, f.store.read().selected)
+            val renamed = first.copy(name = "Personal", host = "renamed.example")
+            f.store.write(renamed, originalName = "First")
+            val stored = f.store.read()
+            assertEquals(listOf("Personal", "Second"), stored.profiles.map { it.name })
+            assertEquals(renamed, stored.profiles.first())
+            f.store.select("Personal")
+            f.store.delete("Personal")
+            assertEquals("Second", f.store.read().selectedProfileName)
+            f.store.delete("Second")
+            assertEquals(VaultProfiles(), f.store.read())
+        } finally {
+            f.close()
+        }
     }
 
-    @Test fun dnsMigrationKeepsOverrides() = runBlocking {
+    @Test
+    fun probeSettings() = runBlocking {
+        val f = Fixture()
+        try {
+            f.store.writeProbeDomains("github.com,t.co")
+            f.store.write(first)
+            f.store.read()
+            assertEquals("github.com,t.co", f.store.readProbeDomains())
+            f.store.writeProbeDomains("")
+            assertEquals("", f.store.readProbeDomains())
+        } finally {
+            f.close()
+        }
+    }
+
+    @Test
+    fun duplicateName() = runBlocking {
+        val f = Fixture()
+        try {
+            f.store.write(first)
+            val error = runCatching { f.store.write(first.copy(name = "FIRST")) }.exceptionOrNull()
+            assertTrue(error is IllegalArgumentException)
+            assertEquals(listOf("First"), f.store.read().profiles.map { it.name })
+        } finally {
+            f.close()
+        }
+    }
+
+    @Test
+    fun legacyIgnored() = runBlocking {
         val f = Fixture()
         try {
             f.disk.edit {
-                it[ConfigKeys.DNS] = "1.1.1.1,2001:4860:4860::8888"
-                it[ConfigKeys.DNS_IPV4] = ""
-                it[ConfigKeys.DNS_IPV6] = "2606:4700:4700::1111"
+                it[ConfigKeys.HOST] = "legacy.example"
+                it[ConfigKeys.PASSWORD] = "legacy"
+                it[ConfigKeys.DNS] = "1.1.1.1"
             }
-            val config = f.store.read()
-            assertEquals("", config.dnsIpv4)
-            assertEquals("2606:4700:4700::1111", config.dnsIpv6)
-            assertNull(f.disk.data.first()[ConfigKeys.DNS])
-        } finally { f.close() }
-    }
-
-    @Test fun dnsMigrationCommitFailure() = runBlocking {
-        val f = Fixture()
-        try {
-            f.disk.edit { it[ConfigKeys.DNS] = "1.1.1.1,2001:4860:4860::8888" }
-            f.failCommit = true
-            try {
-                f.store.read()
-                throw AssertionError("migration unexpectedly succeeded")
-            } catch (_: IOException) { }
+            assertEquals(VaultProfiles(), f.store.read())
             val prefs = f.disk.data.first()
-            assertEquals("1.1.1.1,2001:4860:4860::8888", prefs[ConfigKeys.DNS])
-            assertNull(prefs[ConfigKeys.DNS_IPV4])
-            assertNull(prefs[ConfigKeys.DNS_IPV6])
-            f.failCommit = false
-            assertEquals("2001:4860:4860::8888", f.store.read().dnsIpv6)
-        } finally { f.close() }
+            assertNull(prefs[ConfigKeys.HOST])
+            assertNull(prefs[ConfigKeys.PASSWORD])
+            assertNull(prefs[ConfigKeys.DNS])
+        } finally {
+            f.close()
+        }
     }
 
     @Test(timeout = 15000)
-    fun concurrentAccessKeepsWholeConfigs() = runBlocking {
+    fun concurrentWrites() = runBlocking {
         val f = Fixture()
         try {
             f.store.write(first)
             f.pauseCommit = true
-            val writer = async(Dispatchers.Default) { f.store.write(second) }
+            val writer = async(Dispatchers.Default) {
+                f.store.write(first.copy(host = "updated.example"), originalName = first.name)
+            }
             f.reachedCommit.await()
             val reader = async(Dispatchers.Default) { f.store.read() }
-            val otherWriter = async(Dispatchers.Default) { f.store.write(first) }
+            val otherWriter = async(Dispatchers.Default) { f.store.write(second) }
             f.releaseCommit.complete(Unit)
             writer.await()
-            val observed = reader.await()
+            val observed = observedOrEmpty(reader)
             otherWriter.await()
-            assertTrue(observed == first || observed == second)
-            assertEquals(first, f.store.read())
-            f.reopen()
-            assertEquals(first, f.store.read())
-        } finally { f.close() }
+            assertTrue(observed.host == "first.example" || observed.host == "updated.example")
+            assertEquals(2, f.store.read().profiles.size)
+        } finally {
+            f.close()
+        }
     }
 
+    private suspend fun observedOrEmpty(reader: kotlinx.coroutines.Deferred<VaultProfiles>): VaultConfig =
+        reader.await().profiles.firstOrNull { it.name == first.name } ?: VaultConfig()
+
     @Test
-    fun failedCommitPreservesPreviousConfig() = runBlocking {
+    fun commitFailure() = runBlocking {
         val f = Fixture()
         try {
             f.store.write(first)
             f.failCommit = true
-            try {
-                f.store.write(second)
-                throw AssertionError("write unexpectedly succeeded")
-            } catch (_: IOException) { }
+            assertTrue(runCatching { f.store.write(first.copy(host = "new.example"), originalName = first.name) }.isFailure)
             f.failCommit = false
-            assertEquals(first, f.store.read())
-            f.reopen()
-            assertEquals(first, f.store.read())
-        } finally { f.close() }
+            assertEquals(first, f.store.read().selected)
+        } finally {
+            f.close()
+        }
     }
 
     @Test(timeout = 15000)
@@ -176,118 +198,43 @@ class VaultConfigStoreTest {
         try {
             f.store.write(first)
             f.pauseCommit = true
-            val writer = async(Dispatchers.Default) { f.store.write(second) }
+            val writer = async(Dispatchers.Default) {
+                f.store.write(first.copy(host = "new.example"), originalName = first.name)
+            }
             f.reachedCommit.await()
             writer.cancelAndJoin()
             f.releaseCommit.complete(Unit)
-            assertEquals(first, f.store.read())
-            f.reopen()
-            assertEquals(first, f.store.read())
-        } finally { f.close() }
-    }
-
-    @Test
-    fun encryptedMigration() = runBlocking {
-        val f = Fixture()
-        try {
-            f.legacy = "new encrypted password"
-            f.disk.edit {
-                it[ConfigKeys.HOST] = "legacy.example"
-                it[ConfigKeys.PASSWORD] = "stale plaintext"
-            }
-            val config = f.store.read()
-            assertEquals("legacy.example", config.host)
-            assertEquals("new encrypted password", config.password)
-            val prefs = f.disk.data.first()
-            assertNull(prefs[ConfigKeys.PASSWORD])
-            assertEquals("cipher:new encrypted password", prefs[ConfigKeys.ENCRYPTED_PASSWORD])
-            assertNull(f.legacy)
-        } finally { f.close() }
-    }
-
-    @Test
-    fun keystoreRecoveryMigration() = runBlocking {
-        val f = Fixture()
-        try {
-            f.legacy = "stale credential"
-            f.keepLegacy = true
-            f.failEncrypt = true
-            f.store.write(second)
-            assertEquals(second, f.store.read())
-            assertEquals(second.password, f.disk.data.first()[ConfigKeys.PASSWORD])
-            f.failEncrypt = false
-            assertEquals(second, f.store.read())
-            assertNull(f.disk.data.first()[ConfigKeys.PASSWORD])
-            f.reopen()
-            assertEquals(second, f.store.read())
-        } finally { f.close() }
-    }
-
-    @Test
-    fun failedMigrationCommit() = runBlocking {
-        val f = Fixture()
-        try {
-            f.legacy = "recovery"
-            f.disk.edit { it[ConfigKeys.HOST] = "legacy.example" }
-            f.failCommit = true
-            try {
-                f.store.read()
-                throw AssertionError("migration unexpectedly succeeded")
-            } catch (_: IOException) { }
-            assertEquals("recovery", f.legacy)
-            assertNull(f.disk.data.first()[ConfigKeys.ENCRYPTED_PASSWORD])
-            f.failCommit = false
-            assertEquals("recovery", f.store.read().password)
-            assertNull(f.legacy)
-        } finally { f.close() }
-    }
-
-    @Test
-    fun unreadableCiphertextIsPreserved() = runBlocking {
-        val f = Fixture()
-        try {
-            f.store.write(first)
-            f.legacy = "stale credential"
-            f.failDecrypt = true
-            try {
-                f.store.read()
-                throw AssertionError("read unexpectedly succeeded")
-            } catch (_: IOException) { }
-            assertEquals("cipher:first-password", f.disk.data.first()[ConfigKeys.ENCRYPTED_PASSWORD])
-            assertEquals("stale credential", f.legacy)
-            f.failDecrypt = false
-            assertEquals(first, f.store.read())
-        } finally { f.close() }
-    }
-
-    @Test
-    fun unreadableLegacyCredential() = runBlocking {
-        val f = Fixture()
-        try {
-            f.legacy = "recovery"
-            f.failLegacyRead = true
-            try {
-                f.store.read()
-                throw AssertionError("read unexpectedly succeeded")
-            } catch (_: IOException) { }
-            assertEquals("recovery", f.legacy)
-            assertNull(f.disk.data.first()[ConfigKeys.ENCRYPTED_PASSWORD])
-            f.failLegacyRead = false
-            assertEquals("recovery", f.store.read().password)
-        } finally { f.close() }
+            assertEquals(first, f.store.read().selected)
+        } finally {
+            f.close()
+        }
     }
 
     @Test
     fun plaintextRecovery() = runBlocking {
         val f = Fixture()
         try {
-            f.disk.edit { it[ConfigKeys.PASSWORD] = "recovery" }
             f.failEncrypt = true
-            assertEquals("recovery", f.store.read().password)
-            assertEquals("recovery", f.disk.data.first()[ConfigKeys.PASSWORD])
+            f.store.write(first)
+            assertEquals(first, f.store.read().selected)
             f.failEncrypt = false
-            assertEquals("recovery", f.store.read().password)
-            assertNull(f.disk.data.first()[ConfigKeys.PASSWORD])
-        } finally { f.close() }
+            assertEquals(first, f.store.read().selected)
+        } finally {
+            f.close()
+        }
+    }
+
+    @Test
+    fun decryptFailure() = runBlocking {
+        val f = Fixture()
+        try {
+            f.store.write(first)
+            f.failDecrypt = true
+            assertTrue(runCatching { f.store.read() }.isFailure)
+            f.failDecrypt = false
+            assertEquals(first, f.store.read().selected)
+        } finally {
+            f.close()
+        }
     }
 }

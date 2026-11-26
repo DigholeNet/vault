@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import Foundation
+import SwiftUI
 import VaultCore
 
 /// Keeps the Rust snapshot as the only result model. A local failure can
@@ -133,5 +134,47 @@ enum DiagnosticsPresentation {
     static func connectionDuration(_ elapsed: TimeInterval) -> String {
         let seconds = max(0, Int(elapsed))
         return String(format: "%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
+    }
+}
+
+struct ProbeDomainsEditor: View {
+    @EnvironmentObject var config: VaultConfig
+    @EnvironmentObject var languageManager: LanguageManager
+    @State private var draft = ""
+    @State private var feedback: String?
+
+    private var validationError: String? {
+        SettingsValidation.isValidProbeList(draft) ? nil : "Enter up to 32 domain names, separated by commas, without URLs."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                TextField(languageManager.tr("Probe Domains"), text: $draft)
+                    .autocorrectionDisabled()
+                    .onSubmit(save)
+                Button(languageManager.tr("Save"), action: save)
+                    .disabled(validationError != nil || draft == config.probeDomains)
+            }
+            Text(languageManager.tr("Diagnostic probe domains, separated by commas. Leave empty to use defaults."))
+                .font(.caption).foregroundStyle(.secondary)
+            if let feedback {
+                Text(languageManager.tr(feedback))
+                    .font(.caption).foregroundStyle(feedback == "Saved." ? Color.secondary : Color.red)
+            }
+        }
+        .onAppear {
+            draft = config.probeDomains
+            feedback = nil
+        }
+    }
+
+    private func save() {
+        if let error = config.saveProbeDomains(draft) {
+            feedback = error
+            return
+        }
+        draft = config.probeDomains
+        feedback = "Saved."
     }
 }

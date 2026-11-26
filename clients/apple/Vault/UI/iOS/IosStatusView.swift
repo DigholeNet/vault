@@ -11,7 +11,9 @@ import VaultCore
 struct IosStatusView: View {
     var vpnManager: VpnManager
     @EnvironmentObject var appData: AppData
+    @EnvironmentObject var config: VaultConfig
     @EnvironmentObject var languageManager: LanguageManager
+    @State private var pendingProfileSwitch: String?
 
     var parsedIPs: (ipv4: String?, ipv6: String?) {
         appData.assignedIp.parsedIPv4AndIPv6()
@@ -24,11 +26,19 @@ struct IosStatusView: View {
                     Spacer()
 
                     VStack(spacing: 20) {
+                        profileSelector
+                        Spacer().frame(height: 40)
                         // VPN Status
                         Text(VpnStatusUtil.getStatus(appData.vpnStatus))
                             .bold()
                             .foregroundStyle(.primary)
                             .font(.system(size: 32))
+                        if let running = appData.runningProfileName, appData.vpnStatus != .disconnected {
+                            Text(running).font(.headline).foregroundStyle(.secondary)
+                        } else if let target = appData.switchingProfileName {
+                            Text(languageManager.tr("Switching to") + " \(target)")
+                                .font(.headline).foregroundStyle(.secondary)
+                        }
 
                         Spacer().frame(height: 40)
 
@@ -119,6 +129,67 @@ struct IosStatusView: View {
                     Spacer()
                 }.frame(minHeight: geometry.size.height)
             }
+        }
+        .confirmationDialog(
+            languageManager.tr("Switch Profile?"),
+            isPresented: Binding(
+                get: { pendingProfileSwitch != nil },
+                set: { if !$0 { pendingProfileSwitch = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let name = pendingProfileSwitch {
+                Button(languageManager.tr("Disconnect and Connect")) {
+                    pendingProfileSwitch = nil
+                    vpnManager.requestProfileSelection(name)
+                }
+            }
+            Button(languageManager.tr("Cancel"), role: .cancel) { pendingProfileSwitch = nil }
+        } message: {
+            if let name = pendingProfileSwitch {
+                Text(languageManager.tr("The current tunnel will disconnect before connecting to") + " \(name).")
+            }
+        }
+    }
+
+    @ViewBuilder private var profileSelector: some View {
+        if config.profiles.isEmpty {
+            Button(languageManager.tr("Add Profile")) { appData.showConfigureGuide = true }
+                .buttonStyle(.bordered)
+        } else {
+            Menu {
+                ForEach(config.profiles, id: \.name) { profile in
+                    Button {
+                        if appData.vpnStatus == .disconnected {
+                            vpnManager.requestProfileSelection(profile.name)
+                        } else if profile.name != vpnManager.activeProfileName {
+                            pendingProfileSwitch = profile.name
+                        }
+                    } label: {
+                        if config.selectedProfileName == profile.name {
+                            Label(profile.name, systemImage: "checkmark")
+                        } else {
+                            Text(profile.name)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 0)
+                    Text(config.selectedProfileName ?? languageManager.tr("Add Profile"))
+                        .font(.headline).foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        .layoutPriority(1)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(appData.switchingProfileName != nil || appData.vpnStatus == .disconnecting)
+            .padding(.horizontal, 20)
         }
     }
 }

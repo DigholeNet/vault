@@ -34,7 +34,7 @@ extension VpnManager {
         sendProviderCommand(.init(.diagnosticContext), timeout: 3) { data in
             guard !cancellation.isCancelled, self.diagnosticState.generation == generation,
                   self.vpnStatus == .connected, let data,
-                  let context = try? JSONDecoder().decode(AppleDiagnosticContext.self, from: data) else {
+                  var context = try? JSONDecoder().decode(AppleDiagnosticContext.self, from: data) else {
                 if self.diagnosticState.cancellation === cancellation {
                     self.diagnosticState.cancellation = nil
                     self.diagnosticState.runID = nil
@@ -42,6 +42,7 @@ extension VpnManager {
                 completion(DiagnosticsResult(message: "INCOMPLETE - live diagnostic context unavailable"))
                 return
             }
+            context.domains = self.config.diagnosticDomains
             DispatchQueue.global(qos: .utility).async {
                 var result: DiagnosticsResult
                 do {

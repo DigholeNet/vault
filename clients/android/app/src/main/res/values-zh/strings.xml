@@ -97,4 +97,21 @@
 <string name="check_ping">Ping · IPv4</string>
 <string name="check_ping6">Ping · IPv6</string>
 <string name="ping_note">Ping 仅供参考。ICMP 可能被过滤，无响应不代表 VPN 故障。平均 RTT 仅计算成功回复。</string>
+    <string name="profile_name">配置名称</string>
+    <string name="add_profile">新增配置</string>
+    <string name="delete_profile">删除</string>
+    <string name="select_profile">选择配置</string>
+    <string name="use_profile">使用</string>
+    <string name="used_for_connection">用于连接</string>
+    <string name="profile_format">配置：%1$s</string>
+    <string name="running_profile_format">配置：%1$s</string>
+    <string name="switch_profile">切换配置</string>
+    <string name="switch_profile_confirmation">当前隧道将断开，然后连接到 %1$s。</string>
+    <string name="disconnect_and_connect">断开并连接</string>
+    <string name="delete_profile_confirmation">删除配置 %1$s？</string>
+    <string name="error_profile_name_required">配置名称不能为空</string>
+    <string name="add_profile_empty">新增配置以设置 Supernode。</string>
+    <string name="back_description">返回</string>
+    <string name="error_profile_in_use">请先断开连接，再重命名或删除正在使用的配置。</string>
+    <string name="probe_saved">探测域名已保存。</string>
 </resources>

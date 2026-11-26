@@ -15,13 +15,13 @@ use anyhow::Context;
 use dashmap::DashMap;
 use tracing::{error, info, warn};
 use vault_core::{
-    SysSignal, app_main,
+    SysSignal, app_main_with_profiles,
     device::{self, Ipv4, Ipv6, TunTapDevice},
     logger::rolling::{LoggerGuard, cli_log_levels, init_logger},
     util,
 };
 
-use crate::config::EdgeConfig;
+use crate::config::SelectedEdgeConfig;
 use crate::dns::{DnsGuard, ResolverFile, ResolverViewChanged};
 use crate::edge::Edge;
 use crate::interface::{self, FamilyExits};
@@ -55,18 +55,23 @@ impl NetworkLock {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    app_main::<EdgeConfig, _, _>("edge", logger_init, |signal, config| {
-        // Log errors explicitly: in daemon mode stderr is /dev/null, so an
-        // error returned from here would otherwise be lost.
-        if let Err(e) = run_inner(signal, config) {
-            error!("edge exited with error: {:#}", e);
-            return Err(e);
-        }
-        Ok(())
-    })
+    app_main_with_profiles(
+        "edge",
+        logger_init,
+        |signal, config: SelectedEdgeConfig| {
+            // Log errors explicitly: in daemon mode stderr is /dev/null, so an
+            // error returned from here would otherwise be lost.
+            if let Err(e) = run_inner(signal, config) {
+                error!("edge exited with error: {:#}", e);
+                return Err(e);
+            }
+            Ok(())
+        },
+        SelectedEdgeConfig::select,
+    )
 }
 
-fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
+fn run_inner(signal: Arc<SysSignal>, config: SelectedEdgeConfig) -> anyhow::Result<()> {
     // Keep the netns lease until DNS/routes/TUN have all been cleaned up.
     // Unlike the control-file lock, this also covers private /run mounts.
     let _network_lock = NetworkLock::acquire()?;
@@ -83,6 +88,7 @@ fn run_inner(signal: Arc<SysSignal>, config: EdgeConfig) -> anyhow::Result<()> {
     let tun = device.get_ifname().to_string();
     let mut dns = DnsGuard::setup_for_interface(resolver, &tun);
     let server_addr = format!("{}:{}", config.get_host(), config.get_port());
+    info!(profile = config.get_profile(), "Selected Edge profile");
     info!("Resolving server address: {}", server_addr);
     let hosts =
         vault_core::client::resolve_server_candidates(config.get_host(), config.get_port())?;

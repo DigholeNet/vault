@@ -39,7 +39,10 @@ final class DelayedLoadVpnManager: VpnManager {
         onStartupProbe?()
     }
 
-    override func loadAndCreateProviderManager(_ complete: @escaping (NETunnelProviderManager?, Bool) -> Void) {
+    override func loadAndCreateProviderManager(
+        launch: TunnelLaunchConfiguration,
+        _ complete: @escaping (NETunnelProviderManager?, Bool) -> Void
+    ) {
         preparationCalls += 1
         prepared = complete
         onPreparation?()

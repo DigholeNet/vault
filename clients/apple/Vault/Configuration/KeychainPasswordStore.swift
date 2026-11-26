@@ -1,21 +1,22 @@
 import Foundation
 import Security
 
-// MARK: - Keychain storage for the VPN password
-
-/// Minimal Keychain wrapper for the single shared-network password.
 enum KeychainPasswordStore {
     private static let service = "net.dighole.vault"
-    private static let account = "password"
+    private static let legacyAccount = "password"
 
-    static func load() throws -> String {
-        let query: [String: Any] = [
+    private static func query(account: String) -> [String: Any] {
+        [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
+            kSecAttrAccount as String: account
         ]
+    }
+
+    static func load(profile name: String) throws -> String {
+        var query = query(account: "profile.\(name)")
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         if status == errSecItemNotFound { return "" }
@@ -27,17 +28,13 @@ enum KeychainPasswordStore {
         return password
     }
 
-    static func save(_ password: String) throws {
+    static func save(_ password: String, profile name: String) throws {
         if password.isEmpty {
-            try delete()
+            try delete(profile: name)
             return
         }
         let data = Data(password.utf8)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
+        let query = query(account: "profile.\(name)")
         let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
             var item = query
@@ -50,13 +47,16 @@ enum KeychainPasswordStore {
         }
     }
 
-    static func delete() throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        let status = SecItemDelete(query as CFDictionary)
+    static func delete(profile name: String) throws {
+        try delete(account: "profile.\(name)")
+    }
+
+    static func deleteLegacy() throws {
+        try delete(account: legacyAccount)
+    }
+
+    private static func delete(account: String) throws {
+        let status = SecItemDelete(query(account: account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError(status: status)
         }
@@ -64,6 +64,6 @@ enum KeychainPasswordStore {
 
     private struct KeychainError: LocalizedError {
         let status: OSStatus
-        var errorDescription: String? { "Keychain operation failed (\(status))" }
+        var errorDescription: String { "Keychain operation failed (\(status))" }
     }
 }

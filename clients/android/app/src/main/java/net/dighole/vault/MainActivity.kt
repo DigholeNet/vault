@@ -61,6 +61,8 @@ class MainActivity : BaseActivity() {
         bottomNav.selectedItemId = savedInstanceState?.getInt("selected_tab") ?: R.id.nav_status
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                val editor = supportFragmentManager.findFragmentByTag(TAG_CONFIGURE) as? ConfigureFragment
+                if (bottomNav.selectedItemId == R.id.nav_configure && editor?.navigateBack() == true) return
                 if (bottomNav.selectedItemId != R.id.nav_status) navigateTo(R.id.nav_status)
                 else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
             }

@@ -121,6 +121,7 @@ For example, set `CARGO=/opt/rust/bin/cargo` for a custom installation.
 
 ### Configuration options
 
+- `Profile name`: Unique display name
 - `Device ID`: Read-only peer identifier generated on the device
 - `Host`: Vault server hostname or IP address; required
 - `Port`: Server UDP port; defaults to 9527
@@ -129,8 +130,8 @@ For example, set `CARGO=/opt/rust/bin/cargo` for a custom installation.
 - `IPv4 DNS`: Comma-separated IPv4 resolvers; empty uses `1.1.1.1,8.8.8.8`
 - `IPv6 DNS`: Comma-separated IPv6 resolvers; empty uses
   `2001:4860:4860::8888,2001:4860:4860::8844`
-- `Probe domains`: Comma-separated diagnostic domains; empty uses
-  `www.google.com,github.com,t.co`
+- `Probe domains`: App-wide diagnostic setting on the Diagnostics page; comma-separated,
+  empty uses `www.google.com,github.com,t.co`
 - `Language`: App language; defaults to the system language and applies immediately
 
 The server assigns the client's virtual IP address (IPv4, IPv6-only or dual-stack)
@@ -142,26 +143,17 @@ The Android resolver chooses which configured server to use; list order does
 not guarantee query order. Both IPv4 and IPv6 resolvers can answer A and AAAA
 queries. Settings for an unassigned family are retained but not applied.
 
-Existing combined DNS settings migrate into the two fields by address family,
-preserving custom values and their order within each family. The migration
-commits both fields and removes the old key in one DataStore transaction; a
-failed commit keeps the old record intact. Each field can be cleared independently
-to restore its defaults. Connection-setting changes apply on the next connection.
+The Configure page manages named Supernode profiles. Status selects the profile
+for the next connection while disconnected. Old single-profile settings and
+credentials are not migrated.
 
-Credentials are encrypted with an Android Keystore key; their ciphertext is
-committed in the same DataStore transaction as host, port, and DNS settings.
-If encryption fails, that same transaction stores the existing app-private
-plaintext fallback. Legacy SharedPreferences credentials are removed only
-after the new record commits. Reads, migrations, and writes are serialized by
-DataStore; failed or cancelled commits leave the previous configuration intact.
+Credentials use Android Keystore encryption, with an app-private plaintext
+fallback if encryption fails.
 
 ## Usage and deployment
 
-The four tabs follow the iOS client: Status, Configure, Diagnostics, and About.
-Android uses Material 3 controls and light/dark surfaces. Configuration groups
-follow iOS, including separate IPv4 and IPv6 DNS fields; language selection
-lives in Configure. Saving keeps the page open, and connection changes apply on the next connection. Drafts
-survive tab switches, rotation, and language changes.
+The app has Status, Configure, Diagnostics, and About tabs. Connection changes
+apply on the next connection.
 
 ## Network recovery
 

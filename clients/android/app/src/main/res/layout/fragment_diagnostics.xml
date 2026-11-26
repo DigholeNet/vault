@@ -19,6 +19,49 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:padding="16dp">
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:cardCornerRadius="16dp"
+                app:strokeWidth="0dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/probeDomainsLayout"
+                        style="@style/Widget.Vault.Configure.TextInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/probe_domains"
+                        app:helperText="@string/probe_help">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/edtDiagnosticDomains"
+                            style="@style/Widget.Vault.Configure.EditText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="textNoSuggestions"/>
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSaveProbeDomains"
+                        android:layout_width="wrap_content"
+                        android:layout_height="48dp"
+                        android:layout_gravity="end"
+                        android:enabled="false"
+                        android:text="@string/save_description"/>
+                    <TextView
+                        android:id="@+id/tvProbeStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:accessibilityLiveRegion="polite"
+                        android:paddingHorizontal="4dp"
+                        android:paddingBottom="4dp"
+                        android:textAppearance="@style/TextAppearance.Vault.Supporting"
+                        android:visibility="gone"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
             <TextView
                 android:id="@+id/tvDiagnosticSummary"
                 android:layout_width="match_parent"

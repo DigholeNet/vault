@@ -13,7 +13,7 @@ extension VaultTests {
     func makeController() throws -> DelayedLoadVpnManager {
         let storage = try makeConfig()
         let config = storage.config
-        XCTAssertTrue(config.saveConnection(host: "test.invalid", port: 9527, password: "test-password"))
+        XCTAssertTrue(saveTestProfile(config))
         let data = AppData()
         let controller = DelayedLoadVpnManager(config: config, appData: data)
         addTeardownBlock { await MainActor.run { controller.stopStatsMonitoring() } }
@@ -44,29 +44,39 @@ extension VaultTests {
 
     @MainActor
     func testInvalidConnect() async throws {
-        for (host, password) in [("", ""), ("test.invalid", ""), ("", "test-password")] {
-            let config = try makeConfig(password: password).config
-            config.host = host
-            let data = AppData()
-            let controller = DelayedLoadVpnManager(config: config, appData: data)
-            defer { controller.stopStatsMonitoring() }
-            var startupFinished = false
-            controller.startObservingStatus { startupFinished = true }
-            let startupReply = try XCTUnwrap(controller.loaded)
-            controller.connect()
-            XCTAssertTrue(data.showConfigureGuide)
-            XCTAssertEqual(data.vpnStatus, .disconnected)
-            let profile = TestTunnelManager()
-            startupReply(profile, nil)
-            await drainMainQueue()
-            XCTAssertTrue(controller.activeVPN === profile)
-            XCTAssertEqual(data.vpnStatus, .connected)
-            XCTAssertTrue(startupFinished)
-            // The retained observer must continue following the real session.
-            profile.testConnection.testStatus = .disconnected
-            NotificationCenter.default.post(name: .NEVPNStatusDidChange, object: profile.testConnection)
-            XCTAssertEqual(data.vpnStatus, .disconnected)
-        }
+        let config = try makeConfig().config
+        let data = AppData()
+        let controller = DelayedLoadVpnManager(config: config, appData: data)
+        defer { controller.stopStatsMonitoring() }
+        controller.connect()
+        XCTAssertTrue(data.showConfigureGuide)
+        XCTAssertEqual(data.vpnStatus, .disconnected)
+        XCTAssertTrue(controller.activationRequests.isEmpty)
+    }
+
+    @MainActor
+    func testConnectingProfileIsActiveBeforePreparationFinishes() async throws {
+        let controller = try makeController()
+        controller.connect()
+        XCTAssertEqual(controller.appData.requestedProfileName, "Test")
+        XCTAssertEqual(controller.activeProfileName, "Test")
+        XCTAssertTrue(controller.isProfileActive("Test"))
+        try await activate(controller)
+        XCTAssertTrue(controller.isProfileActive("Test"))
+        controller.prepared?(nil, true)
+        await drainMainQueue()
+        XCTAssertNil(controller.appData.requestedProfileName)
+        XCTAssertFalse(controller.isProfileActive("Test"))
+    }
+
+    @MainActor
+    func testSwitchCancel() async throws {
+        let controller = try makeController()
+        controller.appData.switchingProfileName = "Work"
+        XCTAssertTrue(controller.isProfileActive("Work"))
+        controller.disconnect()
+        XCTAssertNil(controller.appData.switchingProfileName)
+        XCTAssertFalse(controller.isProfileActive("Work"))
     }
 
     @MainActor

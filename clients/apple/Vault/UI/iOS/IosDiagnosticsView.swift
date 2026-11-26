@@ -44,6 +44,9 @@ struct IosDiagnosticsView: View {
     private var checks: some View {
         List {
             Section {
+                ProbeDomainsEditor()
+            }
+            Section {
                 if model.running || model.result != nil { resultHeader } else {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Check your connection")).font(.headline)

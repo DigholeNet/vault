@@ -56,7 +56,8 @@ class VaultApplication : Application() {
 
     @Volatile var vpnGeneration: Long = 0
         private set
-    @Volatile internal var diagnosticDomains: List<String> = emptyList()
+    @Volatile var activeProfileName: String? = null
+    @Volatile var requestedProfileName: String? = null
 
     private val connectionClock = ConnectionClock()
     val connectedAt: Long? get() = connectionClock.startedAt
@@ -72,7 +73,6 @@ class VaultApplication : Application() {
         when (event) {
             is VpnStatusEvent.Connected -> ensureConnectionStarted()
             is VpnStatusEvent.Disconnected, is VpnStatusEvent.Error -> {
-                diagnosticDomains = emptyList()
                 connectionClock.disconnected()
                 latestTrafficStats = null
             }

@@ -20,8 +20,8 @@ enum ConfigurationError: Error {
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
     private var launchConfiguration: TunnelLaunchConfiguration?
-    /// Domains the on-demand diagnostics suite probes; overridable from the
-    /// app's configure page via the "probeDomains" provider configuration.
+    /// Launch-time domains for provider diagnostics. The app substitutes its
+    /// current diagnostic settings when building an engine run.
     private var probeDomains: [String] = []
     /// Cancels the Rust transport executing the current provider-side probe.
     let diagnostics = ProviderDiagnostics()
@@ -621,7 +621,11 @@ extension PacketTunnelProvider {
 
     var providerStatus: ProviderStatus? {
         guard startFinished, !stopRequested, Self.activeProvider === self else { return nil }
-        return statsSession.status(ip: assignedIp, publicIp: edge?.connectionStatus.publicIp)
+        return statsSession.status(
+            ip: assignedIp,
+            publicIp: edge?.connectionStatus.publicIp,
+            profileName: launchConfiguration?.profileName
+        )
     }
 
     var providerStarted: Bool { !stopRequested && (pendingStart != nil || startFinished) }

@@ -26,30 +26,42 @@ private fun Context.configStore(): VaultConfigStore {
             }
         },
         decrypt = secure::decryptPassword,
-        readLegacyPassword = {
-            try {
-                secure.getPassword()
-            } catch (error: Exception) {
-                Log.w(TAG, "Legacy password read failed", error)
-                throw error
-            }
-        },
         clearLegacyPassword = {
             try {
                 secure.clearLegacyPassword()
             } catch (error: Exception) {
-                // The committed DataStore record is authoritative. Cleanup can
-                // retry on the next access without undoing a successful save.
                 Log.w(TAG, "Legacy password cleanup failed", error)
             }
         }
     )
 }
 
-suspend fun Context.readVaultConfig(): VaultConfig = withContext(Dispatchers.IO) {
+suspend fun Context.readVaultProfiles(): VaultProfiles = withContext(Dispatchers.IO) {
     configStore().read()
 }
 
-suspend fun Context.writeVaultConfig(config: VaultConfig): Unit = withContext(Dispatchers.IO) {
-    configStore().write(config)
+suspend fun Context.readVaultConfig(profileName: String? = null): VaultConfig = withContext(Dispatchers.IO) {
+    val store = configStore().read()
+    if (profileName == null) store.selected else store.profiles.firstOrNull { it.name == profileName }
+} ?: VaultConfig()
+
+suspend fun Context.writeVaultConfig(config: VaultConfig, originalName: String? = null): Unit =
+    withContext(Dispatchers.IO) {
+        configStore().write(config, originalName)
+    }
+
+suspend fun Context.selectVaultProfile(name: String): Unit = withContext(Dispatchers.IO) {
+    configStore().select(name)
+}
+
+suspend fun Context.deleteVaultProfile(name: String): Unit = withContext(Dispatchers.IO) {
+    configStore().delete(name)
+}
+
+suspend fun Context.readProbeDomains(): String = withContext(Dispatchers.IO) {
+    configStore().readProbeDomains()
+}
+
+suspend fun Context.writeProbeDomains(domains: String): Unit = withContext(Dispatchers.IO) {
+    configStore().writeProbeDomains(domains)
 }

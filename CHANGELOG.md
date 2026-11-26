@@ -11,6 +11,11 @@ Notable changes to Vault are recorded here using the
 - Static Linux binaries and RPM packages for Edge and Supernode on amd64 and arm64.
 - Automatic Linux VPN DNS on systems where NetworkManager manages `resolv.conf`.
 - Server-observed public IP in the Android, iOS and macOS status screens and in Linux connection logs.
+- Multiple named Supernode profiles on Linux, Android, iOS and macOS, with serialized profile switching and per-profile credential storage.
+
+### Changed
+
+- Client connection settings are not migrated to the new profile format. Re-create profiles after upgrading; Linux flat Edge TOML files must be rewritten with named `[profiles.<name>]` sections.
 
 ### Fixed
 

@@ -285,15 +285,18 @@ class VpnManager {
                 self.activeVPN = manager
                 self.observeVPNStatus(for: manager)
                 self.updateVPNStatus(manager)
+                if self.config.profiles.isEmpty && manager.connection.status != .disconnected {
+                    self.disconnect()
+                }
             }
             completion?()
         }
     }
 
-    private func createProviderManager() -> NETunnelProviderManager {
+    private func createProviderManager(host: String) -> NETunnelProviderManager {
         let manager = NETunnelProviderManager()
         let configuration = NETunnelProviderProtocol()
-        configuration.serverAddress = config.host
+        configuration.serverAddress = host
         #if os(macOS)
         // On macOS the tunnel provider is a system extension with its own
         // bundle ID; without this the system looks for an embedded appex.
@@ -302,28 +305,6 @@ class VpnManager {
         manager.protocolConfiguration = configuration
         manager.localizedDescription = "Vault"
         return manager
-    }
-
-    private func makeLaunchConfiguration() -> TunnelLaunchConfiguration? {
-        // Defensive clamp: a port persisted before range validation
-        // existed must not trap UInt16(Int). Repair the stored value too.
-        let port = min(max(config.port, 1), 65535)
-        if port != config.port {
-            Logger.network.errorAndFile(
-                "Persisted port \(config.port) out of range, clamping to \(port)"
-            )
-            config.port = port
-        }
-        do {
-            return try TunnelLaunchConfiguration(
-                draft: config.connectionDraft,
-                id: config.id,
-                clearLogsToken: logPreferences.string(forKey: "clearLogsToken")
-            )
-        } catch {
-            Logger.network.errorAndFile("Invalid tunnel launch configuration: \(error)")
-            return nil
-        }
     }
 
     private func configureProviderManager(
@@ -338,7 +319,7 @@ class VpnManager {
         // keep launching the stale embedded appex.
         configuration.providerBundleIdentifier = SystemExtensionManager.extensionBundleIdentifier
         #endif
-        configuration.serverAddress = config.host
+        configuration.serverAddress = launch.host
         configuration.providerConfiguration = launch.providerConfiguration
         manager.protocolConfiguration = configuration
         manager.isEnabled = true
@@ -352,6 +333,7 @@ class VpnManager {
 
     /// Completes on main after the profile save and reload settle.
     func loadAndCreateProviderManager(
+        launch: TunnelLaunchConfiguration,
         _ complete: @escaping (NETunnelProviderManager?, _ loaded: Bool) -> Void
     ) {
         removeVpnStatusObservers()
@@ -374,9 +356,9 @@ class VpnManager {
                 Logger.network.noticeAndFile(
                     "Loaded \(managers.count) VPN configuration(s): \(managers.compactMap { $0.localizedDescription })"
                 )
-                let manager = self.preferredManager(from: managers) ?? self.createProviderManager()
-                guard let launch = self.makeLaunchConfiguration(),
-                      self.configureProviderManager(manager, launch: launch) else {
+                let manager = self.preferredManager(from: managers)
+                    ?? self.createProviderManager(host: launch.host)
+                guard self.configureProviderManager(manager, launch: launch) else {
                     complete(nil, false)
                     return
                 }
@@ -419,29 +401,54 @@ class VpnManager {
 
 extension VpnManager {
     func connect() {
+        connect(profileName: nil)
+    }
+
+    private func makeLaunchConfiguration(for profile: VaultProfile) -> TunnelLaunchConfiguration? {
+        let draft = config.draft(for: profile.name)
+        if let error = draft.validationError() {
+            appData.switchingProfileName = nil
+            appData.connectionError = error
+            return nil
+        }
+        do {
+            return try TunnelLaunchConfiguration(
+                draft: draft,
+                id: config.id,
+                probeDomains: config.probeDomains,
+                clearLogsToken: logPreferences.string(forKey: "clearLogsToken")
+            )
+        } catch {
+            Logger.network.errorAndFile("Invalid tunnel launch configuration: \(error)")
+            appData.switchingProfileName = nil
+            appData.connectionError = "Unable to connect. Check your network and server configuration."
+            return nil
+        }
+    }
+
+    func connect(profileName requestedName: String?) {
         if !Thread.isMainThread {
-            DispatchQueue.main.async { self.connect() }
+            DispatchQueue.main.async { self.connect(profileName: requestedName) }
             return
         }
         guard vpnStatus == .disconnected || connectionLifecycle.isStopping else { return }
-        guard !config.host.isEmpty, !config.password.isEmpty else {
+        guard let name = requestedName ?? config.selectedProfileName,
+              let profile = config.profile(named: name) else {
+            appData.switchingProfileName = nil
             appData.showConfigureGuide = true
             return
         }
-        if let error = config.connectionDraft.validationError() {
-            appData.connectionError = error
-            return
-        }
-        config.host = config.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let launch = makeLaunchConfiguration(for: profile) else { return }
         guard let token = connectionLifecycle.beginConnect() else {
             Logger.network.noticeAndFile("Ignoring connect while a connection operation is still active")
             return
         }
+        appData.requestedProfileName = profile.name
         appData.connectionError = nil
         publishStatus()
         connectionRequestedAt = ProcessInfo.processInfo.systemUptime
         tunnelStartIssuedAt = nil
-        Logger.network.noticeAndFile("[operation:\(token)] Connection requested")
+        Logger.network.noticeAndFile("[operation:\(token)] Connection requested profile=\(profile.name)")
         #if os(macOS)
         let activationStarted = ProcessInfo.processInfo.systemUptime
         Logger.network.noticeAndFile("[operation:\(token)] Activating system extension")
@@ -466,17 +473,17 @@ extension VpnManager {
                     Logger.network.errorAndFile("System extension activation failed: \(error.localizedDescription)")
                     self.failConnect(token)
                 case .success:
-                    self.prepareConnection(token)
+                    self.prepareConnection(token, launch: launch)
                 }
             }
         }
         #else
-        prepareConnection(token)
+        prepareConnection(token, launch: launch)
         #endif
     }
 
-    private func prepareConnection(_ token: UInt64) {
-        loadAndCreateProviderManager { manager, loaded in
+    private func prepareConnection(_ token: UInt64, launch: TunnelLaunchConfiguration) {
+        loadAndCreateProviderManager(launch: launch) { manager, loaded in
             let permitted = self.connectionLifecycle.canStart(token)
             self.connectionLifecycle.finishPreparation(token)
             guard permitted else {
@@ -516,9 +523,43 @@ extension VpnManager {
         }
     }
 
+    var activeProfileName: String? {
+        if let running = appData.runningProfileName { return running }
+        if let requested = appData.requestedProfileName { return requested }
+        let protocolConfiguration = activeVPN?.protocolConfiguration as? NETunnelProviderProtocol
+        return protocolConfiguration?.providerConfiguration?["profileName"] as? String
+    }
+
+    func isProfileActive(_ name: String) -> Bool {
+        name == appData.switchingProfileName || (vpnStatus != .disconnected && activeProfileName == name)
+    }
+
+    func requestProfileSelection(_ name: String) {
+        guard config.profile(named: name) != nil, name != activeProfileName || vpnStatus == .disconnected else { return }
+        guard vpnStatus != .disconnected else {
+            config.selectProfile(name)
+            return
+        }
+        guard appData.switchingProfileName == nil else { return }
+        appData.switchingProfileName = name
+        disconnect { [weak self] succeeded in
+            guard let self else { return }
+            guard succeeded else {
+                self.appData.switchingProfileName = nil
+                return
+            }
+            self.config.selectProfile(name)
+            self.connect(profileName: name)
+        }
+    }
+
     func disconnect(completion: ((Bool) -> Void)? = nil) {
         if !Thread.isMainThread { DispatchQueue.main.async { self.disconnect(completion: completion) }
             return
+        }
+        if completion == nil && appData.switchingProfileName != nil {
+            appData.switchingProfileName = nil
+            stopCompletions.removeAll()
         }
         if let completion { stopCompletions.append(completion) }
         guard let token = connectionLifecycle.beginDisconnect() else { return }
@@ -541,12 +582,14 @@ extension VpnManager {
         connectionRequestedAt = nil
         tunnelStartIssuedAt = nil
         publishIdle()
+        appData.switchingProfileName = nil
         appData.connectionError = "Unable to connect. Check your network and server configuration."
     }
 
     private func publishIdle() {
         publishStatus()
         appData.connectedSince = nil
+        appData.requestedProfileName = nil
         stopStatsMonitoring()
         activeVPN = nil
     }
@@ -564,6 +607,7 @@ extension VpnManager {
         tunnelStopTimeoutWorkItem = nil
         if connectionFailurePending {
             connectionFailurePending = false
+            appData.switchingProfileName = nil
             appData.connectionError = "Unable to connect. Check your network and server configuration."
         }
         if !succeeded {

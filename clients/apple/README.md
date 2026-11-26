@@ -85,6 +85,7 @@ These checks do not activate a real tunnel; real tunnel tests need signed target
 
 ### Configuration options
 
+- `Profile name`: Unique display name
 - `Device ID`: Peer identifier generated on the device
 - `Host`: Vault server hostname or IP address; required
 - `Port`: Server UDP port; defaults to 9527
@@ -93,8 +94,8 @@ These checks do not activate a real tunnel; real tunnel tests need signed target
 - `IPv4 DNS`: Comma-separated IPv4 resolvers; empty uses `1.1.1.1,8.8.8.8`
 - `IPv6 DNS`: Comma-separated IPv6 resolvers; empty uses
   `2001:4860:4860::8888,2001:4860:4860::8844`
-- `Probe domains`: Comma-separated diagnostic domains; empty uses
-  `www.google.com,github.com,t.co`
+- `Probe domains`: App-wide Diagnostics setting, not a per-profile field;
+  comma-separated domains, empty uses `www.google.com,github.com,t.co`
 - `Language`: App language; defaults to the system language and applies immediately
 - `Launch at login`: macOS only; registers Vault as a login item
 - `Connect when Vault opens`: macOS only; starts the VPN when the app launches
@@ -103,28 +104,20 @@ These checks do not activate a real tunnel; real tunnel tests need signed target
 Each DNS field accepts up to four addresses of its own family; probe domains
 are limited to 32 entries. IPv4-only tunnels apply only IPv4 DNS, IPv6-only
 tunnels apply only IPv6 DNS, and dual-stack tunnels combine both lists.
-Connection, network and advanced changes apply on the next connection;
-language and macOS general settings apply immediately.
+Profile changes apply on the next connection. Probe-domain edits apply to the
+next diagnostics run without reconnecting; language and macOS general settings
+apply immediately.
 
-The App Group/profile keys are `dnsIpv4` and `dnsIpv6`. Old `dns` settings
-are ignored and are not migrated; re-enter custom DNS values and reconnect to
-save the new VPN profile. Diagnostic interface binding accepts either a live
-IPv4 or IPv6 tunnel address, including IPv6-only assignments.
+Profiles are stored in the App Group, with per-profile Keychain passwords. Old
+single-profile settings and credentials are not migrated. Diagnostic interface
+binding accepts either a live IPv4 or IPv6 tunnel address.
 
 ## Usage and deployment
 
-- **iOS:** Status shows the connection button, session clock, assigned IPv4/IPv6
-  addresses, the server-observed public/egress IP when available, and traffic.
-  Configure validates a draft; Save applies connection settings on the next
-  connection. Language changes apply immediately. Diagnostics holds connection
-  checks and logs. About shows the app icon and version.
-- **macOS:** the menu bar shows connection state. The popover has a connection
-  button, session clock, the server-observed public/egress IP when available,
-  traffic, and Diagnostics / Settings / Quit actions. Diagnostics also lists the
-  public IP separately from the tunnel addresses. Settings groups General,
-  Connection, Network and Advanced; connection/network/
-  advanced edits require Save and apply on the next connection. General changes
-  apply immediately. About is at the bottom of the Settings sidebar.
+- **iOS:** Status and Configure manage profiles and connections. Diagnostics holds
+  probe domains, connection checks and logs.
+- **macOS:** the menu bar popover manages profiles and connections. Settings groups
+  General, Profiles, Status and About; General changes apply immediately.
 - Closing a macOS window leaves the VPN running; Quit waits for the VPN profile
   cleanup and tunnel shutdown. If cleanup fails, Vault stays open so you can retry.
   Login-item registration may require approval in System Settings.

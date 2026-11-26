@@ -124,6 +124,8 @@ private struct MacosConnectionDiagnostics: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                ProbeDomainsEditor()
+                    .padding(12).background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
                 if running || result != nil {
                     resultHeader
                     sessionAddresses

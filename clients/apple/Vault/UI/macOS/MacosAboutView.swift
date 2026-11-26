@@ -10,8 +10,9 @@ struct MacosAboutView: View {
             AboutContent()
         }
         .multilineTextAlignment(.center)
-        .padding(32)
-        .frame(width: 420, height: 440)
+        .padding(.horizontal, 32)
+        .padding(.bottom, 32)
+        .frame(maxWidth: .infinity)
     }
 }
 

@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import net.dighole.vault.data.parseConfigList
+import net.dighole.vault.data.readProbeDomains
 import net.dighole.vaultcore.uniffi.DiagnosticConfig
 import net.dighole.vaultcore.uniffi.DiagnosticEngine
 import net.dighole.vaultcore.uniffi.DiagnosticScope
@@ -105,7 +107,7 @@ internal class DiagnosticsViewModel : ViewModel() {
             val ipv4 = live.firstOrNull { it.address is java.net.Inet4Address }
             val ipv6 = live.firstOrNull { it.address is java.net.Inet6Address }
             val core = DiagnosticEngine(DiagnosticConfig(
-                sessionId = generation.toULong(), domains = app.diagnosticDomains,
+                sessionId = generation.toULong(), domains = parseConfigList(app.readProbeDomains()),
                 dnsServers = properties.dnsServers.mapNotNull { it.hostAddress },
                 tunnelIpv4 = ipv4?.address?.hostAddress, tunnelIpv4Prefix = ipv4?.prefixLength?.toUByte(),
                 tunnelIpv6 = ipv6?.address?.hostAddress, tunnelMtu = properties.mtu.toUShort()

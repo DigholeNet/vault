@@ -3,8 +3,15 @@
     <style name="Theme.Vault" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/vault_blue</item>
         <item name="colorOnPrimary">@color/vault_surface</item>
+        <item name="colorSecondaryContainer">@color/vault_tonal_container</item>
+        <item name="colorOnSecondaryContainer">@color/vault_blue</item>
         <item name="android:colorBackground">@color/vault_background</item>
         <item name="colorSurface">@color/vault_surface</item>
+        <item name="colorSurfaceContainerLowest">@color/vault_surface</item>
+        <item name="colorSurfaceContainerLow">@color/vault_surface</item>
+        <item name="colorSurfaceContainer">@color/vault_surface</item>
+        <item name="colorSurfaceContainerHigh">@color/vault_surface</item>
+        <item name="colorSurfaceContainerHighest">@color/vault_surface</item>
         <item name="colorOnSurface">@color/vault_text</item>
         <item name="android:windowLightStatusBar">?attr/isLightTheme</item>
     </style>

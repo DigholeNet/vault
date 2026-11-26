@@ -2,13 +2,13 @@
 package net.dighole.vault.data
 
 data class VaultConfig(
+    val name: String = "",
     val host: String = "",
     val port: Int = 9527,
     val password: String = "",
     val dnsIpv4: String = "",
     val dnsIpv6: String = "",
-    val mtu: String = "",
-    val probeDomains: String = ""
+    val mtu: String = ""
 )
 
 /** Preserve legacy DNS entries and their order within each address family. */

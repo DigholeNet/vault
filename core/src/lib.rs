@@ -30,6 +30,8 @@ pub mod util;
 
 #[cfg(not(target_os = "ios"))]
 pub use app::app_main;
+#[cfg(target_os = "linux")]
+pub use app::app_main_with_profiles;
 pub use buf::Buffer;
 pub use crypto::CryptoCore;
 pub use crypto::Role;

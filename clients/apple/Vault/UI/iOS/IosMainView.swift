@@ -23,7 +23,7 @@ struct IosMainView: View {
             }.tag(0)
 
             NavigationStack {
-                IosConfigureView(selectedTab: $selectedTab)
+                IosConfigureView(selectedTab: $selectedTab, vpnManager: vpnManager)
             }.tabItem {
                 Label(languageManager.tr("Configure"), systemImage: "gearshape")
                     .environment(\.symbolVariants, .none)

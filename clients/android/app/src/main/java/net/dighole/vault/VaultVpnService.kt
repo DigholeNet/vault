@@ -25,6 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import net.dighole.vault.data.readProbeDomains
 import net.dighole.vault.data.readVaultConfig
 import net.dighole.vaultcore.Edge
 import net.dighole.vaultcore.EdgeConfig
@@ -53,6 +54,7 @@ class VaultVpnService : VpnService() {
         const val ACTION_DISCONNECT = "net.dighole.vault.ACTION_DISCONNECT"
 
         const val EXTRA_ID = "id"
+        const val EXTRA_PROFILE_NAME = "profile_name"
         const val PREFS_NAME = "vault_prefs"
 
         /** The service stays active during core reconnects and platform IP updates. */
@@ -89,6 +91,8 @@ class VaultVpnService : VpnService() {
     private var trafficStatsJob: Job? = null
     private var connectJob: Job? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var requestedProfileName: String? = null
+    private val switchGate = ProfileSwitchGate<Intent>()
 
     private fun trace(event: String) {
         VaultFileLogger.event(TAG, "service=${System.identityHashCode(this)} " +
@@ -126,18 +130,42 @@ class VaultVpnService : VpnService() {
         }
     }
 
+    private fun handleProfileSwitch(intent: Intent, profileName: String?): Boolean {
+        if (switchGate.closing) {
+            if (profileName != null) {
+                switchGate.begin(Intent(intent))
+                (application as VaultApplication).requestedProfileName = profileName
+            }
+            return true
+        }
+        if ((serviceRunning.get() || connectJob?.isActive == true) && requestedProfileName != null) {
+            if (profileName == requestedProfileName) return true
+            if (profileName != null && switchGate.begin(Intent(intent))) {
+                (application as VaultApplication).requestedProfileName = profileName
+                performCleanup {
+                    mainExecutor.execute {
+                        val next = switchGate.complete()
+                        if (next != null) handleConnect(next)
+                    }
+                }
+                return true
+            }
+        }
+        return false
+    }
+
     // Native/Android setup can throw varied exceptions; cancellation is rethrown.
     @Suppress("TooGenericExceptionCaught")
     private fun handleConnect(intent: Intent) {
-        if (serviceRunning.get()) {
-            return
-        }
+        val profileName = intent.getStringExtra(EXTRA_PROFILE_NAME)
+        if (handleProfileSwitch(intent, profileName)) return
 
         // Re-create scope if it was cancelled by a previous disconnect
         if (!serviceJob.isActive) {
             serviceJob = SupervisorJob()
             scope = CoroutineScope(Dispatchers.IO + serviceJob)
         }
+        if (networkCallback == null) registerNetworkCallback()
 
         if (connectJob?.isActive == true) {
             Log.d(TAG, "Connection already in progress, ignoring duplicate request")
@@ -168,12 +196,14 @@ class VaultVpnService : VpnService() {
         )
 
         val id = intent.getByteArrayExtra(EXTRA_ID)
-        if (id == null) {
-            Log.e(TAG, "EXTRA_ID missing, stopping service")
+        if (id == null || profileName == null) {
+            Log.e(TAG, "Connection extras missing, stopping service")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
         }
+        requestedProfileName = profileName
+        (application as VaultApplication).requestedProfileName = profileName
 
         emitVpnEvent(VpnStatusEvent.Connecting)
         connectJob = scope.launch {
@@ -188,7 +218,7 @@ class VaultVpnService : VpnService() {
             }
             try {
                 val config = try {
-                    this@VaultVpnService.readVaultConfig()
+                    this@VaultVpnService.readVaultConfig(profileName)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -207,14 +237,13 @@ class VaultVpnService : VpnService() {
                     dnsIpv4 = config.dnsIpv4,
                     dnsIpv6 = config.dnsIpv6,
                     mtu = config.mtu,
-                    probeDomains = config.probeDomains
+                    probeDomains = this@VaultVpnService.readProbeDomains()
                 ))
                 if (!sessionGate.update(sessionToken) {
                     mtuCap = validated.mtuCap?.toInt()
                     serverHost = validated.host
                     dnsIpv4List = validated.dnsIpv4
                     dnsIpv6List = validated.dnsIpv6
-                    (application as VaultApplication).diagnosticDomains = validated.probeDomains
                 }) return@launch
 
                 createAndStartEdge(validated.password, validated.host, validated.port.toInt(), id, sessionToken)
@@ -364,6 +393,7 @@ class VaultVpnService : VpnService() {
                         val ipv4 = assignment.ipv4?.address.orEmpty()
                         val ipv6 = assignment.ipv6?.address.orEmpty()
                         connectedEvent = VpnStatusEvent.Connected(ipv4, ipv6, "")
+                        (application as VaultApplication).activeProfileName = requestedProfileName
                         serviceRunning.set(true)
                         connectJob = null
                         vpnIoHandler?.startReadingAndWriting()
@@ -401,6 +431,7 @@ class VaultVpnService : VpnService() {
 
     private fun handleDisconnect() {
         Log.d(TAG, "handleDisconnect called")
+        switchGate.cancel()
         performCleanup()
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -411,12 +442,16 @@ class VaultVpnService : VpnService() {
         }
     }
 
-    private fun performCleanup() = sessionGate.stop {
+    private fun performCleanup(onClosed: (() -> Unit)? = null) = sessionGate.stop {
         trace("CLEANUP_BEGIN")
         serviceRunning.set(false)
+        connectJob = null
         stopTrafficStats()
         connectedEvent = null
         lastCoreConnected = null
+        (application as VaultApplication).activeProfileName = null
+        if (onClosed == null) (application as VaultApplication).requestedProfileName = null
+        requestedProfileName = null
         saveVpnState(false, "", "", "")
 
         // Each cleanup step is independent; one failure must not skip the others.
@@ -437,6 +472,7 @@ class VaultVpnService : VpnService() {
                     edgeToClose.close()
                 } catch (_: Exception) {
                 }
+                if (onClosed != null) mainExecutor.execute(onClosed)
             }
         }
 
@@ -449,6 +485,7 @@ class VaultVpnService : VpnService() {
         }
 
         emitVpnEvent(VpnStatusEvent.Disconnected)
+        if (edgeToClose == null && onClosed != null) mainExecutor.execute(onClosed)
     }
 
     private fun registerNetworkCallback() {
@@ -513,6 +550,7 @@ class VaultVpnService : VpnService() {
             putString("vpn_assigned_ipv4", ipv4)
             putString("vpn_assigned_ipv6", ipv6)
             putString("vpn_public_ip", publicIp)
+            putString("vpn_profile_name", if (connected) requestedProfileName else null)
             commit()
         }
 
@@ -685,6 +723,7 @@ class VaultVpnService : VpnService() {
         // The service may be destroyed by the system while serviceRunning
         // is already false (e.g. after disconnect) or while still true
         // (e.g. process death). performCleanup() is idempotent.
+        switchGate.cancel()
         performCleanup()
         Log.d(TAG, "Service destroyed, state cleared")
         serviceInstance = null

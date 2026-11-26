@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-use crate::config::EdgeConfig;
+use crate::config::SelectedEdgeConfig;
 use crate::storage::SimpleFileStorage;
 use anyhow::Context;
 use std::io;
@@ -32,7 +32,7 @@ pub struct Edge {
 
 impl Edge {
     pub fn new(
-        config: &EdgeConfig,
+        config: &SelectedEdgeConfig,
         device: Arc<TunTapDevice>,
         hosts: &[SocketAddr],
         assignments: Sender<Assignment>,

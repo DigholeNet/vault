@@ -1361,6 +1361,121 @@
         }
       }
     },
+    "Add Profile" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新增配置" } }
+      }
+    },
+    "Add a profile to configure a Supernode." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请新增配置以设置 Supernode。" } }
+      }
+    },
+    "A profile with this name already exists." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已存在同名配置。" } }
+      }
+    },
+    "Configuration could not be loaded. Please try again." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法读取配置，请重试。" } }
+      }
+    },
+    "Delete" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除" } }
+      }
+    },
+    "Delete Profile" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除配置" } }
+      }
+    },
+    "Discard" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "放弃修改" } }
+      }
+    },
+    "Discard unsaved changes?" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "放弃未保存的修改？" } }
+      }
+    },
+    "Saved." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存。" } }
+      }
+    },
+    "Save the connection settings first." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请先保存连接设置。" } }
+      }
+    },
+    "Used for connection" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接时使用" } }
+      }
+    },
+    "Use" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用" } }
+      }
+    },
+    "Delete this profile?" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除此配置？" } }
+      }
+    },
+    "Disconnect before renaming or deleting the running profile." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请先断开连接，再重命名或删除正在使用的配置。" } }
+      }
+    },
+    "Disconnect and Connect" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "断开并连接" } }
+      }
+    },
+    "Edit" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑" } }
+      }
+    },
+    "Enter a profile name." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请输入配置名称。" } }
+      }
+    },
+    "Profile" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "配置" } }
+      }
+    },
+    "Profile Name" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "配置名称" } }
+      }
+    },
+    "Profiles" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "配置" } }
+      }
+    },
+    "Switch Profile?" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换配置？" } }
+      }
+    },
+    "Switching to" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在切换到" } }
+      }
+    },
+    "The current tunnel will disconnect before connecting to" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前隧道将断开，然后连接到" } }
+      }
+    },
     "Server Not Configured" : {
       "localizations" : {
         "zh-Hans" : {

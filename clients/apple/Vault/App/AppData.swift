@@ -12,6 +12,9 @@ class AppData: ObservableObject {
 
     @Published var assignedIp = ""
     @Published var publicIp = ""
+    @Published var runningProfileName: String?
+    @Published var requestedProfileName: String?
+    @Published var switchingProfileName: String?
     @Published var connectedSince: Date?
 
     @Published var connectionError: String?
@@ -46,6 +49,7 @@ class AppData: ObservableObject {
     func resetStats() {
         assignedIp = ""
         publicIp = ""
+        runningProfileName = nil
         providerSession = nil
         statsBase = (0, 0, 0, 0)
         previousStats = .zero
@@ -59,10 +63,18 @@ class AppData: ObservableObject {
         bytesReceivedPerSecond = 0
     }
 
+    private func applyProfileStatus(_ status: ProviderStatus) {
+        guard let profileName = status.profileName else { return }
+        runningProfileName = profileName
+        if requestedProfileName == profileName { requestedProfileName = nil }
+        if switchingProfileName == profileName { switchingProfileName = nil }
+    }
+
     func applyStatus(_ status: ProviderStatus) {
         if assignedIp != status.ip { assignedIp = status.ip }
         let publicIp = status.publicIp ?? ""
         if self.publicIp != publicIp { self.publicIp = publicIp }
+        applyProfileStatus(status)
         let stats = status.stats
         let restarted = providerSession != nil && status.session != nil && providerSession != status.session
         providerSession = status.session

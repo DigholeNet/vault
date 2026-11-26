@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <resources>
     <color name="vault_blue">#2563EB</color>
+    <color name="vault_tonal_container">#E3ECFF</color>
     <color name="vault_background">#F4F6FA</color>
     <color name="vault_surface">#FFFFFF</color>
     <color name="vault_text">#172033</color>

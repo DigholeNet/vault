@@ -13,6 +13,7 @@ public struct TunnelLaunchConfiguration {
 
     public enum InvalidField: Error { case host, port, password, peerID, dnsIpv4, dnsIpv6, probeDomains }
 
+    public let profileName: String
     public let host: String
     public let port: UInt16
     public let password: String
@@ -41,6 +42,7 @@ public struct TunnelLaunchConfiguration {
         } catch let error as SettingsError {
             throw Self.invalidField(error)
         }
+        profileName = values["profileName"] as? String ?? ""
         host = validated.host
         port = validated.port
         self.password = validated.password
@@ -55,7 +57,7 @@ public struct TunnelLaunchConfiguration {
 
     public var providerConfiguration: [String: Any] {
         var values: [String: Any] = [
-            "host": host, "port": port, "password": password, "id": peerID,
+            "profileName": profileName, "host": host, "port": port, "password": password, "id": peerID,
             "dnsIpv4": dnsIpv4.joined(separator: ","), "dnsIpv6": dnsIpv6.joined(separator: ","),
             "probeDomains": probeDomains.joined(separator: ","), "mtu": String(mtuCap)
         ]

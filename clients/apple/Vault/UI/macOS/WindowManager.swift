@@ -35,24 +35,12 @@ final class WindowManager {
                     .environmentObject(appData).environmentObject(config).environmentObject(LanguageManager.shared)
             )
         }
-        factories["about"] = { [unowned self] in
-            makeWindow(
-                id: "about",
-                title: "About",
-                size: NSSize(width: 420, height: 440),
-                minimum: NSSize(width: 420, height: 440),
-                resizable: false,
-                content:
-                MacosAboutView().environmentObject(LanguageManager.shared)
-            )
-        }
         factories["welcome"] = { [unowned self] in
             makeWindow(
                 id: "welcome",
                 title: "Welcome to Vault",
-                size: NSSize(width: 480, height: 360),
-                minimum: NSSize(width: 480, height: 360),
-                resizable: false,
+                size: NSSize(width: 560, height: 360),
+                minimum: NSSize(width: 560, height: 360),
                 content:
                 MacosWelcomeView().environmentObject(LanguageManager.shared)
             )

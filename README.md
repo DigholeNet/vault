@@ -187,14 +187,21 @@ Open UDP port 9527 on the firewall. The server takes the first pool address
 **2. Linux client** — install the edge DEB or RPM package and write `/etc/vault/edge.toml`:
 
 ```toml
+iface = "vpn0"
+storage = "/var/lib/vault/storage.dat"
+default_profile = "main"
+
+[profiles.main]
 password = "a-long-random-password"  # must match the server
 host = "your.server.ip"
 port = 9527
-iface = "vpn0"
 dns_ipv4 = ["1.1.1.1", "8.8.8.8"]
 dns_ipv6 = ["2001:4860:4860::8888", "2001:4860:4860::8844"]
-storage = "/var/lib/vault/storage.dat"
 ```
+
+Add more `[profiles.<name>]` sections for other Supernodes. Select one for a
+standalone run with `edge --profile <name>`; systemd uses `default_profile`.
+The old flat single-profile format is not migrated and must be rewritten.
 
 ```bash
 sudo systemctl enable --now edge
@@ -209,8 +216,9 @@ its current connections on exit; other resolver setups require manual DNS
 configuration. See the
 [Linux client setup](clients/linux/README.md#configuration-options).
 
-**3. Android** — install the APK, enter the same host, port and password,
-and toggle connect.
+**3. Android** — install the APK, add a profile with the same host, port and
+password, then connect. Mobile clients support multiple profiles; old connection
+settings are not migrated.
 
 ### For developers — build from source
 

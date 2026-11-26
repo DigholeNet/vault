@@ -142,9 +142,11 @@ extension PacketStats {
             self.stats = stats
         }
 
-        public func status(ip: String, publicIp: String? = nil) -> ProviderStatus? {
+        public func status(ip: String, publicIp: String? = nil, profileName: String? = nil) -> ProviderStatus? {
             guard let id else { return nil }
-            return ProviderStatus(ip: ip, stats: stats, session: id, publicIp: publicIp)
+            return ProviderStatus(
+                ip: ip, stats: stats, session: id, publicIp: publicIp, profileName: profileName
+            )
         }
     }
 }

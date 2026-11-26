@@ -12,6 +12,13 @@
         android:orientation="vertical"
         android:paddingHorizontal="20dp"
         android:paddingVertical="24dp">
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnProfile"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginBottom="40dp"
+            android:text="@string/add_profile"/>
         <TextView
             android:id="@+id/tvStatus"
             android:layout_width="wrap_content"

@@ -8,26 +8,45 @@ import SystemExtensions
 @testable import Vault
 
 final class VaultTests: XCTestCase {
-    func makeConfig(password initialPassword: String = "") throws -> (config: VaultConfig, defaults: UserDefaults) {
+    func makeConfig() throws -> (config: VaultConfig, defaults: UserDefaults) {
         let suite = "VaultTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
-        var password = initialPassword
-        let passwords = PasswordPersistence(
-            read: { password }, write: { password = $0 },
-            readLegacy: { defaults.string(forKey: "password") },
-            clearLegacy: { defaults.removeObject(forKey: "password") }
-        )
-        return (VaultConfig(defaults: defaults, passwords: passwords), defaults)
+        var passwords: [String: String] = [:]
+        let config = VaultConfig(defaults: defaults, passwordStore: { name in
+            PasswordPersistence(
+                read: { passwords[name] ?? "" },
+                write: { passwords[name] = $0 },
+                readLegacy: { nil },
+                clearLegacy: {}
+            )
+        })
+        return (config, defaults)
     }
 
-    func testConfigUsesIsolatedStorage() throws {
+    @discardableResult
+    func saveTestProfile(
+        _ config: VaultConfig,
+        name: String = "Test",
+        host: String = "test.invalid",
+        password: String = "test-password"
+    ) -> Bool {
+        var draft = ConnectionDraft()
+        draft.name = name
+        draft.host = host
+        draft.password = password
+        return config.saveProfile(draft) == nil
+    }
+
+    func testIsolatedStorage() throws {
         let (config, defaults) = try makeConfig()
         XCTAssertFalse(config.id.isEmpty)
         XCTAssertEqual(defaults.string(forKey: "id"), config.id)
-        XCTAssertTrue(config.saveConnection(host: "test.invalid", port: 9527, password: "test-password"))
-        XCTAssertEqual(defaults.string(forKey: "host"), "test.invalid")
+        XCTAssertTrue(saveTestProfile(config))
+        XCTAssertEqual(config.host, "test.invalid")
         XCTAssertEqual(config.password, "test-password")
+        XCTAssertNil(defaults.object(forKey: "host"))
+        XCTAssertNotNil(defaults.data(forKey: "connectionProfiles.v1"))
         config.retryPasswordStorage()
         XCTAssertNil(config.passwordStorageError)
     }

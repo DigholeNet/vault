@@ -22,6 +22,10 @@ struct Args {
     #[arg(short, long)]
     quiet: bool,
 
+    /// Select a named profile from the configuration file.
+    #[arg(long)]
+    profile: Option<String>,
+
     /// Print the version and exit
     #[arg(long)]
     version: bool,
@@ -123,6 +127,41 @@ where
     F: FnOnce(bool, bool, Option<&String>) -> anyhow::Result<LoggerGuard>,
     F2: FnOnce(Arc<SysSignal>, T) -> anyhow::Result<()>,
 {
+    app_main_inner(name, logger_init, do_run, |value, profile| {
+        anyhow::ensure!(
+            profile.is_none(),
+            "--profile is not supported for this service"
+        );
+        Ok(value.try_into()?)
+    })
+}
+
+#[cfg(target_os = "linux")]
+pub fn app_main_with_profiles<T, F, F2, F3>(
+    name: &str,
+    logger_init: F,
+    do_run: F2,
+    select: F3,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(bool, bool, Option<&String>) -> anyhow::Result<LoggerGuard>,
+    F2: FnOnce(Arc<SysSignal>, T) -> anyhow::Result<()>,
+    F3: FnOnce(toml::Value, Option<&str>) -> anyhow::Result<T>,
+{
+    app_main_inner(name, logger_init, do_run, select)
+}
+
+fn app_main_inner<T, F, F2, F3>(
+    name: &str,
+    logger_init: F,
+    do_run: F2,
+    select: F3,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(bool, bool, Option<&String>) -> anyhow::Result<LoggerGuard>,
+    F2: FnOnce(Arc<SysSignal>, T) -> anyhow::Result<()>,
+    F3: FnOnce(toml::Value, Option<&str>) -> anyhow::Result<T>,
+{
     let args: Args = Args::parse();
     if args.version {
         println!("Vault v{}", env!("CARGO_PKG_VERSION"));
@@ -150,7 +189,12 @@ where
 
     // Validate before daemonizing or touching control paths. Acquire the
     // instance lock before forking so duplicate starts fail in the caller.
-    let (config, signal) = load_and_lock::<T>(args.config.as_deref(), sock_path)?;
+    let (config, signal) = load_selected_and_lock(
+        args.config.as_deref(),
+        sock_path,
+        args.profile.as_deref(),
+        select,
+    )?;
 
     if args.user.is_some() || args.group.is_some() {
         // Capabilities are per-thread. Establish the final identity before
@@ -196,13 +240,29 @@ where
     Ok(())
 }
 
+#[cfg(test)]
 fn load_and_lock<T: DeserializeOwned>(
     config_path: Option<&str>,
     sock_path: String,
 ) -> anyhow::Result<(T, Arc<SysSignal>)> {
+    load_selected_and_lock(config_path, sock_path, None, |value, _| {
+        Ok(value.try_into()?)
+    })
+}
+
+fn load_selected_and_lock<T, F>(
+    config_path: Option<&str>,
+    sock_path: String,
+    profile: Option<&str>,
+    select: F,
+) -> anyhow::Result<(T, Arc<SysSignal>)>
+where
+    F: FnOnce(toml::Value, Option<&str>) -> anyhow::Result<T>,
+{
     let path = config_path.context("--config must be provided")?;
     let content = fs::read_to_string(path)?;
-    let config = toml::from_str(&content)?;
+    let value = toml::from_str(&content)?;
+    let config = select(value, profile)?;
     let signal = Arc::new(SysSignal::bind(sock_path)?);
     Ok((config, signal))
 }

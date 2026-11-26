@@ -97,4 +97,21 @@
 <string name="check_ping">Ping · IPv4</string>
 <string name="check_ping6">Ping · IPv6</string>
 <string name="ping_note">Ping es informativo. ICMP puede estar filtrado; la falta de respuesta no implica un fallo de VPN. El RTT medio incluye solo respuestas.</string>
+    <string name="profile_name">Nombre del perfil</string>
+    <string name="add_profile">Añadir perfil</string>
+    <string name="delete_profile">Eliminar</string>
+    <string name="select_profile">Seleccionar perfil</string>
+    <string name="use_profile">Usar</string>
+    <string name="used_for_connection">Usar para la conexión</string>
+    <string name="profile_format">Perfil: %1$s</string>
+    <string name="running_profile_format">Perfil: %1$s</string>
+    <string name="switch_profile">Cambiar perfil</string>
+    <string name="switch_profile_confirmation">El túnel actual se desconectará antes de conectar con %1$s.</string>
+    <string name="disconnect_and_connect">Desconectar y conectar</string>
+    <string name="delete_profile_confirmation">¿Eliminar el perfil %1$s?</string>
+    <string name="error_profile_name_required">El nombre del perfil es obligatorio</string>
+    <string name="add_profile_empty">Añade un perfil para configurar un Supernode.</string>
+    <string name="back_description">Atrás</string>
+    <string name="error_profile_in_use">Desconecta antes de renombrar o eliminar el perfil en uso.</string>
+    <string name="probe_saved">Dominios de prueba guardados.</string>
 </resources>
