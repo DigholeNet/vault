@@ -376,7 +376,12 @@ impl Engine {
                 && self.config.tunnel_ipv6.is_none())
                 || (matches!(
                     stage,
-                    Stage::Dns | Stage::Tcp | Stage::Https | Stage::Dns6 | Stage::Tcp6 | Stage::Https6
+                    Stage::Dns
+                        | Stage::Tcp
+                        | Stage::Https
+                        | Stage::Dns6
+                        | Stage::Tcp6
+                        | Stage::Https6
                 ) && !self.required_stage(stage))
             {
                 self.phase += 1;

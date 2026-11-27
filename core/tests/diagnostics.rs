@@ -207,7 +207,13 @@ fn offline_plan() {
     let requests = drive(&mut engine, &mut 0, success);
     assert_eq!(
         requests.iter().map(|r| r.stage).collect::<Vec<_>>(),
-        vec![Stage::Application, Stage::Ping, Stage::Ping, Stage::Ping6, Stage::Ping6]
+        vec![
+            Stage::Application,
+            Stage::Ping,
+            Stage::Ping,
+            Stage::Ping6,
+            Stage::Ping6
+        ]
     );
     let result = engine.snapshot();
     assert_eq!(result.state, State::Passed);
