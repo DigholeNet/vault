@@ -148,19 +148,32 @@ struct ProbeDomainsEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
                 TextField(languageManager.tr("Probe Domains"), text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundStyle(VaultTheme.textPrimary)
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 44)
+                    .background(VaultTheme.surfaceSubtle, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(validationError == nil ? VaultTheme.outline : VaultTheme.danger)
+                    }
                     .autocorrectionDisabled()
                     .onSubmit(save)
                 Button(languageManager.tr("Save"), action: save)
+                    .buttonStyle(VaultSecondaryButtonStyle())
+                    .frame(width: 72)
                     .disabled(validationError != nil || draft == config.probeDomains)
             }
             Text(languageManager.tr("Diagnostic probe domains, separated by commas. Leave empty to use defaults."))
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.system(size: 12)).foregroundStyle(VaultTheme.textSecondary)
             if let feedback {
                 Text(languageManager.tr(feedback))
-                    .font(.caption).foregroundStyle(feedback == "Saved." ? Color.secondary : Color.red)
+                    .font(.system(size: 12))
+                    .foregroundStyle(feedback == "Saved." ? VaultTheme.textSecondary : VaultTheme.danger)
             }
         }
         .onAppear {

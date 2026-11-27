@@ -90,6 +90,7 @@ class VaultVpnService : VpnService() {
     private var lastCoreConnected: Boolean? = null
     private var trafficStatsJob: Job? = null
     private var connectJob: Job? = null
+    private var initialConnectionTimeoutJob: Job? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var requestedProfileName: String? = null
     private val switchGate = ProfileSwitchGate<Intent>()
@@ -206,6 +207,17 @@ class VaultVpnService : VpnService() {
         (application as VaultApplication).requestedProfileName = profileName
 
         emitVpnEvent(VpnStatusEvent.Connecting)
+        initialConnectionTimeoutJob?.cancel()
+        initialConnectionTimeoutJob = scope.launch {
+            delay(15_000)
+            sessionGate.update(sessionToken) {
+                if (connectedEvent == null) {
+                    Log.e(TAG, "Initial connection timed out")
+                    emitVpnEvent(VpnStatusEvent.Error(null, R.string.error_connection_timeout))
+                    handleDisconnect()
+                }
+            }
+        }
         connectJob = scope.launch {
             // Blocking Rust shutdown runs here on the IO dispatcher, not the
             // main thread. Closing before creating the new Edge below also
@@ -392,6 +404,8 @@ class VaultVpnService : VpnService() {
                         }
                         val ipv4 = assignment.ipv4?.address.orEmpty()
                         val ipv6 = assignment.ipv6?.address.orEmpty()
+                        initialConnectionTimeoutJob?.cancel()
+                        initialConnectionTimeoutJob = null
                         connectedEvent = VpnStatusEvent.Connected(ipv4, ipv6, "")
                         (application as VaultApplication).activeProfileName = requestedProfileName
                         serviceRunning.set(true)
@@ -444,6 +458,9 @@ class VaultVpnService : VpnService() {
 
     private fun performCleanup(onClosed: (() -> Unit)? = null) = sessionGate.stop {
         trace("CLEANUP_BEGIN")
+        val preserveError = (application as VaultApplication).currentVpnStatus is VpnStatusEvent.Error
+        initialConnectionTimeoutJob?.cancel()
+        initialConnectionTimeoutJob = null
         serviceRunning.set(false)
         connectJob = null
         stopTrafficStats()
@@ -484,7 +501,7 @@ class VaultVpnService : VpnService() {
         } catch (_: Exception) {
         }
 
-        emitVpnEvent(VpnStatusEvent.Disconnected)
+        if (!preserveError) emitVpnEvent(VpnStatusEvent.Disconnected)
         if (edgeToClose == null && onClosed != null) mainExecutor.execute(onClosed)
     }
 

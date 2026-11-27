@@ -111,6 +111,11 @@ class StatusFragment : Fragment() {
             }
         }
         view.findViewById<View>(R.id.btnProfile).setOnClickListener { showProfileDialog() }
+        view.findViewById<View>(R.id.failureDiagnosticsCard).setOnClickListener {
+            requireActivity().findViewById<com.google.android.material.bottomnavigation.BottomNavigationView>(
+                R.id.bottomNav
+            ).selectedItemId = R.id.nav_diagnostics
+        }
 
         restoreStateFromPrefs()
         refreshProfiles()
@@ -234,11 +239,10 @@ class StatusFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val store = requireContext().readVaultProfiles()
-                view?.findViewById<android.widget.Button>(R.id.btnProfile)?.text =
-                    store.selectedProfileName?.let { getString(R.string.profile_format, it) }
-                        ?: getString(R.string.add_profile)
+                view?.findViewById<TextView>(R.id.btnProfileText)?.text =
+                    store.selectedProfileName ?: getString(R.string.add_profile)
             } catch (_: Exception) {
-                view?.findViewById<android.widget.Button>(R.id.btnProfile)?.setText(R.string.config_load_failed)
+                view?.findViewById<TextView>(R.id.btnProfileText)?.setText(R.string.config_load_failed)
             }
         }
     }
@@ -322,8 +326,11 @@ class StatusFragment : Fragment() {
         val error = app.currentVpnStatus as? VpnStatusEvent.Error
         val runningProfile = if (active) app.activeProfileName ?: app.requestedProfileName else null
         return when {
-            error != null -> getString(R.string.status_error_prefix, error.message.orEmpty())
-            runningProfile != null -> getString(R.string.running_profile_format, runningProfile)
+            error != null -> getString(
+                R.string.status_error_prefix,
+                error.messageResId?.let(::getString) ?: error.message.orEmpty()
+            )
+            runningProfile != null -> getString(R.string.profile_disconnect_format, runningProfile)
             else -> null
         }
     }
@@ -333,28 +340,97 @@ class StatusFragment : Fragment() {
         val app = requireContext().applicationContext as VaultApplication
         val preparing = awaitingPermission || connectJob?.isActive == true
         val active = vpnState.isConnected || vpnState.isConnecting
+        val emphasized = active || preparing
+        val failed = app.currentVpnStatus is VpnStatusEvent.Error && !emphasized
         val connected = vpnState.isConnected && !vpnState.isConnecting
-        root.findViewById<View>(R.id.btnProfile).visibility = if (active || preparing) View.GONE else View.VISIBLE
+        root.findViewById<View>(R.id.btnProfile).visibility = if (emphasized) View.GONE else View.VISIBLE
         tvStatus.setText(when {
+            failed -> R.string.status_failed
             vpnState.isConnecting && vpnState.isConnected -> R.string.status_reconnecting
             vpnState.isConnecting || preparing -> R.string.status_connecting
             vpnState.isConnected -> R.string.status_on
             else -> R.string.status_off
         })
-        btnToggleVpn.setImageResource(if (active) R.drawable.ic_connected else R.drawable.ic_disconnected)
+        root.findViewById<TextView>(R.id.tvHeaderStatus).apply {
+            text = tvStatus.text
+            setTextColor(ContextCompat.getColor(
+                requireContext(), when {
+                    failed -> R.color.vault_danger
+                    emphasized -> R.color.vault_blue_dark
+                    else -> R.color.vault_text_secondary
+                }
+            ))
+        }
+        root.findViewById<View>(R.id.headerStatusDot).backgroundTintList =
+            android.content.res.ColorStateList.valueOf(ContextCompat.getColor(
+                requireContext(), when {
+                    failed -> R.color.vault_danger
+                    emphasized -> R.color.connection_connected
+                    else -> R.color.connection_disconnected
+                }
+            ))
+        val hero = root.findViewById<View>(R.id.statusHero)
+        hero.setBackgroundResource(when {
+            failed -> R.drawable.vault_bg_hero_error
+            emphasized -> R.drawable.vault_bg_hero_active
+            else -> R.drawable.vault_bg_hero_muted
+        })
+        hero.layoutParams = hero.layoutParams.apply {
+            height = ((if (emphasized) 258 else 286) * resources.displayMetrics.density).toInt()
+        }
+        val heroVerticalPadding = ((if (emphasized) 8 else 24) * resources.displayMetrics.density).toInt()
+        hero.setPadding(hero.paddingLeft, heroVerticalPadding, hero.paddingRight, heroVerticalPadding)
+        tvStatus.setTextColor(ContextCompat.getColor(
+            requireContext(), when {
+                failed -> R.color.vault_danger
+                emphasized -> R.color.vault_hero_text
+                else -> R.color.vault_text_secondary
+            }
+        ))
+        btnToggleVpn.setImageResource(when {
+            failed -> R.drawable.ic_error
+            active -> R.drawable.ic_connected
+            else -> R.drawable.ic_disconnected
+        })
         btnToggleVpn.isEnabled = !preparing
         btnToggleVpn.alpha = if (btnToggleVpn.isEnabled) 1f else 0.5f
-        btnToggleVpn.contentDescription = getString(
-            if (active) R.string.status_tap_to_disconnect else R.string.status_tap_to_connect)
+        btnToggleVpn.contentDescription = getString(when {
+            failed -> R.string.retry
+            active -> R.string.status_tap_to_disconnect
+            else -> R.string.status_tap_to_connect
+        })
+        root.findViewById<TextView>(R.id.tvConnectionAction).apply {
+            visibility = if (emphasized) View.GONE else View.VISIBLE
+            setText(if (failed) R.string.retry else R.string.status_tap_to_connect)
+            setTextColor(ContextCompat.getColor(requireContext(), R.color.vault_blue))
+        }
         val detail = statusDetailText(app, active)
         tvStatusDetail.text = detail.orEmpty()
         tvStatusDetail.visibility = if (detail == null) View.GONE else View.VISIBLE
+        tvStatusDetail.setTextColor(ContextCompat.getColor(
+            requireContext(), when {
+                failed -> R.color.vault_danger
+                emphasized -> R.color.vault_hero_secondary
+                else -> R.color.vault_text_secondary
+            }
+        ))
+        root.findViewById<TextView>(R.id.tvTunnelFeature).apply {
+            setText(if (failed) R.string.failure_retry_hint else R.string.tunnel_features)
+            setBackgroundResource(
+                if (emphasized) R.drawable.vault_bg_feature_active else R.drawable.vault_bg_feature
+            )
+            setTextColor(ContextCompat.getColor(
+                requireContext(), if (emphasized) R.color.vault_hero_secondary else R.color.vault_text_secondary
+            ))
+        }
+        root.findViewById<View>(R.id.readyCard).visibility = if (emphasized || failed) View.GONE else View.VISIBLE
+        root.findViewById<View>(R.id.failureDiagnosticsCard).visibility = if (failed) View.VISIBLE else View.GONE
         duration.visibility = if (connected) View.VISIBLE else View.GONE
         if (connected) {
             renderDuration(app.ensureConnectionStarted())
             if (!isHidden && isResumed) startDurationUpdates(app.ensureConnectionStarted())
         } else stopDurationUpdates()
-        renderConnectionInfo(root, connected)
+        renderConnectionInfo(root, vpnState.isConnected)
         renderTrafficStats(app.latestTrafficStats)
     }
 
@@ -364,12 +440,6 @@ class StatusFragment : Fragment() {
         val showNetworkCard = connected && (showPublicIp || hasTunnelIps)
         val connectionInfo = root.findViewById<View>(R.id.connectionInfo)
         connectionInfo.visibility = if (connected) View.VISIBLE else View.GONE
-        val topMargin = ((if (showNetworkCard) 24 else 50) * root.resources.displayMetrics.density).toInt()
-        val layoutParams = connectionInfo.layoutParams as ViewGroup.MarginLayoutParams
-        if (layoutParams.topMargin != topMargin) {
-            layoutParams.topMargin = topMargin
-            connectionInfo.layoutParams = layoutParams
-        }
         networkCard.visibility = if (showNetworkCard) View.VISIBLE else View.GONE
         publicIpSection.visibility = if (showPublicIp) View.VISIBLE else View.GONE
         root.findViewById<View>(R.id.networkDivider).visibility =

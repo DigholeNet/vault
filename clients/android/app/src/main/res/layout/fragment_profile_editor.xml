@@ -1,245 +1,121 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
+    android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical">
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:paddingHorizontal="8dp">
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/action_back"
-            style="@style/Widget.Material3.Button.IconButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_gravity="start|center_vertical"
-            android:contentDescription="@string/back_description"
-            app:icon="@drawable/ic_back"
-            app:iconTint="?attr/colorOnSurface"/>
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/action_save"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:layout_gravity="end|center_vertical"
-            android:text="@string/save_description"
-            android:minWidth="56dp"
-            android:minHeight="48dp"
-            android:paddingHorizontal="8dp"
-            android:paddingVertical="0dp"
-            android:textSize="12sp"
-            android:letterSpacing="0"
-            android:insetTop="8dp"
-            android:insetBottom="8dp"
-            android:insetLeft="0dp"
-            android:insetRight="0dp"
-            android:enabled="false"
-            app:cornerRadius="16dp"
-            app:strokeWidth="0dp"/>
-    </FrameLayout>
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true">
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp">
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                app:cardCornerRadius="16dp"
-                app:strokeWidth="0dp">
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-                    <com.google.android.material.textfield.TextInputLayout
-                        style="@style/Widget.Vault.Configure.TextInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginVertical="2dp"
-                        android:hint="@string/profile_name">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/edtProfileName"
-                            style="@style/Widget.Vault.Configure.EditText"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="textNoSuggestions"/>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="56dp"
+        android:gravity="center_vertical" android:orientation="horizontal" android:paddingHorizontal="12dp">
+        <com.google.android.material.button.MaterialButton android:id="@+id/action_back"
+            style="@style/Widget.Material3.Button.IconButton" android:layout_width="48dp"
+            android:layout_height="48dp" android:contentDescription="@string/back_description"
+            app:icon="@drawable/ic_back" app:iconTint="@color/vault_text"/>
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:text="@string/profile_details"
+            android:textAppearance="@style/TextAppearance.Vault.PageTitle"/>
+        <com.google.android.material.button.MaterialButton android:id="@+id/action_save"
+            style="@style/Widget.Vault.Button.Tonal" android:layout_width="wrap_content"
+            android:layout_height="48dp" android:enabled="false" android:text="@string/save_description"/>
+    </LinearLayout>
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:fillViewport="true">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:paddingHorizontal="20dp" android:paddingBottom="20dp">
+            <com.google.android.material.card.MaterialCardView style="@style/Widget.Vault.Card"
+                android:layout_width="match_parent" android:layout_height="wrap_content">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="@string/basic_information" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
+                    <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" android:hint="@string/profile_name">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/edtProfileName"
+                            style="@style/Widget.Vault.Configure.EditText" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="textNoSuggestions"/>
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:hint="@string/device_id">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/edtId"
+                            style="@style/Widget.Vault.Configure.EditText" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:focusable="false"
+                            android:inputType="textNoSuggestions" android:longClickable="true" android:textIsSelectable="true"/>
                     </com.google.android.material.textfield.TextInputLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                app:cardCornerRadius="16dp"
-                app:strokeWidth="0dp">
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-                    <com.google.android.material.textfield.TextInputLayout
-                        style="@style/Widget.Vault.Configure.TextInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginVertical="2dp"
-                        android:hint="@string/device_id">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/edtId"
-                            style="@style/Widget.Vault.Configure.EditText"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="textNoSuggestions"
-                            android:focusable="false"
-                            android:longClickable="true"
-                            android:textIsSelectable="true"/>
+            <com.google.android.material.card.MaterialCardView style="@style/Widget.Vault.Card"
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="@string/server_section" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
+                    <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" android:hint="@string/server_host">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/edtHost"
+                            style="@style/Widget.Vault.Configure.EditText" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="textNoSuggestions"/>
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:hint="@string/port">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/edtPort"
+                            style="@style/Widget.Vault.Configure.EditText" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="number"/>
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:hint="@string/password" app:endIconMode="password_toggle">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/edtPassword"
+                            style="@style/Widget.Vault.Configure.EditText" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="textPassword"/>
                     </com.google.android.material.textfield.TextInputLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                app:cardCornerRadius="16dp"
-                app:strokeWidth="0dp">
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-                    <com.google.android.material.textfield.TextInputLayout
-                        style="@style/Widget.Vault.Configure.TextInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginVertical="2dp"
-                        android:hint="@string/server_host">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/edtHost"
-                            style="@style/Widget.Vault.Configure.EditText"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="textNoSuggestions"/>
+            <com.google.android.material.card.MaterialCardView style="@style/Widget.Vault.Card"
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="DNS" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
+                    <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" android:hint="@string/dns_ipv4_servers" app:helperText="@string/dns_ipv4_help">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/edtDnsIpv4"
+                            style="@style/Widget.Vault.Configure.EditText" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="textNoSuggestions"/>
                     </com.google.android.material.textfield.TextInputLayout>
-                    <com.google.android.material.textfield.TextInputLayout
-                        style="@style/Widget.Vault.Configure.TextInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginVertical="2dp"
-                        android:hint="@string/port">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/edtPort"
-                            style="@style/Widget.Vault.Configure.EditText"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="number"/>
-                    </com.google.android.material.textfield.TextInputLayout>
-                    <com.google.android.material.textfield.TextInputLayout
-                        style="@style/Widget.Vault.Configure.TextInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginVertical="2dp"
-                        android:hint="@string/password"
-                        app:endIconMode="password_toggle">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/edtPassword"
-                            style="@style/Widget.Vault.Configure.EditText"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="textPassword"/>
+                    <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:hint="@string/dns_ipv6_servers" app:helperText="@string/dns_ipv6_help">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/edtDnsIpv6"
+                            style="@style/Widget.Vault.Configure.EditText" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="textNoSuggestions"/>
                     </com.google.android.material.textfield.TextInputLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                app:cardCornerRadius="16dp"
-                app:strokeWidth="0dp">
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-                    <com.google.android.material.textfield.TextInputLayout
-                        style="@style/Widget.Vault.Configure.TextInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginVertical="2dp"
-                        android:hint="@string/dns_ipv4_servers"
-                        app:helperText="@string/dns_ipv4_help">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/edtDnsIpv4"
-                            style="@style/Widget.Vault.Configure.EditText"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="textNoSuggestions"/>
-                    </com.google.android.material.textfield.TextInputLayout>
-                    <com.google.android.material.textfield.TextInputLayout
-                        style="@style/Widget.Vault.Configure.TextInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginVertical="2dp"
-                        android:hint="@string/dns_ipv6_servers"
-                        app:helperText="@string/dns_ipv6_help">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/edtDnsIpv6"
-                            style="@style/Widget.Vault.Configure.EditText"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="textNoSuggestions"/>
+            <com.google.android.material.card.MaterialCardView style="@style/Widget.Vault.Card"
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="@string/advanced_settings" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
+                    <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" android:hint="@string/mtu" app:helperText="@string/mtu_help">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/edtMtu"
+                            style="@style/Widget.Vault.Configure.EditText" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="number"/>
                     </com.google.android.material.textfield.TextInputLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                app:cardCornerRadius="16dp"
-                app:strokeWidth="0dp">
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-                    <com.google.android.material.textfield.TextInputLayout
-                        style="@style/Widget.Vault.Configure.TextInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginVertical="2dp"
-                        android:hint="@string/mtu"
-                        app:helperText="@string/mtu_help">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/edtMtu"
-                            style="@style/Widget.Vault.Configure.EditText"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="number"/>
-                    </com.google.android.material.textfield.TextInputLayout>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/action_delete_profile"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="@string/delete_profile"
-                android:textColor="?attr/colorError"/>
-            <TextView
-                android:id="@+id/tvSaveStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:accessibilityLiveRegion="polite"
-                android:paddingVertical="4dp"
-                android:text="@string/save_hint"
-                android:textColor="?attr/colorOnSurfaceVariant"
-                android:textSize="12sp"/>
+            <com.google.android.material.button.MaterialButton android:id="@+id/action_delete_profile"
+                style="@style/Widget.Material3.Button.TextButton" android:layout_width="match_parent"
+                android:layout_height="48dp" android:text="@string/delete_profile" android:textColor="@color/vault_danger"/>
+            <TextView android:id="@+id/tvSaveStatus" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:accessibilityLiveRegion="polite"
+                android:gravity="center" android:paddingVertical="4dp" android:text="@string/save_hint"
+                android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
         </LinearLayout>
     </ScrollView>
 </LinearLayout>

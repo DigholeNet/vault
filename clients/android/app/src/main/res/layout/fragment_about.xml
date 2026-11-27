@@ -1,59 +1,47 @@
-<?xml version="1.0" ?>
-<ScrollView
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:fillViewport="true">
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:padding="32dp">
-        <com.google.android.material.imageview.ShapeableImageView
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:src="@mipmap/ic_launcher"
-            android:scaleType="fitCenter"
-            app:shapeAppearanceOverlay="@style/AboutAppIconShape"
-            android:layout_marginBottom="16dp"
-            android:contentDescription="@string/app_icon_description"/>
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/app_name"
-            android:textSize="24sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="12dp"/>
-        <TextView
-            android:id="@+id/tvVersion"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/version_unknown"
-            android:textSize="16sp"
-            android:textColor="?android:attr/textColorSecondary"
-            android:layout_marginBottom="32dp"/>
-        <TextView
-            android:id="@+id/tvWebsite"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/website"
-            android:textSize="14sp"
-            android:textColor="?attr/colorPrimary"
-            android:layout_marginBottom="16dp"/>
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/about_description"
-            android:textSize="14sp"
-            android:gravity="center"
-            android:layout_marginBottom="16dp"/>
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/copyright"
-            android:textSize="12sp"
-            android:textColor="?android:attr/textColorSecondary"/>
+    android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:paddingHorizontal="20dp"
+        android:paddingBottom="20dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="@string/nav_about" android:textAppearance="@style/TextAppearance.Vault.PageTitle"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:text="@string/about_page_subtitle"
+            android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:background="@drawable/vault_bg_hero_active"
+            android:gravity="center_horizontal" android:orientation="vertical" android:padding="28dp">
+            <com.google.android.material.imageview.ShapeableImageView android:layout_width="96dp"
+                android:layout_height="96dp" android:contentDescription="@string/app_icon_description"
+                android:scaleType="fitCenter" android:src="@mipmap/ic_launcher"
+                app:shapeAppearanceOverlay="@style/AboutAppIconShape"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="18dp" android:text="@string/app_name"
+                android:textColor="@color/vault_hero_text" android:textSize="34sp" android:textStyle="bold"/>
+            <TextView android:id="@+id/tvVersion" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:layout_marginTop="20dp"
+                android:background="@drawable/vault_bg_feature_active" android:text="@string/version_unknown"
+                android:textColor="@color/vault_hero_secondary" android:textSize="11sp"/>
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/Widget.Vault.Card"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center_horizontal" android:orientation="vertical" android:padding="22dp">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:gravity="center" android:text="@string/about_description"
+                    android:textAppearance="@style/TextAppearance.Vault.Body"/>
+                <TextView android:id="@+id/tvWebsite" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="18dp"
+                    android:background="@drawable/vault_bg_panel_muted" android:clickable="true"
+                    android:focusable="true" android:gravity="center" android:padding="16dp"
+                    android:text="@string/website" android:textColor="@color/vault_blue" android:textSize="13sp"
+                    android:textStyle="bold"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal" android:layout_marginTop="24dp"
+            android:text="@string/copyright" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
     </LinearLayout>
 </ScrollView>

@@ -2,6 +2,34 @@
 <resources>
     <!-- App -->
     <string name="app_name">Vault</string>
+    <string name="status_page_subtitle">Private networking, made simple.</string>
+    <string name="configure_page_subtitle">Choose the server for your next connection.</string>
+    <string name="diagnostics_page_subtitle">Check your connection and troubleshoot network issues.</string>
+    <string name="about_page_subtitle">Private, secure, open source.</string>
+    <string name="tunnel_features">Encrypted tunnel · Auto reconnect</string>
+    <string name="ready_to_connect">Ready to connect</string>
+    <string name="ready_to_connect_detail">Review the server configuration, then tap the power button. Network details and live traffic appear after connecting.</string>
+    <string name="network_details">Network details</string>
+    <string name="live_traffic">Live traffic</string>
+    <string name="preferences">Preferences</string>
+    <string name="save_before_connecting_title">Save changes before connecting</string>
+    <string name="save_before_connecting_detail">Server, DNS and MTU changes apply the next time you connect.</string>
+    <string name="basic_information">Basic information</string>
+    <string name="server_section">Server</string>
+    <string name="advanced_settings">Advanced settings</string>
+    <string name="test_targets">Test targets</string>
+    <string name="log_selection_hint">Select log text to copy details for troubleshooting.</string>
+    <string name="switch_profile_short">Switch profile</string>
+    <string name="profile_disconnect_format">%1$s · Tap to disconnect</string>
+    <string name="profile_details">Profile Details</string>
+    <string name="version_about_format">Version %1$s · BUILD %2$s</string>
+    <string name="profile_active">In use</string>
+    <string name="status_failed">Connection failed</string>
+    <string name="retry">Retry</string>
+    <string name="error_connection_timeout">The server could not be reached. Check the address and your network, then retry.</string>
+    <string name="failure_retry_hint">Check the configuration, then retry</string>
+    <string name="failure_diagnostics_title">Need to investigate further?</string>
+    <string name="failure_diagnostics_detail">Check the server address and network, or open Diagnostics.</string>
 
     <!-- Navigation -->
     <string name="nav_status">Status</string>
@@ -32,7 +60,6 @@
 
     <!-- About Fragment -->
     <string name="app_icon_description">App Icon</string>
-    <string name="version_format">Version %1$s (%2$s)</string>
     <string name="version_unknown">Version unknown</string>
     <string name="website">https://github.com/DigholeNet/vault</string>
     <string name="about_description">A secure VPN client for cross-regional connectivity.</string>
@@ -63,7 +90,6 @@
     <string name="error_dns_ipv4">Enter up to 4 IPv4 DNS addresses separated by commas.</string>
     <string name="error_dns_ipv6">Enter up to 4 IPv6 DNS addresses separated by commas.</string>
     <string name="error_probe">Enter up to 32 valid domains separated by commas, without URLs.</string>
-    <string name="config_saved_next">Saved. Changes apply the next time you connect.</string>
     <string name="save_hint">Save changes before connecting.</string>
     <string name="config_load_failed">Could not load configuration. Reopen this page to retry.</string>
     <string name="config_save_failed">Could not save configuration. Please retry.</string>
@@ -73,7 +99,7 @@
     <string name="run_again">Run again</string>
     <string name="checking">Checking connection…</string>
     <string name="checks_intro">Test VPN DNS, TCP and HTTPS, plus application access.</string>
-    <string name="checks_disconnected">Connect the VPN before running diagnostics. Logs remain available.</string>
+    <string name="checks_disconnected">Run application access checks without connecting. Tunnel checks are available after connecting. Logs remain available.</string>
     <string name="checks_passed">Connectivity checks passed</string>
     <string name="checks_failed">Connectivity issues found</string>
     <string name="checks_incomplete">Diagnostics incomplete. Some checks were not completed.</string>
@@ -100,12 +126,10 @@
 <string name="ping_note">Ping is informational. ICMP may be filtered; no reply alone does not mean the VPN is broken. Average RTT includes replies only.</string>
     <string name="profile_name">Profile name</string>
     <string name="add_profile">Add profile</string>
-    <string name="delete_profile">Delete</string>
+    <string name="delete_profile">Delete Profile</string>
     <string name="select_profile">Select profile</string>
     <string name="use_profile">Use</string>
     <string name="used_for_connection">Use for connection</string>
-    <string name="profile_format">Profile: %1$s</string>
-    <string name="running_profile_format">Profile: %1$s</string>
     <string name="switch_profile">Switch profile</string>
     <string name="switch_profile_confirmation">The current tunnel will disconnect before connecting to %1$s.</string>
     <string name="disconnect_and_connect">Disconnect and connect</string>

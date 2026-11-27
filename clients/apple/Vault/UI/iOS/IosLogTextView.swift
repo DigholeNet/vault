@@ -10,12 +10,13 @@ struct LogTextView: UIViewRepresentable {
         let view = UITextView()
         view.isEditable = false
         view.isSelectable = true
-        let font = UIFont.preferredFont(forTextStyle: .footnote)
+        let font = UIFont.preferredFont(forTextStyle: .caption1)
         let descriptor = font.fontDescriptor.withDesign(.monospaced) ?? font.fontDescriptor
         view.font = UIFont(descriptor: descriptor, size: 0)
         view.adjustsFontForContentSizeCategory = true
-        view.backgroundColor = .secondarySystemGroupedBackground
-        view.textContainerInset = UIEdgeInsets(top: 12, left: 10, bottom: 12, right: 10)
+        view.backgroundColor = UIColor(VaultTheme.surface)
+        view.textColor = UIColor(VaultTheme.textSecondary)
+        view.textContainerInset = UIEdgeInsets(top: 16, left: 12, bottom: 16, right: 12)
         return view
     }
 

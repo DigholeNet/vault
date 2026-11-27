@@ -2,6 +2,34 @@
 <resources>
     <!-- App -->
     <string name="app_name">Vault</string>
+    <string name="status_page_subtitle">Red privada, conexión sencilla.</string>
+    <string name="configure_page_subtitle">Elige el servidor para tu próxima conexión.</string>
+    <string name="diagnostics_page_subtitle">Comprueba la conexión y resuelve problemas de red.</string>
+    <string name="about_page_subtitle">Privado, seguro y de código abierto.</string>
+    <string name="tunnel_features">Túnel cifrado · Reconexión automática</string>
+    <string name="ready_to_connect">Listo para conectar</string>
+    <string name="ready_to_connect_detail">Revisa el servidor y pulsa el botón de encendido. Los detalles y el tráfico aparecen al conectar.</string>
+    <string name="network_details">Detalles de red</string>
+    <string name="live_traffic">Tráfico en tiempo real</string>
+    <string name="preferences">Preferencias</string>
+    <string name="save_before_connecting_title">Guarda los cambios antes de conectar</string>
+    <string name="save_before_connecting_detail">Los cambios de servidor, DNS y MTU se aplican en la próxima conexión.</string>
+    <string name="basic_information">Información básica</string>
+    <string name="server_section">Servidor</string>
+    <string name="advanced_settings">Configuración avanzada</string>
+    <string name="test_targets">Objetivos de prueba</string>
+    <string name="log_selection_hint">Selecciona el texto del registro para copiar detalles de diagnóstico.</string>
+    <string name="switch_profile_short">Cambiar perfil</string>
+    <string name="profile_disconnect_format">%1$s · Toca para desconectar</string>
+    <string name="profile_details">Detalles del perfil</string>
+    <string name="version_about_format">Versión %1$s · BUILD %2$s</string>
+    <string name="profile_active">En uso</string>
+    <string name="status_failed">Error de conexión</string>
+    <string name="retry">Reintentar</string>
+    <string name="error_connection_timeout">No se pudo conectar con el servidor. Comprueba la dirección y la red e inténtalo de nuevo.</string>
+    <string name="failure_retry_hint">Comprueba la configuración y vuelve a intentarlo</string>
+    <string name="failure_diagnostics_title">¿Necesitas más ayuda?</string>
+    <string name="failure_diagnostics_detail">Revisa la dirección del servidor y la red, o abre Diagnóstico.</string>
 
     <!-- Navigation -->
     <string name="nav_status">Estado</string>
@@ -31,7 +59,6 @@
 
     <!-- About Fragment -->
     <string name="app_icon_description">Icono de la app</string>
-    <string name="version_format">Versión %1$s (%2$s)</string>
     <string name="version_unknown">Versión desconocida</string>
     <string name="website">https://github.com/DigholeNet/vault</string>
     <string name="about_description">Un cliente VPN seguro para conectividad interregional.</string>
@@ -62,7 +89,6 @@
 <string name="error_dns_ipv4">Introduce hasta 4 direcciones DNS IPv4 separadas por comas.</string>
     <string name="error_dns_ipv6">Introduce hasta 4 direcciones DNS IPv6 separadas por comas.</string>
 <string name="error_probe">Introduce hasta 32 dominios válidos separados por comas, sin URL.</string>
-<string name="config_saved_next">Guardado. Los cambios se aplicarán en la próxima conexión.</string>
 <string name="save_hint">Guarda los cambios antes de conectar.</string>
 <string name="config_load_failed">No se pudo cargar la configuración. Vuelve a abrir esta página.</string>
 <string name="config_save_failed">No se pudo guardar. Inténtalo de nuevo.</string>
@@ -72,7 +98,7 @@
 <string name="run_again">Repetir</string>
 <string name="checking">Comprobando conexión…</string>
 <string name="checks_intro">Comprueba DNS, TCP y HTTPS de la VPN y el acceso de la aplicación.</string>
-<string name="checks_disconnected">Conecta la VPN antes del diagnóstico. Los registros siguen disponibles.</string>
+<string name="checks_disconnected">Comprueba el acceso directo de la aplicación sin conectarte. Las comprobaciones del túnel estarán disponibles tras conectar. Los registros siguen disponibles.</string>
 <string name="checks_passed">Comprobaciones superadas</string>
 <string name="checks_failed">Se encontraron problemas de conexión</string>
 <string name="checks_incomplete">Diagnóstico incompleto. Algunas comprobaciones no se completaron.</string>
@@ -99,12 +125,10 @@
 <string name="ping_note">Ping es informativo. ICMP puede estar filtrado; la falta de respuesta no implica un fallo de VPN. El RTT medio incluye solo respuestas.</string>
     <string name="profile_name">Nombre del perfil</string>
     <string name="add_profile">Añadir perfil</string>
-    <string name="delete_profile">Eliminar</string>
+    <string name="delete_profile">Eliminar perfil</string>
     <string name="select_profile">Seleccionar perfil</string>
     <string name="use_profile">Usar</string>
     <string name="used_for_connection">Usar para la conexión</string>
-    <string name="profile_format">Perfil: %1$s</string>
-    <string name="running_profile_format">Perfil: %1$s</string>
     <string name="switch_profile">Cambiar perfil</string>
     <string name="switch_profile_confirmation">El túnel actual se desconectará antes de conectar con %1$s.</string>
     <string name="disconnect_and_connect">Desconectar y conectar</string>

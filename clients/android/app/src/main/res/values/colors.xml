@@ -1,16 +1,33 @@
-<?xml version="1.0" ?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="vault_blue">#2563EB</color>
-    <color name="vault_tonal_container">#E3ECFF</color>
-    <color name="vault_background">#F4F6FA</color>
+    <color name="vault_blue">#4F46E5</color>
+    <color name="vault_blue_dark">#3730A3</color>
+    <color name="vault_indigo_soft">#E9E9FF</color>
+    <color name="vault_tonal_container">#E9E9FF</color>
+    <color name="vault_background">#F6F7FB</color>
     <color name="vault_surface">#FFFFFF</color>
+    <color name="vault_surface_muted">#EDF0F5</color>
+    <color name="vault_surface_subtle">#F0F2F8</color>
     <color name="vault_text">#172033</color>
-    <color name="connection_connected">#34C759</color>
-    <color name="connection_disconnected">#FF3B30</color>
-<color name="status_uplink">#007AFF</color>
-<color name="status_downlink">#34C759</color>
-    <color name="configure_body">#111827</color>
-    <color name="configure_label">@color/configure_body</color>
-    <color name="configure_supporting">#6B7280</color>
-    <color name="configure_placeholder">#9CA3AF</color>
+    <color name="vault_text_secondary">#64748B</color>
+    <color name="vault_text_disabled">#8A96A8</color>
+    <color name="vault_outline">#DEE2EC</color>
+    <color name="vault_hero_text">#F8FAFF</color>
+    <color name="vault_hero_secondary">#C7D2FE</color>
+    <color name="vault_on_primary">#FFFFFF</color>
+    <color name="vault_feature_background">#E1E6EE</color>
+    <color name="vault_segmented_background">#ECEDF6</color>
+    <color name="vault_log_text">#475569</color>
+    <color name="vault_profile_selected_outline">#594F46E5</color>
+    <color name="vault_failure_surface">#FFF1F2</color>
+    <color name="vault_failure_outline">#FECDD3</color>
+    <color name="connection_connected">#4F46E5</color>
+    <color name="connection_disconnected">#8A96A8</color>
+    <color name="status_uplink">#4F46E5</color>
+    <color name="status_downlink">#2563EB</color>
+    <color name="vault_danger">#DC4655</color>
+    <color name="configure_body">@color/vault_text</color>
+    <color name="configure_label">@color/vault_text_secondary</color>
+    <color name="configure_supporting">@color/vault_text_secondary</color>
+    <color name="configure_placeholder">@color/vault_text_disabled</color>
 </resources>

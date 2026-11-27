@@ -1,13 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <style name="TextAppearance.Vault.PageTitle" parent="TextAppearance.Material3.HeadlineMedium">
+        <item name="android:textSize">28sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/vault_text</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
     <style name="TextAppearance.Vault.Body" parent="TextAppearance.Material3.BodyMedium">
         <item name="android:textSize">14sp</item>
         <item name="android:fontFamily">sans-serif</item>
-        <item name="android:textColor">@color/configure_body</item>
+        <item name="android:textColor">@color/vault_text</item>
+    </style>
+    <style name="TextAppearance.Vault.CardTitle" parent="TextAppearance.Vault.Body">
+        <item name="android:textSize">13sp</item>
+        <item name="android:textStyle">bold</item>
     </style>
     <style name="TextAppearance.Vault.Supporting" parent="TextAppearance.Material3.BodySmall">
         <item name="android:textSize">12sp</item>
         <item name="android:fontFamily">sans-serif</item>
-        <item name="android:textColor">@color/configure_supporting</item>
+        <item name="android:textColor">@color/vault_text_secondary</item>
+    </style>
+    <style name="TextAppearance.Vault.Navigation" parent="TextAppearance.Material3.LabelSmall">
+        <item name="android:textSize">10sp</item>
+    </style>
+    <style name="TextAppearance.Vault.Navigation.Active" parent="TextAppearance.Vault.Navigation">
+        <item name="android:textStyle">bold</item>
     </style>
 </resources>

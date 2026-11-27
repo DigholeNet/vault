@@ -1,11 +1,11 @@
 import Combine
 import NetworkExtension
+@testable import Vault
 import VaultCore
 import XCTest
 #if os(macOS)
 import SystemExtensions
 #endif
-@testable import Vault
 
 #if os(macOS)
 extension VaultTests {
@@ -195,6 +195,26 @@ extension VaultTests {
         XCTAssertEqual(controller.vpnStatus, .connected)
         XCTAssertEqual(profile.testConnection.startCalls, 0)
         XCTAssertTrue(controller.activeVPN === profile)
+    }
+
+    @MainActor
+    func testInitialConnectionTimeout() async throws {
+        let controller = try makeController()
+        controller.connectionStartTimeout = 0.05
+        controller.connect()
+        try await activate(controller)
+        let profile = TestTunnelManager()
+        profile.testConnection.testStatus = .disconnected
+        controller.onStartupProbe = { controller.startupProbe?(true) }
+        let stopped = expectation(description: "initial connection timed out and stopped")
+        profile.testConnection.onStop = { stopped.fulfill() }
+        controller.prepared?(profile, true)
+        await fulfillment(of: [stopped], timeout: 2)
+        profile.testConnection.testStatus = .disconnected
+        controller.updateVPNStatus(profile)
+        await drainMainQueue()
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
+        XCTAssertNotNil(controller.appData.connectionError)
     }
 
     @MainActor
@@ -573,6 +593,5 @@ extension VaultTests {
         XCTAssertEqual(data.vpnStatus, .disconnected)
         XCTAssertFalse(startupFinished)
     }
-
 }
 #endif

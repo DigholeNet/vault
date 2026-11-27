@@ -71,16 +71,24 @@ internal class DiagnosticsViewModel : ViewModel() {
             var monitor: Job? = null
             try {
                 val generation = app.vpnGeneration
-                val connected = app.currentVpnStatus as? VpnStatusEvent.Connected ?: error("VPN disconnected")
-                val network = vpnNetwork(manager, connected) ?: error("Live VPN network unavailable")
-                val properties = manager.getLinkProperties(network) ?: error("VPN properties unavailable")
-                callback = watchNetwork(manager, network, properties)
+                val connected = app.currentVpnStatus as? VpnStatusEvent.Connected
                 monitor = launch {
                     app.vpnStatusEvents.collect { event ->
                         if (event !is VpnStatusEvent.TrafficStats && app.vpnGeneration != generation) this@DiagnosticsViewModel.cancel()
                     }
                 }
-                runEngine(app, generation, network, properties, connected)
+                if (connected == null) {
+                    runEngine(app, generation, DiagnosticConfig(
+                        sessionId = generation.toULong(), domains = parseConfigList(app.readProbeDomains()),
+                        dnsServers = emptyList(), tunnelIpv4 = null, tunnelIpv4Prefix = null,
+                        tunnelIpv6 = null, tunnelMtu = 1427.toUShort()
+                    ), null)
+                } else {
+                    val network = vpnNetwork(manager, connected) ?: error("Live VPN network unavailable")
+                    val properties = manager.getLinkProperties(network) ?: error("VPN properties unavailable")
+                    callback = watchNetwork(manager, network, properties)
+                    runEngine(app, generation, tunnelConfig(app, generation, properties, connected), network)
+                }
             } catch (cancelled: CancellationException) {
                 mutableState.value = mutableState.value.copy(header = R.string.checks_incomplete)
                 throw cancelled
@@ -98,61 +106,67 @@ internal class DiagnosticsViewModel : ViewModel() {
         job?.start()
     }
 
-    private suspend fun runEngine(app: VaultApplication, generation: Long, network: Network,
-        properties: LinkProperties, connected: VpnStatusEvent.Connected) =
-        withContext(Dispatchers.IO) {
-            val assigned = assignedAddresses(connected)
-            val live = properties.linkAddresses.filter { it.address in assigned }
-            check(live.map { it.address }.toSet() == assigned.toSet()) { "Live tunnel addresses unavailable" }
-            val ipv4 = live.firstOrNull { it.address is java.net.Inet4Address }
-            val ipv6 = live.firstOrNull { it.address is java.net.Inet6Address }
-            val core = DiagnosticEngine(DiagnosticConfig(
-                sessionId = generation.toULong(), domains = parseConfigList(app.readProbeDomains()),
-                dnsServers = properties.dnsServers.mapNotNull { it.hostAddress },
-                tunnelIpv4 = ipv4?.address?.hostAddress, tunnelIpv4Prefix = ipv4?.prefixLength?.toUByte(),
-                tunnelIpv6 = ipv6?.address?.hostAddress, tunnelMtu = properties.mtu.toUShort()
-            ))
-            synchronized(lifetime) { engine = core }
-            try {
-                while (true) {
+    private suspend fun tunnelConfig(
+        app: VaultApplication, generation: Long, properties: LinkProperties, connected: VpnStatusEvent.Connected
+    ): DiagnosticConfig {
+        val assigned = assignedAddresses(connected)
+        val live = properties.linkAddresses.filter { it.address in assigned }
+        check(live.map { it.address }.toSet() == assigned.toSet()) { "Live tunnel addresses unavailable" }
+        val ipv4 = live.firstOrNull { it.address is java.net.Inet4Address }
+        val ipv6 = live.firstOrNull { it.address is java.net.Inet6Address }
+        return DiagnosticConfig(
+            sessionId = generation.toULong(), domains = parseConfigList(app.readProbeDomains()),
+            dnsServers = properties.dnsServers.mapNotNull { it.hostAddress },
+            tunnelIpv4 = ipv4?.address?.hostAddress, tunnelIpv4Prefix = ipv4?.prefixLength?.toUByte(),
+            tunnelIpv6 = ipv6?.address?.hostAddress, tunnelMtu = properties.mtu.toUShort()
+        )
+    }
+
+    private suspend fun runEngine(
+        app: VaultApplication, generation: Long, config: DiagnosticConfig, network: Network?
+    ) = withContext(Dispatchers.IO) {
+        val core = DiagnosticEngine(config)
+        synchronized(lifetime) { engine = core }
+        try {
+            while (true) {
+                ensureActive()
+                check(app.vpnGeneration == generation) { "VPN session changed" }
+                val request = core.nextRequest() ?: break
+                mutableState.value = mutableState.value.copy(snapshot = core.snapshot())
+                val now = core.elapsedMs()
+                if (request.deadlineMs <= now) continue
+                val io = if (request.scope == DiagnosticScope.TUNNEL) {
+                    DiagnosticTransport.forNetwork(checkNotNull(network).networkHandle.toULong())
+                } else DiagnosticTransport(null)
+                synchronized(lifetime) { transport = io }
+                try {
+                    ensureActive()
+                    val response = io.execute(request.operation, request.domain, request.deadlineMs - now)
                     ensureActive()
                     check(app.vpnGeneration == generation) { "VPN session changed" }
-                    val request = core.nextRequest() ?: break
-                    mutableState.value = mutableState.value.copy(snapshot = core.snapshot())
-                    val now = core.elapsedMs()
-                    if (request.deadlineMs <= now) continue
-                    val io = if (request.scope == DiagnosticScope.TUNNEL) {
-                        DiagnosticTransport.forNetwork(network.networkHandle.toULong())
-                    } else DiagnosticTransport(null)
-                    synchronized(lifetime) { transport = io }
-                    try {
-                        ensureActive()
-                        val response = io.execute(request.operation, request.domain, request.deadlineMs - now)
-                        ensureActive()
-                        check(app.vpnGeneration == generation) { "VPN session changed" }
-                        core.complete(request.id, response)
-                        core.snapshot().probes.lastOrNull()?.let {
-                            VaultFileLogger.event("Diagnostics", "[probe] ${it.request.stage} ${it.request.domain}: ${it.detail}")
-                        }
-                    } finally {
-                        synchronized(lifetime) { transport = null; io.close() }
+                    core.complete(request.id, response)
+                    core.snapshot().probes.lastOrNull()?.let {
+                        VaultFileLogger.event("Diagnostics", "[probe] ${it.request.stage} ${it.request.domain}: ${it.detail}")
                     }
-                }
-                val result = core.snapshot()
-                mutableState.value = mutableState.value.copy(snapshot = result, header = when (result.state) {
-                    DiagnosticState.PASSED -> R.string.checks_passed
-                    DiagnosticState.FAILED -> R.string.checks_failed
-                    DiagnosticState.INCOMPLETE -> R.string.checks_incomplete
-                })
-            } finally {
-                synchronized(lifetime) {
-                    core.cancel()
-                    mutableState.value = mutableState.value.copy(snapshot = core.snapshot())
-                    engine = null
-                    core.close()
+                } finally {
+                    synchronized(lifetime) { transport = null; io.close() }
                 }
             }
+            val result = core.snapshot()
+            mutableState.value = mutableState.value.copy(snapshot = result, header = when (result.state) {
+                DiagnosticState.PASSED -> R.string.checks_passed
+                DiagnosticState.FAILED -> R.string.checks_failed
+                DiagnosticState.INCOMPLETE -> R.string.checks_incomplete
+            })
+        } finally {
+            synchronized(lifetime) {
+                core.cancel()
+                mutableState.value = mutableState.value.copy(snapshot = core.snapshot())
+                engine = null
+                core.close()
+            }
         }
+    }
 
     private fun watchNetwork(manager: ConnectivityManager, network: Network, initial: LinkProperties): ConnectivityManager.NetworkCallback {
         val callback = object : ConnectivityManager.NetworkCallback() {

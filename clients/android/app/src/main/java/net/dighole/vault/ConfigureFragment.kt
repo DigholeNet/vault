@@ -7,7 +7,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
-import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
@@ -87,19 +86,21 @@ class ConfigureFragment : Fragment() {
     private fun renderProfiles() {
         val container = view?.findViewById<ViewGroup>(R.id.profileRows) ?: return
         container.removeAllViews()
-        profiles.profiles.forEachIndexed { index, profile ->
+        profiles.profiles.forEach { profile ->
             val row = layoutInflater.inflate(R.layout.item_profile, container, false)
             row.findViewById<TextView>(R.id.profileName).text = profile.name
             row.findViewById<TextView>(R.id.profileServer).text = "${profile.host}:${profile.port}"
             val selected = profile.name == profiles.selectedProfileName
-            row.findViewById<ImageView>(R.id.profileSelected).visibility = if (selected) View.VISIBLE else View.GONE
+            row.findViewById<View>(R.id.profileSelectedGroup).visibility = if (selected) View.VISIBLE else View.GONE
+            (row as com.google.android.material.card.MaterialCardView).strokeColor =
+                androidx.core.content.ContextCompat.getColor(
+                    requireContext(),
+                    if (selected) R.color.vault_profile_selected_outline else R.color.vault_outline
+                )
             row.findViewById<View>(R.id.profileUse).visibility = if (selected) View.GONE else View.VISIBLE
             row.findViewById<View>(R.id.profileEdit).setOnClickListener { openProfile(profile.name) }
             row.findViewById<View>(R.id.profileUse).setOnClickListener { useProfile(profile.name) }
             container.addView(row)
-            if (index < profiles.profiles.lastIndex) {
-                container.addView(com.google.android.material.divider.MaterialDivider(requireContext()))
-            }
         }
         view?.findViewById<TextView>(R.id.profileEmpty)?.visibility =
             if (profiles.profiles.isEmpty()) View.VISIBLE else View.GONE

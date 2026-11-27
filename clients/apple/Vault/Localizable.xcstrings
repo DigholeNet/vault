@@ -1,6 +1,38 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Private networking, made simple." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "私密网络，简单连接。" } } } },
+    "Private, secure, open source." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "私密、安全、开源。" } } } },
+    "Choose the server for your next connection." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择下次连接使用的服务器。" } } } },
+    "Diagnose connections and troubleshoot network issues." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断连接并排查网络问题。" } } } },
+    "Ready to connect" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "准备连接" } } } },
+    "Review the server configuration, then tap the power button. Network details and live traffic appear after connecting." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "确认服务器配置后，点击连接按钮。连接后可查看网络详情与实时流量。" } } } },
+    "Encrypted tunnel · Auto reconnect" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "加密隧道 · 自动重连" } } } },
+    "Network details" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "网络详情" } } } },
+    "Live traffic" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "实时流量" } } } },
+    "Tap to connect" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点击连接" } } } },
+    "Tap to disconnect" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点击断开" } } } },
+    "Switch Profile" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换配置" } } } },
+    "Preferences" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "偏好设置" } } } },
+    "Save changes before connecting" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接前保存更改" } } } },
+    "Server, DNS and MTU changes apply the next time you connect." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器、DNS 和 MTU 修改后，将在下次建立连接时生效。" } } } },
+    "Profile Details" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "配置详情" } } } },
+    "Basic information" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "基本信息" } } } },
+    "Advanced settings" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "高级设置" } } } },
+    "Test targets" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "测试目标" } } } },
+    "Your private network control center" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "你的私人网络控制台" } } } },
+    "Encrypted connections with automatic path discovery." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "加密连接，自动发现更优路径。" } } } },
+    "Select log text to copy details for troubleshooting." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "日志用于连接排查，可选择文本后复制。" } } } },
+    "Copied to clipboard." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制到剪贴板。" } } } },
+    "Save changes before connecting." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接前保存更改。" } } } },
+    "Test VPN DNS, TCP and HTTPS, plus application access." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "检查 VPN DNS、TCP、HTTPS 以及应用访问。" } } } },
+    "Version %@ · BUILD %@" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "版本 %@ · BUILD %@" } } } },
+    "In use" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用中" } } } },
+    "Selected" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已选中" } } } },
+    "Establish an encrypted tunnel for secure access to your private network" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "建立加密隧道，安全访问私人网络" } } } },
+    "Check the configuration, then retry" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "检查配置后可重试" } } } },
+    "Need to investigate further?" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要进一步排查？" } } } },
+    "Check the server address and network, or open Diagnostics." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "检查服务器地址与网络，或打开诊断。" } } } },
     "IPv4 DNS" : {
       "localizations": {
         "zh-Hans": {
@@ -771,12 +803,12 @@
         }
       }
     },
-    "Connect the VPN before running diagnostics. Logs are available while disconnected." : {
+    "Run application access checks without connecting. Tunnel checks are available after connecting. Logs remain available." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先连接 VPN 再运行诊断；未连接时仍可查看日志。"
+            "value" : "未连接时可检查应用直连网络；连接后可检查完整隧道。运行日志始终可用。"
           }
         }
       }

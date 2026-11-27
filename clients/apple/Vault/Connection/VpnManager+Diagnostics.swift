@@ -19,8 +19,12 @@ extension VpnManager {
             DispatchQueue.main.async { self.requestDiagnostics(onProgress: onProgress, completion: completion) }
             return
         }
-        guard diagnosticState.cancellation == nil, vpnStatus == .connected else {
+        guard diagnosticState.cancellation == nil else {
             completion(DiagnosticsResult(message: "INCOMPLETE - diagnostics unavailable or already running"))
+            return
+        }
+        if vpnStatus != .connected {
+            requestApplicationDiagnostics(onProgress: onProgress, completion: completion)
             return
         }
         let cancellation = DiagnosticsCancellation()
@@ -89,6 +93,59 @@ extension VpnManager {
                     FileLogger.shared.log("[probe] final summary: \(result.summary) duration=\(result.durationMs ?? 0)ms")
                     completion(result)
                 }
+            }
+        }
+    }
+
+    private func requestApplicationDiagnostics(
+        onProgress: ((DiagnosticsResult) -> Void)?, completion: @escaping (DiagnosticsResult?) -> Void
+    ) {
+        let cancellation = DiagnosticsCancellation()
+        let run = UUID().uuidString
+        let generation = diagnosticState.generation
+        let context = AppleDiagnosticContext(
+            provider: "application", generation: generation, ipv4: "", mask: "",
+            ipv6: nil, mtu: 1427, dns: [], domains: config.diagnosticDomains
+        )
+        diagnosticState.cancellation = cancellation
+        diagnosticState.runID = run
+        diagnosticState.cancelledByUser = false
+        DispatchQueue.global(qos: .utility).async {
+            var result: DiagnosticsResult
+            do {
+                let snapshot = try RustDiagnostics.run(
+                    context: context,
+                    cancellation: cancellation,
+                    execute: { request, remaining in
+                        let native = AppleProbeRequest(
+                            request: request, context: context, run: run, remainingMs: remaining
+                        )
+                        return RustDiagnostics.execute(native, tunnelAddress: nil, cancellation: cancellation).rust
+                    },
+                    onProgress: { progress in
+                        DispatchQueue.main.async {
+                            if self.diagnosticState.cancellation === cancellation, !cancellation.isCancelled {
+                                onProgress?(DiagnosticsResult(snapshot: progress))
+                            }
+                        }
+                    }
+                )
+                result = DiagnosticsResult(snapshot: snapshot)
+            } catch {
+                result = DiagnosticsResult(message: "INCOMPLETE - Rust diagnostics: \(error)")
+            }
+            DispatchQueue.main.async {
+                if cancellation.isCancelled || self.diagnosticState.generation != generation {
+                    result.message = self.diagnosticState.cancelledByUser
+                        ? "INCOMPLETE - diagnostics cancelled"
+                        : "INCOMPLETE - network state changed; run diagnostics again"
+                }
+                if self.diagnosticState.cancellation === cancellation {
+                    self.diagnosticState.cancellation = nil
+                    self.diagnosticState.runID = nil
+                }
+                FileLogger.shared.log("[probe] final summary: \(result.summary) duration=\(result.durationMs ?? 0)ms")
+                completion(result)
             }
         }
     }

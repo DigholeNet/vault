@@ -95,6 +95,7 @@ fallback to an unbound socket.
 ## Workflow and Apple baseline
 
 - Route assessment, then IPv4 DNS → TCP → HTTPS sweeps across all domains.
+- With no assigned tunnel addresses, route assessment and tunnel stages are skipped. Application HTTPS and informational Ping run over default routing, allowing disconnected diagnostics without fabricating tunnel results.
 - IPv6 AAAA → TCP → HTTPS sweeps. IPv4 has a 25s window; IPv6 retains the
   remainder of a separate 50s tunnel deadline. Per-probe limits are DNS 3s,
   TCP 4s and HTTPS 6s, capped by the remaining phase window.
@@ -132,13 +133,13 @@ Unassigned-family checks are omitted from the check list and domain verdicts.
 Snapshots include `planned_checks` for UI rows and progress; this includes the
 applicable tunnel checks, application HTTPS and two informational Ping checks.
 All required checks must complete successfully, and route assessment must be
-available without mismatches, for the run to pass. Missing required work is incomplete;
+available without mismatches, for a connected run to pass. Missing required work is incomplete;
 explicit failures remain visible in checks and probes even when the overall
 state is incomplete. Route mismatch is a failure; missing live metadata is
 incomplete. A default route for an unassigned family (IPv4 or IPv6) is a possible
-bypass, never inferred from cached addresses. No live tunnel address in either
-family makes the route assessment incomplete. Informational application Ping
-may still probe both families and does not change the required-check verdict.
+bypass, never inferred from cached addresses. With no live tunnel address in either
+family, route assessment is skipped and application HTTPS is the only required check.
+Informational application Ping may still probe both families and does not change the required-check verdict.
 
 DNS/TCP/HTTPS success counts domains, not candidate attempts. Failed candidates
 remain in details and timing samples but do not fail a domain if a retry

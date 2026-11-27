@@ -1,25 +1,48 @@
-<?xml version="1.0" ?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Vault" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/vault_blue</item>
-        <item name="colorOnPrimary">@color/vault_surface</item>
+        <item name="colorOnPrimary">@color/vault_on_primary</item>
         <item name="colorSecondaryContainer">@color/vault_tonal_container</item>
-        <item name="colorOnSecondaryContainer">@color/vault_blue</item>
+        <item name="colorOnSecondaryContainer">@color/vault_blue_dark</item>
         <item name="android:colorBackground">@color/vault_background</item>
         <item name="colorSurface">@color/vault_surface</item>
         <item name="colorSurfaceContainerLowest">@color/vault_surface</item>
-        <item name="colorSurfaceContainerLow">@color/vault_surface</item>
+        <item name="colorSurfaceContainerLow">@color/vault_background</item>
         <item name="colorSurfaceContainer">@color/vault_surface</item>
-        <item name="colorSurfaceContainerHigh">@color/vault_surface</item>
-        <item name="colorSurfaceContainerHighest">@color/vault_surface</item>
+        <item name="colorSurfaceContainerHigh">@color/vault_surface_subtle</item>
+        <item name="colorSurfaceContainerHighest">@color/vault_surface_muted</item>
         <item name="colorOnSurface">@color/vault_text</item>
+        <item name="colorOnSurfaceVariant">@color/vault_text_secondary</item>
+        <item name="colorOutline">@color/vault_outline</item>
+        <item name="colorOutlineVariant">@color/vault_outline</item>
+        <item name="colorError">@color/vault_danger</item>
+        <item name="android:navigationBarColor">@color/vault_background</item>
+        <item name="android:statusBarColor">@color/vault_background</item>
         <item name="android:windowLightStatusBar">?attr/isLightTheme</item>
     </style>
     <style name="Widget.Vault.BottomNavigation.ActiveIndicator"
         parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
-        <item name="android:width">48dp</item>
-        <item name="android:height">32dp</item>
+        <item name="android:width">56dp</item>
+        <item name="android:height">28dp</item>
         <item name="marginHorizontal">0dp</item>
-        <item name="android:color">@color/vault_surface</item>
+        <item name="android:color">@color/vault_indigo_soft</item>
+    </style>
+    <style name="Widget.Vault.Card" parent="Widget.Material3.CardView.Elevated">
+        <item name="cardBackgroundColor">@color/vault_surface</item>
+        <item name="cardCornerRadius">20dp</item>
+        <item name="cardElevation">0dp</item>
+        <item name="strokeColor">@color/vault_outline</item>
+        <item name="strokeWidth">1dp</item>
+    </style>
+    <style name="Widget.Vault.Button" parent="Widget.Material3.Button">
+        <item name="cornerRadius">14dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+    <style name="Widget.Vault.Button.Tonal" parent="Widget.Material3.Button.TonalButton">
+        <item name="cornerRadius">14dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:textSize">13sp</item>
     </style>
 </resources>

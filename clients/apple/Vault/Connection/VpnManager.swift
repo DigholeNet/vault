@@ -29,6 +29,8 @@ class VpnManager {
     var terminationInProgress = false
     var logPreferences = UserDefaults.standard
     private var stopCompletions: [(Bool) -> Void] = []
+    var connectionStartTimeout: TimeInterval = 20
+    private var connectionStartTimeoutWorkItem: DispatchWorkItem?
     var tunnelStopTimeout: TimeInterval = 15
     private var tunnelStopTimeoutWorkItem: DispatchWorkItem?
     #if os(macOS)
@@ -174,6 +176,7 @@ class VpnManager {
         }
         let oldStatus = appData.vpnStatus
         let status = presentationStatus(for: manager.connection.status)
+        if status == .connected { cancelConnectionStartTimeout() }
         let unexpectedDisconnect = connectionLifecycle.observe(status, updateIntent: stopResult == nil)
         publishStatus(recovering: manager.connection.status == .reasserting)
 
@@ -445,6 +448,7 @@ extension VpnManager {
         }
         appData.requestedProfileName = profile.name
         appData.connectionError = nil
+        armConnectionStartTimeout(token)
         publishStatus()
         connectionRequestedAt = ProcessInfo.processInfo.systemUptime
         tunnelStartIssuedAt = nil
@@ -563,6 +567,7 @@ extension VpnManager {
         }
         if let completion { stopCompletions.append(completion) }
         guard let token = connectionLifecycle.beginDisconnect() else { return }
+        cancelConnectionStartTimeout()
         appData.connectionError = nil
         #if os(macOS)
         // Release only the activation waiter; a profile save must still finish.
@@ -577,7 +582,25 @@ extension VpnManager {
         advanceConnection()
     }
 
+    private func armConnectionStartTimeout(_ token: UInt64) {
+        cancelConnectionStartTimeout()
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.connectionLifecycle.generation == token, self.vpnStatus == .connecting else { return }
+            Logger.network.errorAndFile("[operation:\(token)] Initial connection timed out")
+            self.connectionFailurePending = true
+            self.disconnect()
+        }
+        connectionStartTimeoutWorkItem = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + connectionStartTimeout, execute: timeout)
+    }
+
+    private func cancelConnectionStartTimeout() {
+        connectionStartTimeoutWorkItem?.cancel()
+        connectionStartTimeoutWorkItem = nil
+    }
+
     private func failConnect(_ token: UInt64) {
+        cancelConnectionStartTimeout()
         guard connectionLifecycle.failConnect(token) else { return }
         connectionRequestedAt = nil
         tunnelStartIssuedAt = nil

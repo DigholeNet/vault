@@ -23,9 +23,11 @@ final class DiagnosticsViewModel: ObservableObject {
     @Published var logFilter = "all" {
         didSet { if logFilter != oldValue { filterLogs() } }
     }
+
     @Published var logSearch = "" {
         didSet { if logSearch != oldValue { filterLogs() } }
     }
+
     @Published private(set) var loadingLogs = false
 
     @Published private(set) var clearingLogs = false
@@ -38,8 +40,8 @@ final class DiagnosticsViewModel: ObservableObject {
     var incomplete: Bool { DiagnosticsPresentation.incomplete(result) }
     var diagnosticText: String { ([result?.summary ?? ""] + (result?.lines ?? [])).joined(separator: "\n") }
 
-    func run(using manager: VpnManager, connected: Bool) {
-        guard !running, connected else { return }
+    func run(using manager: VpnManager) {
+        guard !running else { return }
         generation &+= 1
         let token = generation
         running = true

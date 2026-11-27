@@ -371,10 +371,13 @@ impl Engine {
         }
         while self.phase < PHASES.len() {
             let stage = PHASES[self.phase];
-            if matches!(
-                stage,
-                Stage::Dns | Stage::Tcp | Stage::Https | Stage::Dns6 | Stage::Tcp6 | Stage::Https6
-            ) && !self.required_stage(stage)
+            if (stage == Stage::Route
+                && self.config.tunnel_ipv4.is_none()
+                && self.config.tunnel_ipv6.is_none())
+                || (matches!(
+                    stage,
+                    Stage::Dns | Stage::Tcp | Stage::Https | Stage::Dns6 | Stage::Tcp6 | Stage::Https6
+                ) && !self.required_stage(stage))
             {
                 self.phase += 1;
                 continue;

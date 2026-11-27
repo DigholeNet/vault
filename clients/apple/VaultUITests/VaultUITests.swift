@@ -51,7 +51,7 @@ final class VaultUITests: XCTestCase {
     #if os(iOS)
     @MainActor
     private func selectTab(_ label: String, in app: XCUIApplication, ready: XCUIElement) {
-        let tab = app.tabBars.buttons[label]
+        let tab = app.buttons[label]
         XCTAssertTrue(tab.waitForExistence(timeout: 10), app.debugDescription)
         tab.tap()
         XCTAssertTrue(ready.waitForExistence(timeout: 10), app.debugDescription)
@@ -64,7 +64,7 @@ final class VaultUITests: XCTestCase {
     @MainActor
     func testStatusPage() throws {
         let app = launchApplication()
-        let tab = app.tabBars.buttons["Status"]
+        let tab = app.buttons["Status"]
         XCTAssertTrue(tab.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(tab.isSelected)
         let connection = app.switches["vpn.connection"]
@@ -83,18 +83,27 @@ final class VaultUITests: XCTestCase {
     @MainActor
     func testDiagnosticsAndRuntimeLogs() throws {
         let app = launchApplication()
-        let start = app.navigationBars.buttons["Start"]
+        let start = app.buttons["Start"]
         selectTab("Diagnostics", in: app, ready: start)
-        XCTAssertFalse(start.isEnabled)
+        XCTAssertTrue(start.isEnabled)
+        start.tap()
+        let outcome = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Connectivity'")).firstMatch
+        XCTAssertTrue(outcome.waitForExistence(timeout: 45), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Tunnel DNS · IPv4"].exists)
+        XCTAssertFalse(app.navigationBars.buttons["Start"].exists)
         XCTAssertFalse(app.buttons["Cancel"].exists)
         XCTAssertFalse(app.buttons["Copy"].exists)
 
-        let logs = app.segmentedControls.buttons["Runtime Logs"]
+        let logs = app.buttons["Runtime Logs"]
         XCTAssertTrue(logs.waitForExistence(timeout: 10))
         logs.tap()
         let copy = app.buttons["Copy"]
         XCTAssertTrue(copy.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(app.buttons["Clear"].exists)
+        let clear = app.buttons["Clear"]
+        XCTAssertTrue(clear.exists)
+        let diagnosticsTab = app.buttons["Diagnostics"]
+        XCTAssertLessThanOrEqual(copy.frame.maxY, diagnosticsTab.frame.minY - 8, app.debugDescription)
+        XCTAssertLessThanOrEqual(clear.frame.maxY, diagnosticsTab.frame.minY - 8, app.debugDescription)
         let selected = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in logs.exists && logs.isSelected }, object: nil
         )

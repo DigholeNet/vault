@@ -3,7 +3,6 @@ import AppKit
 import SwiftUI
 import VaultCore
 
-/// The label is observed separately so the menu bar updates while the popover is closed.
 struct MacosMenuLabel: View {
     @ObservedObject var appData: AppData
     @EnvironmentObject var languageManager: LanguageManager
@@ -31,107 +30,70 @@ struct MacosMenuView: View {
     private enum Action: CaseIterable { case connection, settings, diagnostics, quit }
     @State private var focusedAction: Action?
 
+    private var active: Bool { appData.vpnStatus != .disconnected }
+    private var failed: Bool { appData.vpnStatus == .disconnected && appData.connectionError != nil }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                MacosAppIcon(size: 20)
-                Text("Vault").font(.body.weight(.semibold))
+            HStack(spacing: 10) {
+                MacosAppIcon(size: 24)
+                Text("Vault")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(VaultTheme.textPrimary)
                 Spacer()
-                Group {
-                    if appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
-                        ProgressView().controlSize(.mini)
-                    } else {
-                        Circle().fill(appData.macStatusColor).frame(width: 7, height: 7)
-                    }
-                }
-                .frame(width: 20, height: 20)
-                Text(languageManager.tr(appData.macStatusTitle)).font(.body)
-                    .foregroundStyle(.secondary)
+                VaultStatusBadge(title: languageManager.tr(appData.macStatusTitle), active: active, failure: failed)
             }
-            .frame(height: 20)
-            Divider()
-            if !config.profiles.isEmpty {
-                Menu {
-                    ForEach(config.profiles, id: \.name) { profile in
-                        Button {
-                            if appData.vpnStatus == .disconnected {
-                                vpnManager.requestProfileSelection(profile.name)
-                            } else if profile.name != vpnManager.activeProfileName {
-                                pendingProfileSwitch = profile.name
-                            }
-                        } label: {
-                            if config.selectedProfileName == profile.name {
-                                Label(profile.name, systemImage: "checkmark")
-                            } else {
-                                Text(profile.name)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text(config.selectedProfileName ?? "")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Image(systemName: "chevron.up.chevron.down").font(.caption)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .menuStyle(.borderlessButton)
-                .disabled(appData.switchingProfileName != nil || appData.vpnStatus == .disconnecting)
-                Divider()
+            Divider().overlay(VaultTheme.outline)
+
+            if !active, !config.profiles.isEmpty {
+                profileSelector
             }
-            connectionButton
-            if let since = appData.connectedSince,
-               appData.vpnStatus == .connected || (appData.vpnStatus == .connecting && appData.isRecovering) {
-                ConnectionDurationView(since: since)
-            }
+
+            connectionHero
+                .padding(.top, active ? 8 : 0)
+
             if appData.vpnStatus == .connected || appData.isRecovering {
                 sessionAddresses
-            }
-            if appData.isRecovering {
-                Text(languageManager.tr("Network changed. Reconnecting…"))
-                    .font(.body).foregroundStyle(.primary.opacity(0.8))
-            } else if let error = appData.connectionError {
-                Text(languageManager.tr(error)).font(.body).foregroundStyle(.primary.opacity(0.8))
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
-            // Never show stale counters while disconnected or establishing a new session.
-            if appData.vpnStatus == .connected || appData.isRecovering {
-                Divider()
                 traffic
             }
-            Divider()
+
+            Divider().overlay(VaultTheme.outline)
             HStack(spacing: 0) {
                 Button { open("configure") } label: {
                     footerLabel("Settings", symbol: "gearshape")
-                }.keyboardShortcut(",")
-                    .macosKeyboardAction(focus: $focusedAction, id: .settings) { open("configure") }
-                Divider().frame(height: 16)
+                }
+                .keyboardShortcut(",")
+                .macosKeyboardAction(focus: $focusedAction, id: .settings) { open("configure") }
+                Divider().frame(height: 22)
                 Button { open("status") } label: {
-                    footerLabel("Diagnostics", symbol: "stethoscope")
+                    footerLabel("Diagnostics", symbol: "waveform.path.ecg")
                 }
                 .macosKeyboardAction(focus: $focusedAction, id: .diagnostics) { open("status") }
-                Divider().frame(height: 16)
+                Divider().frame(height: 22)
                 Button {
                     dismiss()
                     NSApp.terminate(nil)
                 } label: {
                     footerLabel("Quit", symbol: "power")
-                }.keyboardShortcut("q")
-                    .macosKeyboardAction(focus: $focusedAction, id: .quit) { dismiss()
-                        NSApp.terminate(nil)
-                    }
+                }
+                .keyboardShortcut("q")
+                .macosKeyboardAction(focus: $focusedAction, id: .quit) {
+                    dismiss()
+                    NSApp.terminate(nil)
+                }
             }
-            .buttonStyle(.plain).font(.body).foregroundStyle(.primary)
+            .buttonStyle(.plain)
+            .font(.system(size: 12))
+            .foregroundStyle(VaultTheme.textSecondary)
         }
         .font(.body)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 14)
+        .padding(14)
         .frame(width: 340)
         .fixedSize(horizontal: false, vertical: true)
+        .background(VaultTheme.background)
         .macosKeyboardNavigation { [focus = $focusedAction] event in
-            if event.type == .leftMouseDown { focus.wrappedValue = nil
+            if event.type == .leftMouseDown {
+                focus.wrappedValue = nil
                 return false
             }
             let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
@@ -139,11 +101,14 @@ struct MacosMenuView: View {
                 let order = Action.allCases.filter { $0 != .connection || appData.canToggleConnection }
                 if let current = focus.wrappedValue, let index = order.firstIndex(of: current) {
                     focus.wrappedValue = order[(index + (modifiers.contains(.shift) ? order.count - 1 : 1)) % order.count]
-                } else { focus.wrappedValue = modifiers.contains(.shift) ? order.last : order.first }
+                } else {
+                    focus.wrappedValue = modifiers.contains(.shift) ? order.last : order.first
+                }
                 event.window?.makeFirstResponder(nil)
                 return true
             }
-            if event.keyCode == 53, modifiers.isEmpty { dismiss()
+            if event.keyCode == 53, modifiers.isEmpty {
+                dismiss()
                 return true
             }
             guard modifiers.isEmpty, !event.isARepeat, [36, 49, 76].contains(event.keyCode),
@@ -153,7 +118,8 @@ struct MacosMenuView: View {
                 if appData.canToggleConnection { toggleConnection() }
             case .diagnostics: open("status")
             case .settings: open("configure")
-            case .quit: dismiss()
+            case .quit:
+                dismiss()
                 NSApp.terminate(nil)
             }
             return true
@@ -188,122 +154,267 @@ struct MacosMenuView: View {
         }
     }
 
-    private var connectionButton: some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 0)
-            Button(action: toggleConnection) {
-                ZStack {
-                    Circle()
-                        .fill(connectionColor.opacity(hoveringConnection ? 0.1 : 0.04))
-                        .overlay(Circle().strokeBorder(connectionColor.opacity(hoveringConnection ? 0.25 : 0.1)))
-                        .shadow(color: Color.black.opacity(hoveringConnection ? 0.16 : 0), radius: 8, y: 4)
-                    Image(systemName: appData.vpnStatus == .disconnected ? "personalhotspot.slash" : "personalhotspot")
-                        .font(.system(size: 48, weight: .regular))
-                        .foregroundStyle(connectionColor)
-                    if appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
-                        ProgressView().controlSize(.small)
-                            .padding(5).background(.regularMaterial, in: Circle()).offset(x: 30, y: 30)
+    private var profileSelector: some View {
+        Menu {
+            ForEach(config.profiles, id: \.name) { profile in
+                Button {
+                    if appData.vpnStatus == .disconnected {
+                        vpnManager.requestProfileSelection(profile.name)
+                    } else if profile.name != vpnManager.activeProfileName {
+                        pendingProfileSwitch = profile.name
+                    }
+                } label: {
+                    if config.selectedProfileName == profile.name {
+                        Label(profile.name, systemImage: "checkmark")
+                    } else {
+                        Text(profile.name)
                     }
                 }
-                .frame(width: 88, height: 88)
-                .contentShape(.interaction, Circle())
             }
-            .buttonStyle(.plain)
-            .frame(width: 88, height: 88)
-            .contentShape(.interaction, Circle())
-            .onContinuousHover { phase in
-                switch phase {
-                case .active(let point):
-                    let dx = point.x - 44
-                    let dy = point.y - 44
-                    hoveringConnection = dx * dx + dy * dy <= 44 * 44
-                case .ended:
-                    hoveringConnection = false
-                }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "server.rack").foregroundStyle(VaultTheme.primary)
+                Text(config.selectedProfileName ?? "")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(VaultTheme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(languageManager.tr("Switch Profile"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(VaultTheme.textDisabled)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10))
+                    .foregroundStyle(VaultTheme.textDisabled)
             }
-            .animation(.easeOut(duration: 0.15), value: hoveringConnection)
-            .disabled(!appData.canToggleConnection)
-            .help(languageManager.tr(appData.connectionActionTitle))
-            .accessibilityLabel(languageManager.tr(appData.connectionActionTitle))
-            .macosKeyboardAction(
-                focus: $focusedAction,
-                id: .connection,
-                enabled: appData.canToggleConnection,
-                circular: true,
-                action: toggleConnection
-            )
-            Spacer(minLength: 0)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+            .background(VaultTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(VaultTheme.outline)
+            }
         }
-        .padding(.vertical, 8)
+        .menuStyle(.borderlessButton)
+        .disabled(appData.switchingProfileName != nil || appData.vpnStatus == .disconnecting)
+    }
+
+    private var connectionHero: some View {
+        ZStack {
+            if active {
+                RoundedRectangle(cornerRadius: 24, style: .continuous).fill(VaultTheme.heroGradient)
+                VaultHeroDecoration().clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(failed ? VaultTheme.failureSurface : VaultTheme.surfaceMuted)
+            }
+            if active {
+                VStack(spacing: 0) {
+                    Text(languageManager.tr(appData.macStatusTitle))
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(VaultTheme.heroText)
+                    connectionButton.padding(.top, 8)
+                    if let since = appData.connectedSince,
+                       appData.vpnStatus == .connected || (appData.vpnStatus == .connecting && appData.isRecovering) {
+                        ConnectionDurationView(since: since)
+                            .font(.system(size: 24, weight: .light, design: .monospaced))
+                            .foregroundStyle(VaultTheme.heroText)
+                            .padding(.top, 6)
+                    }
+                    if appData.isRecovering {
+                        Text(languageManager.tr("Network changed. Reconnecting…"))
+                            .font(.system(size: 11))
+                            .foregroundStyle(VaultTheme.heroSecondary)
+                            .padding(.top, 4)
+                    } else if let error = appData.connectionError {
+                        Text(languageManager.tr(error))
+                            .font(.system(size: 11))
+                            .foregroundStyle(VaultTheme.heroSecondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
+                    } else if let running = appData.runningProfileName {
+                        Text("\(running) · " + languageManager.tr("Tap to disconnect"))
+                            .font(.system(size: 11))
+                            .foregroundStyle(VaultTheme.heroSecondary)
+                            .padding(.top, 4)
+                    }
+                    featureBadge.padding(.top, 8)
+                }
+                .padding(10)
+            } else {
+                VStack(spacing: 0) {
+                    Text(languageManager.tr(appData.macStatusTitle))
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(failed ? VaultTheme.danger : VaultTheme.textSecondary)
+                    connectionIcon
+                        .frame(width: 64, height: 64)
+                        .padding(.top, 16)
+                    if !failed {
+                        Text(languageManager.tr("Establish an encrypted tunnel for secure access to your private network"))
+                            .font(.system(size: 11))
+                            .foregroundStyle(VaultTheme.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 12)
+                    }
+                    if let error = appData.connectionError {
+                        Text(languageManager.tr(error))
+                            .font(.system(size: 11))
+                            .foregroundStyle(VaultTheme.danger)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 6)
+                    }
+                    Button(action: toggleConnection) {
+                        Label(
+                            languageManager.tr(appData.connectionActionTitle),
+                            systemImage: failed ? "arrow.clockwise" : "power"
+                        )
+                    }
+                    .buttonStyle(VaultPrimaryButtonStyle())
+                    .frame(width: 140)
+                    .padding(.top, 12)
+                    .disabled(!appData.canToggleConnection)
+                    .help(languageManager.tr(appData.connectionActionTitle))
+                    .accessibilityLabel(languageManager.tr(appData.connectionActionTitle))
+                    .macosKeyboardAction(
+                        focus: $focusedAction,
+                        id: .connection,
+                        enabled: appData.canToggleConnection,
+                        action: toggleConnection
+                    )
+                    featureBadge.padding(.top, 12)
+                }
+                .padding(20)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: active ? 190 : 286)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(failed ? VaultTheme.failureOutline : (active ? Color.clear : VaultTheme.outline))
+        }
+    }
+
+    private var featureBadge: some View {
+        Text(languageManager.tr(failed ? "Check the configuration, then retry" : "Encrypted tunnel · Auto reconnect"))
+            .font(.system(size: 10))
+            .foregroundStyle(active ? VaultTheme.heroSecondary : VaultTheme.textSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(
+                active ? Color.white.opacity(0.09) : VaultTheme.surfaceSubtle,
+                in: Capsule()
+            )
+    }
+
+    private var connectionIcon: some View {
+        ZStack {
+            Circle()
+                .fill(VaultTheme.surface)
+                .overlay(Circle().strokeBorder(failed ? VaultTheme.failureOutline : (active ? Color.clear : VaultTheme.outline)))
+                .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
+            if appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
+                ProgressView().controlSize(.regular).tint(connectionColor)
+            } else {
+                Image(systemName: failed ? "exclamationmark" : "power")
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(failed ? VaultTheme.danger : connectionColor)
+            }
+        }
+    }
+
+    private var connectionButton: some View {
+        Button(action: toggleConnection) {
+            connectionIcon
+                .frame(width: 56, height: 56)
+                .contentShape(.interaction, Circle())
+        }
+        .buttonStyle(.plain)
+        .frame(width: 56, height: 56)
+        .contentShape(.interaction, Circle())
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let point):
+                let dx = point.x - 28
+                let dy = point.y - 28
+                hoveringConnection = dx * dx + dy * dy <= 28 * 28
+            case .ended:
+                hoveringConnection = false
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: hoveringConnection)
+        .disabled(!appData.canToggleConnection)
+        .help(languageManager.tr(appData.connectionActionTitle))
+        .accessibilityLabel(languageManager.tr(appData.connectionActionTitle))
+        .macosKeyboardAction(
+            focus: $focusedAction,
+            id: .connection,
+            enabled: appData.canToggleConnection,
+            circular: true,
+            action: toggleConnection
+        )
     }
 
     private var connectionColor: Color {
         if appData.isRecovering { return .orange }
         switch appData.vpnStatus {
-        case .connected: return .green
-        case .connecting: return .accentColor
-        case .disconnecting: return .secondary
-        case .disconnected: return .red
+        case .connected, .connecting: return VaultTheme.primary
+        case .disconnecting, .disconnected: return VaultTheme.textDisabled
         }
     }
 
     private func footerLabel(_ title: String, symbol: String) -> some View {
         Label(languageManager.tr(title), systemImage: symbol)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
     }
 
-    @ViewBuilder private var sessionAddresses: some View {
+    @ViewBuilder
+    private var sessionAddresses: some View {
         let addresses = appData.assignedIp.parsedIPv4AndIPv6()
-        let hasTunnelAddresses = addresses.ipv4 != nil || addresses.ipv6 != nil
-        if !appData.publicIp.isEmpty || hasTunnelAddresses {
-            VStack(alignment: .leading, spacing: 10) {
+        if !appData.publicIp.isEmpty || addresses.ipv4 != nil || addresses.ipv6 != nil {
+            VStack(spacing: 12) {
                 if !appData.publicIp.isEmpty {
-                    MacosStatusAddressRow(
-                        title: "WAN", address: appData.publicIp, symbol: "network", color: .accentColor
-                    )
+                    VaultAddressRow(title: "WAN", address: appData.publicIp, symbol: "globe")
                 }
-                if !appData.publicIp.isEmpty, hasTunnelAddresses { Divider() }
-                if hasTunnelAddresses {
-                    VStack(spacing: 8) {
-                        if let ipv4 = addresses.ipv4 {
-                            MacosStatusAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: .blue)
-                        }
-                        if let ipv6 = addresses.ipv6 {
-                            MacosStatusAddressRow(title: "IPv6", address: ipv6, symbol: "server.rack", color: .green)
-                        }
-                    }
+                if !appData.publicIp.isEmpty, addresses.ipv4 != nil || addresses.ipv6 != nil {
+                    Divider().overlay(VaultTheme.outline)
+                }
+                if let ipv4 = addresses.ipv4 {
+                    VaultAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: Color(vaultHex: "2563EB"))
+                }
+                if let ipv6 = addresses.ipv6 {
+                    VaultAddressRow(title: "IPv6", address: ipv6, symbol: "server.rack")
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+            .vaultCard(padding: 14)
         }
     }
 
     private var traffic: some View {
         HStack(spacing: 0) {
-            MacosTrafficColumn(
-                title: "Uplink", symbol: "arrow.up.circle.fill", color: .blue,
+            VaultTrafficColumn(
+                title: "Uplink", symbol: "arrow.up", color: VaultTheme.primary,
                 packets: appData.packetsSent, bytes: appData.bytesSent, rate: appData.bytesSentPerSecond
             )
-            Divider().frame(height: 70)
-            MacosTrafficColumn(
-                title: "Downlink", symbol: "arrow.down.circle.fill", color: .green,
+            Divider().frame(height: 88).overlay(VaultTheme.outline)
+            VaultTrafficColumn(
+                title: "Downlink", symbol: "arrow.down", color: Color(vaultHex: "2563EB"),
                 packets: appData.packetsReceived, bytes: appData.bytesReceived, rate: appData.bytesReceivedPerSecond
             )
         }
         .transaction { $0.animation = nil }
-        .frame(maxWidth: .infinity)
+        .vaultCard(padding: 14)
     }
 
     private func toggleConnection() {
         vpnManager.toggleConnection { open("configure") }
     }
 
-    private func open(_ id: String) { dismiss()
+    private func open(_ id: String) {
+        dismiss()
         WindowManager.shared.showWindow(withIdentifier: id)
     }
 }
@@ -315,58 +426,7 @@ struct MacosStatusAddressRow: View {
     let color: Color
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 13))
-                .foregroundStyle(color)
-                .frame(width: 16)
-            Text(verbatim: title)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: true, vertical: false)
-            Text(verbatim: address)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .lineLimit(1)
-                .minimumScaleFactor(0.55)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-    }
-}
-
-private struct MacosTrafficColumn: View {
-    let title: String
-    let symbol: String
-    let color: Color
-    let packets: UInt64
-    let bytes: UInt64
-    let rate: UInt64
-    @EnvironmentObject var languageManager: LanguageManager
-
-    var body: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 4) {
-                Image(systemName: symbol)
-                    .font(.system(size: 18))
-                    .foregroundStyle(color)
-                Text(languageManager.tr(title))
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            }
-            Text(PacketStats.formatBytes(rate) + "/s")
-                .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                .foregroundStyle(color)
-            Text(PacketStats.formatBytes(bytes))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Text(languageManager.tr("Packets") + " \(packets)")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-        .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity)
+        VaultAddressRow(title: title, address: address, symbol: symbol, color: color)
     }
 }
 
@@ -379,9 +439,9 @@ extension AppData {
 
     var macStatusColor: Color {
         if isRecovering { return .orange }
-        if vpnStatus == .connected { return .green }
-        if connectionError != nil && vpnStatus == .disconnected { return .red }
-        return .secondary
+        if vpnStatus == .connected { return VaultTheme.primary }
+        if connectionError != nil && vpnStatus == .disconnected { return VaultTheme.danger }
+        return VaultTheme.textDisabled
     }
 }
 #endif

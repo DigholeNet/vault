@@ -1,16 +1,33 @@
-<?xml version="1.0" ?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="vault_blue">#A9C7FF</color>
-    <color name="vault_tonal_container">#2B3D61</color>
-    <color name="vault_background">#101318</color>
-    <color name="vault_surface">#1B2028</color>
-    <color name="vault_text">#E4E8F0</color>
-    <color name="connection_connected">#30D158</color>
-    <color name="connection_disconnected">#FF453A</color>
-<color name="status_uplink">#0A84FF</color>
-<color name="status_downlink">#30D158</color>
-    <color name="configure_body">#F3F4F6</color>
-    <color name="configure_label">@color/configure_body</color>
-    <color name="configure_supporting">#9CA3AF</color>
-    <color name="configure_placeholder">#6B7280</color>
+    <color name="vault_blue">#A5B4FC</color>
+    <color name="vault_blue_dark">#C7D2FE</color>
+    <color name="vault_indigo_soft">#292D55</color>
+    <color name="vault_tonal_container">#292D55</color>
+    <color name="vault_background">#0F1220</color>
+    <color name="vault_surface">#171B2E</color>
+    <color name="vault_surface_muted">#20253A</color>
+    <color name="vault_surface_subtle">#20253A</color>
+    <color name="vault_text">#F1F5F9</color>
+    <color name="vault_text_secondary">#A7B0C2</color>
+    <color name="vault_text_disabled">#8A96A8</color>
+    <color name="vault_outline">#30374E</color>
+    <color name="vault_hero_text">#F8FAFF</color>
+    <color name="vault_hero_secondary">#C7D2FE</color>
+    <color name="vault_on_primary">#1E1B4B</color>
+    <color name="vault_feature_background">#2A3045</color>
+    <color name="vault_segmented_background">#20253A</color>
+    <color name="vault_log_text">#C7D2FE</color>
+    <color name="vault_profile_selected_outline">#80A5B4FC</color>
+    <color name="vault_failure_surface">#3B1D2A</color>
+    <color name="vault_failure_outline">#6B2D3F</color>
+    <color name="connection_connected">#A5B4FC</color>
+    <color name="connection_disconnected">#8A96A8</color>
+    <color name="status_uplink">#A5B4FC</color>
+    <color name="status_downlink">#7DA7FF</color>
+    <color name="vault_danger">#FDA4AF</color>
+    <color name="configure_body">@color/vault_text</color>
+    <color name="configure_label">@color/vault_text_secondary</color>
+    <color name="configure_supporting">@color/vault_text_secondary</color>
+    <color name="configure_placeholder">@color/vault_text_disabled</color>
 </resources>

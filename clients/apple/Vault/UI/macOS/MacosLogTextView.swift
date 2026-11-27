@@ -11,9 +11,11 @@ struct LogTextView: NSViewRepresentable {
         if let view = scroll.documentView as? NSTextView {
             view.isEditable = false
             view.isSelectable = true
-            view.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-            view.textContainerInset = NSSize(width: 12, height: 12)
-            view.backgroundColor = .textBackgroundColor
+            view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            view.textContainerInset = NSSize(width: 16, height: 16)
+            view.backgroundColor = NSColor(Color(vaultHex: "171B2E"))
+            view.textColor = NSColor(Color(vaultHex: "C7D2FE"))
+            view.insertionPointColor = NSColor(Color(vaultHex: "C7D2FE"))
         }
         return scroll
     }

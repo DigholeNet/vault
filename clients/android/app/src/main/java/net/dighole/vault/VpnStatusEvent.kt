@@ -10,7 +10,7 @@ sealed class VpnStatusEvent {
     data class Connected(val ipv4: String, val ipv6: String, val publicIp: String) : VpnStatusEvent()
     data object Reconnecting : VpnStatusEvent()
     data object Disconnected : VpnStatusEvent()
-    data class Error(val message: String?) : VpnStatusEvent()
+    data class Error(val message: String?, val messageResId: Int? = null) : VpnStatusEvent()
     data class TrafficStats(
         val bytesSent: Long,
         val bytesReceived: Long,

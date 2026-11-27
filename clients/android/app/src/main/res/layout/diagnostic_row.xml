@@ -1,37 +1,37 @@
-<?xml version="1.0" ?>
-<com.google.android.material.card.MaterialCardView
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginVertical="4dp"
-    android:clickable="true"
-    android:focusable="true"
-    app:cardCornerRadius="16dp"
-    app:strokeWidth="0dp"
-    android:minHeight="64dp">
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="12dp">
-        <TextView
-            android:id="@+id/checkTitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Title"/>
-        <TextView
-            android:id="@+id/checkSummary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
-        <TextView
-            android:id="@+id/checkDetails"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:textIsSelectable="true"
+    style="@style/Widget.Vault.Card"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:layout_marginTop="12dp" android:clickable="true" android:focusable="true"
+    android:minHeight="68dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="16dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="center_vertical" android:orientation="horizontal">
+            <FrameLayout android:layout_width="26dp" android:layout_height="26dp"
+                android:background="@drawable/vault_bg_icon_tile" android:padding="5dp">
+                <ImageView android:id="@+id/checkIcon" android:layout_width="match_parent"
+                    android:layout_height="match_parent" android:importantForAccessibility="no"
+                    android:src="@drawable/ic_check" app:tint="@color/vault_blue"/>
+            </FrameLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_marginStart="12dp" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:id="@+id/checkTitle" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.Vault.CardTitle"
+                    android:textSize="13sp"/>
+                <TextView android:id="@+id/checkSummary" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="5dp"
+                    android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
+            </LinearLayout>
+            <ImageView android:id="@+id/checkChevron" android:layout_width="16dp"
+                android:layout_height="16dp" android:layout_marginStart="8dp"
+                android:importantForAccessibility="no" android:src="@drawable/ic_chevron"
+                app:tint="@color/vault_text_disabled"/>
+        </LinearLayout>
+        <TextView android:id="@+id/checkDetails" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="12dp"
+            android:fontFamily="monospace" android:textIsSelectable="true"
             android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

@@ -52,30 +52,31 @@ struct MacosConfigureView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(Page.allCases) { item in
                     Button { page = item } label: {
                         Label(languageManager.tr(item.rawValue), systemImage: item.symbol)
-                            .font(.body.weight(page == item ? .medium : .regular))
+                            .font(.system(size: 15, weight: page == item ? .semibold : .regular))
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 10).padding(.vertical, 9)
+                            .padding(.horizontal, 16)
+                            .frame(height: 48)
                             .background(
-                                page == item ? Color.accentColor.opacity(0.13) : .clear,
-                                in: RoundedRectangle(cornerRadius: 7)
+                                page == item ? VaultTheme.indigoSoft : .clear,
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                             )
-                            .foregroundStyle(page == item ? Color.accentColor : .primary)
+                            .foregroundStyle(page == item ? VaultTheme.primary : VaultTheme.textSecondary)
                     }
                     .buttonStyle(.plain)
                     .keyboardShortcut(KeyEquivalent(Character(String((Page.allCases.firstIndex(of: item) ?? 0) + 1))))
                 }
                 Spacer()
             }
-            .padding(12).frame(width: 150).frame(maxHeight: .infinity)
-            .background(.quaternary.opacity(0.3))
-            Divider()
+            .padding(16)
+            .frame(width: 150)
+            .frame(maxHeight: .infinity)
+            .background(VaultTheme.surfaceMuted)
+            Divider().overlay(VaultTheme.outline)
             VStack(alignment: .leading, spacing: 0) {
-                Text(languageManager.tr(page.rawValue))
-                    .font(.system(size: 15, weight: .semibold)).padding([.horizontal, .top], 24)
                 Group {
                     if page == .about {
                         ScrollView { about.padding(.top, 20) }
@@ -89,25 +90,35 @@ struct MacosConfigureView: View {
                             }
                         }
                         .formStyle(.grouped)
+                        .scrollContentBackground(.hidden)
                     }
                 }
                 if page == .profiles, let feedback {
                     Text(languageManager.tr(feedback))
-                        .font(.body).foregroundStyle(isError ? Color.red : Color.secondary)
-                        .textSelection(.enabled).padding(.horizontal, 24).padding(.bottom, 10)
+                        .font(.system(size: 12))
+                        .foregroundStyle(isError ? VaultTheme.danger : VaultTheme.textSecondary)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 10)
                 }
                 if page == .profiles {
                     HStack {
                         Spacer()
                         Button(languageManager.tr("Save"), action: save)
-                            .buttonStyle(.borderedProminent).keyboardShortcut("s")
+                            .buttonStyle(VaultPrimaryButtonStyle())
+                            .keyboardShortcut("s")
+                            .frame(width: 140)
                             .disabled(validationError != nil)
                     }
-                    .padding(.horizontal, 24).padding(.bottom, 20)
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 20)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(VaultTheme.background)
         }
+        .background(VaultTheme.background)
+        .tint(VaultTheme.primary)
         .onAppear {
             guard !loaded else { return }
             loaded = true
