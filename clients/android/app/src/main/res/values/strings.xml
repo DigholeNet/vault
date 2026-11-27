@@ -26,7 +26,11 @@
     <string name="profile_active">In use</string>
     <string name="status_failed">Connection failed</string>
     <string name="retry">Retry</string>
-    <string name="error_connection_timeout">The server could not be reached. Check the address and your network, then retry.</string>
+    <string name="status_tap_to_retry">Tap to retry</string>
+    <string name="status_permission_required">VPN permission required</string>
+    <string name="status_authorize">Authorize VPN</string>
+    <string name="status_permission_detail">System permission is required to connect.</string>
+    <string name="error_connection_timeout">Could not reach the server.</string>
     <string name="failure_retry_hint">Check the configuration, then retry</string>
     <string name="failure_diagnostics_title">Need to investigate further?</string>
     <string name="failure_diagnostics_detail">Check the server address and network, or open Diagnostics.</string>
@@ -39,6 +43,7 @@
     <!-- Status Fragment -->
     <string name="status_off">Disconnected</string>
     <string name="status_on">Connected</string>
+    <string name="status_running">Running</string>
     <string name="status_connecting">Connecting…</string>
     <string name="status_tap_to_connect">Tap to connect</string>
     <string name="status_tap_to_disconnect">Tap to disconnect</string>
@@ -63,6 +68,7 @@
     <string name="version_unknown">Version unknown</string>
     <string name="website">https://github.com/DigholeNet/vault</string>
     <string name="about_description">A secure VPN client for cross-regional connectivity.</string>
+    <string name="about_path_discovery">Encrypted connections with automatic path discovery.</string>
     <string name="copyright">© 2026 Dighole Team</string>
     <string name="no_browser">No browser app found</string>
 
@@ -110,6 +116,8 @@
     <string name="not_measured">Not measured</string>
     <string name="copy">Copy</string>
     <string name="clear">Clear</string>
+    <string name="clear_runtime_logs_title">Clear runtime logs?</string>
+    <string name="clear_runtime_logs_message">This clears all runtime logs.</string>
     <string name="no_logs">No log content found.</string>
     <string name="logs_failed">Could not read or clear logs. Please retry.</string>
     <string name="elapsed">Elapsed: %1$d ms</string>
@@ -117,7 +125,7 @@
     <string name="connected_duration">Connected %1$s</string>
     <string name="uplink">Uplink</string>
     <string name="downlink">Downlink</string>
-    <string name="probe_detail">%1$d/%2$d · %3$s</string>
+    <string name="probe_detail">%1$d/%2$d passed · %3$s</string>
 <string name="check_dns6">Tunnel DNS · AAAA</string>
 <string name="check_tcp6">Tunnel TCP · IPv6</string>
 <string name="check_https6">Tunnel HTTPS · IPv6</string>
@@ -139,4 +147,27 @@
     <string name="back_description">Back</string>
     <string name="error_profile_in_use">Disconnect before renaming or deleting the running profile.</string>
     <string name="probe_saved">Probe domains saved.</string>
+    <string name="diagnostic_offline_title">Direct checks and runtime logs are available</string>
+    <string name="diagnostic_offline_detail">Connect to run the full tunnel checks.</string>
+    <string name="diagnostic_start_direct">Start direct checks</string>
+    <string name="diagnostic_summary_success">%1$d checks · %2$.1f s</string>
+    <string name="diagnostic_summary_partial">%1$d/%2$d checks passed · %3$d failed</string>
+    <string name="diagnostic_row_passed">Passed</string>
+    <string name="diagnostic_row_failed">Failed</string>
+    <string name="diagnostic_expanded">Expanded</string>
+    <string name="diagnostic_collapsed">Collapsed</string>
+    <string name="diagnostic_tls_handshake">TLS handshake</string>
+    <string name="diagnostic_logs_copied">Copied to clipboard.</string>
+    <string name="diagnostic_logs_loading">Loading logs…</string>
+    <string name="diagnostic_logs_clearing">Clearing logs…</string>
+    <string name="status_no_profile">No configuration</string>
+    <string name="status_no_profile_detail">No server configuration has been added.</string>
+    <string name="status_wait">Please wait…</string>
+    <string name="status_connecting_detail">Establishing a secure tunnel</string>
+    <string name="status_disconnecting">Disconnecting…</string>
+    <string name="status_disconnecting_detail">Closing the secure tunnel</string>
+    <string name="status_reconnecting_detail">Keeping the last connection data</string>
+    <string name="status_cancel_connection">Cancel connection</string>
+    <string name="status_recovery_rates">Uplink %1$s/s · Downlink %2$s/s</string>
+    <string name="status_using_profile">Using profile: %1$s</string>
 </resources>

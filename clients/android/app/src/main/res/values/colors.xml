@@ -30,4 +30,11 @@
     <color name="configure_label">@color/vault_text_secondary</color>
     <color name="configure_supporting">@color/vault_text_secondary</color>
     <color name="configure_placeholder">@color/vault_text_disabled</color>
+    <color name="vault_diagnostic_field">#FAFAFD</color>
+    <color name="vault_diagnostic_field_outline">#D6DBE8</color>
+    <color name="vault_diagnostic_warning_surface">#FFFBEB</color>
+    <color name="vault_diagnostic_warning">#92400E</color>
+    <color name="vault_diagnostic_expanded_outline">#C7D2FE</color>
+    <color name="connection_permission">#A16207</color>
+    <color name="status_progress">#A5B4FC</color>
 </resources>

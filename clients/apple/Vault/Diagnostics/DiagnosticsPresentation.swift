@@ -65,6 +65,7 @@ enum DiagnosticsPresentation {
     struct CheckRow {
         let state: DiagnosticState?
         let active: Bool
+        let hasMeasurements: Bool
         /// Localization key or a numeric passed/attempted count.
         let resultText: String
         let durationMs: UInt64?
@@ -76,7 +77,8 @@ enum DiagnosticsPresentation {
         let text = check.map { $0.attempted == 0 ? "Not measured" : "\($0.passed)/\($0.attempted)" }
             ?? (active ? "Checking" : (running ? "Waiting" : "Not measured"))
         let duration = check.flatMap { $0.attempted > 0 && $0.sampleCount != 0 ? $0.durationMs : nil }
-        return CheckRow(state: check?.state, active: active, resultText: text, durationMs: duration)
+        return CheckRow(state: check?.state, active: active, hasMeasurements: (check?.attempted ?? 0) > 0,
+            resultText: text, durationMs: duration)
     }
 
     static func resultTitle(_ result: DiagnosticsResult?, running: Bool) -> String {
@@ -138,6 +140,7 @@ enum DiagnosticsPresentation {
 }
 
 struct ProbeDomainsEditor: View {
+    var stacked = false
     @EnvironmentObject var config: VaultConfig
     @EnvironmentObject var languageManager: LanguageManager
     @State private var draft = ""
@@ -149,27 +152,43 @@ struct ProbeDomainsEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                TextField(languageManager.tr("Probe Domains"), text: $draft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundStyle(VaultTheme.textPrimary)
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: 44)
-                    .background(VaultTheme.surfaceSubtle, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(validationError == nil ? VaultTheme.outline : VaultTheme.danger)
+            if stacked {
+                VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(languageManager.tr("Probe Domains"))
+                            .font(.caption)
+                            .foregroundStyle(VaultTheme.textSecondary)
+                            .accessibilityHidden(true)
+                        field
+                            .font(.caption)
+                            .accessibilityIdentifier("diagnostics.probeDomains")
                     }
-                    .autocorrectionDisabled()
-                    .onSubmit(save)
-                Button(languageManager.tr("Save"), action: save)
-                    .buttonStyle(VaultSecondaryButtonStyle())
-                    .frame(width: 72)
-                    .disabled(validationError != nil || draft == config.probeDomains)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 6)
+                    .frame(minHeight: 48)
+                    .background(Color(vaultLight: "FAFAFD", dark: "20253A"), in: RoundedRectangle(cornerRadius: 13))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 13)
+                            .strokeBorder(validationError == nil ? Color(vaultLight: "D6DBE8", dark: "30374E") : VaultTheme.danger)
+                    }
+                    guidance
+                }
+                saveButton.frame(width: 72).frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                HStack(spacing: 10) {
+                    field
+                        .font(.system(size: 13))
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .background(VaultTheme.surfaceSubtle, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(validationError == nil ? VaultTheme.outline : VaultTheme.danger)
+                        }
+                    saveButton.frame(width: 72)
+                }
+                guidance
             }
-            Text(languageManager.tr("Diagnostic probe domains, separated by commas. Leave empty to use defaults."))
-                .font(.system(size: 12)).foregroundStyle(VaultTheme.textSecondary)
             if let feedback {
                 Text(languageManager.tr(feedback))
                     .font(.system(size: 12))
@@ -182,7 +201,32 @@ struct ProbeDomainsEditor: View {
         }
     }
 
+    private var field: some View {
+        TextField(languageManager.tr("Probe Domains"), text: $draft, prompt: stacked ? Text(verbatim: "") : nil)
+            .textFieldStyle(.plain)
+            .foregroundStyle(VaultTheme.textPrimary)
+            .autocorrectionDisabled()
+            .onSubmit(save)
+    }
+
+    private var guidance: some View {
+        let error = stacked ? validationError : nil
+        return Text(languageManager.tr(error ??
+            "Diagnostic probe domains, separated by commas. Leave empty to use defaults."))
+            .font(stacked ? .caption : .system(size: 12))
+            .foregroundStyle(error == nil ? VaultTheme.textSecondary : VaultTheme.danger)
+    }
+
+    private var saveButton: some View {
+        Button(languageManager.tr("Save"), action: save)
+            .buttonStyle(VaultSecondaryButtonStyle())
+            .disabled(validationError != nil || draft == config.probeDomains)
+    }
+
     private func save() {
+        #if os(iOS)
+        IosKeyboardDismissal.dismiss()
+        #endif
         if let error = config.saveProbeDomains(draft) {
             feedback = error
             return

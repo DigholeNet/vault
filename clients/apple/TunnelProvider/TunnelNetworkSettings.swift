@@ -6,7 +6,9 @@ import VaultCore
 
 enum TunnelConstants {
     static let mtuUpperBound = TunnelLaunchConfiguration.mtuUpperBound
-    /// Platform startup deadline; transport attempts and backoff remain in Rust.
+    /// Time allowed for the first tunnel, including DNS, handshake and settings.
+    static let initialConnectionTimeout: TimeInterval = 12
+    /// Deadline for individual OS operations, including after startup.
     static let startTimeout: TimeInterval = 30
 }
 

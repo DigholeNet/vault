@@ -26,7 +26,11 @@
     <string name="profile_active">使用中</string>
     <string name="status_failed">接続に失敗しました</string>
     <string name="retry">再試行</string>
-    <string name="error_connection_timeout">サーバーに接続できません。アドレスとネットワークを確認して再試行してください。</string>
+    <string name="status_tap_to_retry">タップして再試行</string>
+    <string name="status_permission_required">VPN の許可が必要です</string>
+    <string name="status_authorize">VPN を許可</string>
+    <string name="status_permission_detail">接続にはシステムの許可が必要です。</string>
+    <string name="error_connection_timeout">サーバーに接続できません。</string>
     <string name="failure_retry_hint">設定を確認して再試行</string>
     <string name="failure_diagnostics_title">さらに詳しく調べますか？</string>
     <string name="failure_diagnostics_detail">サーバーアドレスとネットワークを確認するか、診断を開いてください。</string>
@@ -39,6 +43,7 @@
     <!-- Status Fragment -->
     <string name="status_off">未接続</string>
     <string name="status_on">接続済み</string>
+    <string name="status_running">稼働中</string>
     <string name="status_connecting">接続中…</string>
     <string name="status_tap_to_connect">タップして接続</string>
     <string name="status_tap_to_disconnect">タップして切断</string>
@@ -62,6 +67,7 @@
     <string name="version_unknown">バージョン不明</string>
     <string name="website">https://github.com/DigholeNet/vault</string>
     <string name="about_description">クロスリージョン接続用の安全な VPN クライアント。</string>
+    <string name="about_path_discovery">接続を暗号化し、より適した経路を自動的に検出します。</string>
     <string name="copyright">© 2026 Dighole Team</string>
     <string name="no_browser">ブラウザアプリが見つかりません</string>
 
@@ -109,6 +115,8 @@
 <string name="not_measured">未測定</string>
 <string name="copy">コピー</string>
 <string name="clear">消去</string>
+    <string name="clear_runtime_logs_title">実行ログを消去しますか？</string>
+    <string name="clear_runtime_logs_message">すべての実行ログが消去されます。</string>
 <string name="no_logs">ログはありません。</string>
 <string name="logs_failed">ログを読み込みまたは消去できません。再試行してください。</string>
 <string name="elapsed">経過時間：%1$d ms</string>
@@ -138,4 +146,27 @@
     <string name="back_description">戻る</string>
     <string name="error_profile_in_use">使用中のプロファイル名を変更または削除する前に切断してください。</string>
     <string name="probe_saved">診断ドメインを保存しました。</string>
+    <string name="diagnostic_offline_title">直接接続チェックと実行ログは常に利用できます</string>
+    <string name="diagnostic_offline_detail">接続するとトンネル全体を確認できます。</string>
+    <string name="diagnostic_start_direct">直接接続チェックを開始</string>
+    <string name="diagnostic_summary_success">%1$d 件のチェック · %2$.1f 秒</string>
+    <string name="diagnostic_summary_partial">%1$d/%2$d 件成功 · %3$d 件失敗</string>
+    <string name="diagnostic_row_passed">成功</string>
+    <string name="diagnostic_row_failed">失敗</string>
+    <string name="diagnostic_expanded">展開済み</string>
+    <string name="diagnostic_collapsed">折りたたみ済み</string>
+    <string name="diagnostic_tls_handshake">TLS ハンドシェイク</string>
+    <string name="diagnostic_logs_copied">クリップボードにコピーしました。</string>
+    <string name="diagnostic_logs_loading">ログを読み込み中…</string>
+    <string name="diagnostic_logs_clearing">ログを消去中…</string>
+    <string name="status_no_profile">設定なし</string>
+    <string name="status_no_profile_detail">サーバー設定はまだ追加されていません。</string>
+    <string name="status_wait">お待ちください…</string>
+    <string name="status_connecting_detail">安全なトンネルを確立しています</string>
+    <string name="status_disconnecting">切断中…</string>
+    <string name="status_disconnecting_detail">安全なトンネルを閉じています</string>
+    <string name="status_reconnecting_detail">前回の接続データを保持しています</string>
+    <string name="status_cancel_connection">接続をキャンセル</string>
+    <string name="status_recovery_rates">上り %1$s/s · 下り %2$s/s</string>
+    <string name="status_using_profile">使用中のプロファイル：%1$s</string>
 </resources>

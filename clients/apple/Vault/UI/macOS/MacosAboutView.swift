@@ -7,8 +7,7 @@ struct MacosAboutView: View {
     var body: some View {
         VStack(spacing: 18) {
             ZStack {
-                RoundedRectangle(cornerRadius: 26, style: .continuous).fill(VaultTheme.heroGradient)
-                VaultHeroDecoration().clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                VaultHeroBackground()
                 VStack(spacing: 0) {
                     MacosAppIcon(size: 112).accessibilityHidden(true)
                     Text("Vault")

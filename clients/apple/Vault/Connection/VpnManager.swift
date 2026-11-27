@@ -29,7 +29,7 @@ class VpnManager {
     var terminationInProgress = false
     var logPreferences = UserDefaults.standard
     private var stopCompletions: [(Bool) -> Void] = []
-    var connectionStartTimeout: TimeInterval = 20
+    var connectionStartTimeout: TimeInterval = 15
     private var connectionStartTimeoutWorkItem: DispatchWorkItem?
     var tunnelStopTimeout: TimeInterval = 15
     private var tunnelStopTimeoutWorkItem: DispatchWorkItem?
@@ -176,6 +176,7 @@ class VpnManager {
         }
         let oldStatus = appData.vpnStatus
         let status = presentationStatus(for: manager.connection.status)
+        let awaitingFirstConnection = connectionStartTimeoutWorkItem != nil
         if status == .connected { cancelConnectionStartTimeout() }
         let unexpectedDisconnect = connectionLifecycle.observe(status, updateIntent: stopResult == nil)
         publishStatus(recovering: manager.connection.status == .reasserting)
@@ -185,7 +186,10 @@ class VpnManager {
         if self.vpnStatus == .connected {
             self.appData.connectionError = nil
         } else if self.vpnStatus == .disconnected && unexpectedDisconnect {
-            self.appData.connectionError = "Connection ended unexpectedly. Check your network and server configuration."
+            cancelConnectionStartTimeout()
+            self.appData.connectionError = awaitingFirstConnection
+                ? "Could not reach the server."
+                : "Connection ended unexpectedly. Check your network and server configuration."
         }
         if let stopResult { finishDisconnect(succeeded: stopResult) }
     }
@@ -207,9 +211,7 @@ class VpnManager {
             diagnosticState.cancellation?.cancel()
             appData.vpnStatus = vpnStatus
         }
-        #if os(macOS)
-        appData.isRecovering = recovering
-        #endif
+        if appData.isRecovering != recovering { appData.isRecovering = recovering }
     }
 
     private func updateSessionDetails(_ manager: NEVPNManager, previousStatus oldStatus: VpnStatus) {
@@ -337,7 +339,7 @@ class VpnManager {
     /// Completes on main after the profile save and reload settle.
     func loadAndCreateProviderManager(
         launch: TunnelLaunchConfiguration,
-        _ complete: @escaping (NETunnelProviderManager?, _ loaded: Bool) -> Void
+        _ complete: @escaping (NETunnelProviderManager?, _ loaded: Bool, Error?) -> Void
     ) {
         removeVpnStatusObservers()
         let operation = connectionLifecycle.generation
@@ -351,7 +353,7 @@ class VpnManager {
                     Logger.network.errorAndFile(
                         "loadAllFromPreferences failed: \(error?.localizedDescription ?? "unknown")"
                     )
-                    complete(nil, false)
+                    complete(nil, false, nil)
                     return
                 }
                 // Diagnostic: duplicate saved configurations can make the
@@ -362,7 +364,7 @@ class VpnManager {
                 let manager = self.preferredManager(from: managers)
                     ?? self.createProviderManager(host: launch.host)
                 guard self.configureProviderManager(manager, launch: launch) else {
-                    complete(nil, false)
+                    complete(nil, false, nil)
                     return
                 }
 
@@ -378,7 +380,7 @@ class VpnManager {
                             } else {
                                 Logger.network.errorAndFile("Failed to save VPN configuration: \(error)")
                             }
-                            complete(nil, false)
+                            complete(nil, false, error)
                             return
                         }
                         let reloadStarted = ProcessInfo.processInfo.systemUptime
@@ -392,7 +394,7 @@ class VpnManager {
                                     error: error
                                 )
                                 // The saved on-demand profile still needs cleanup if reload failed.
-                                complete(manager, error == nil)
+                                complete(manager, error == nil, error)
                             }
                         }
                     }
@@ -487,7 +489,7 @@ extension VpnManager {
     }
 
     private func prepareConnection(_ token: UInt64, launch: TunnelLaunchConfiguration) {
-        loadAndCreateProviderManager(launch: launch) { manager, loaded in
+        loadAndCreateProviderManager(launch: launch) { manager, loaded, error in
             let permitted = self.connectionLifecycle.canStart(token)
             self.connectionLifecycle.finishPreparation(token)
             guard permitted else {
@@ -495,7 +497,9 @@ extension VpnManager {
                 self.advanceConnection()
                 return
             }
-            guard let manager else { self.failConnect(token)
+            guard let manager else {
+                let denied = (error as? NEVPNError)?.code == .configurationReadWriteFailed
+                self.failConnect(token, message: denied ? AppData.vpnPermissionError : nil)
                 return
             }
             self.activeVPN = manager
@@ -599,14 +603,14 @@ extension VpnManager {
         connectionStartTimeoutWorkItem = nil
     }
 
-    private func failConnect(_ token: UInt64) {
+    private func failConnect(_ token: UInt64, message: String? = nil) {
         cancelConnectionStartTimeout()
         guard connectionLifecycle.failConnect(token) else { return }
         connectionRequestedAt = nil
         tunnelStartIssuedAt = nil
         publishIdle()
         appData.switchingProfileName = nil
-        appData.connectionError = "Unable to connect. Check your network and server configuration."
+        appData.connectionError = message ?? "Unable to connect. Check your network and server configuration."
     }
 
     private func publishIdle() {

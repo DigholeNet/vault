@@ -26,7 +26,11 @@
     <string name="profile_active">使用中</string>
     <string name="status_failed">连接失败</string>
     <string name="retry">重试</string>
-    <string name="error_connection_timeout">无法连接服务器，请检查地址和网络后重试。</string>
+    <string name="status_tap_to_retry">点击重试</string>
+    <string name="status_permission_required">需要 VPN 权限</string>
+    <string name="status_authorize">重新授权</string>
+    <string name="status_permission_detail">需要系统授权才能连接。</string>
+    <string name="error_connection_timeout">无法连接服务器。</string>
     <string name="failure_retry_hint">检查配置后可重试</string>
     <string name="failure_diagnostics_title">需要进一步排查？</string>
     <string name="failure_diagnostics_detail">检查服务器地址与网络，或打开诊断。</string>
@@ -38,7 +42,8 @@
 
     <!-- Status Fragment -->
     <string name="status_off">未连接</string>
-    <string name="status_on">已连接</string>
+    <string name="status_on">已链接</string>
+    <string name="status_running">运行中</string>
     <string name="status_connecting">连接中…</string>
     <string name="status_tap_to_connect">点击连接</string>
     <string name="status_tap_to_disconnect">点击断开</string>
@@ -62,6 +67,7 @@
     <string name="version_unknown">版本未知</string>
     <string name="website">https://github.com/DigholeNet/vault</string>
     <string name="about_description">一款用于跨区域连接的安全 VPN 客户端。</string>
+    <string name="about_path_discovery">加密连接，自动发现更优路径。</string>
     <string name="copyright">© 2026 Dighole Team</string>
     <string name="no_browser">未找到浏览器应用</string>
 
@@ -109,6 +115,8 @@
     <string name="not_measured">尚未检测</string>
     <string name="copy">复制</string>
     <string name="clear">清空</string>
+    <string name="clear_runtime_logs_title">清空运行日志？</string>
+    <string name="clear_runtime_logs_message">此操作会清空所有运行日志。</string>
     <string name="no_logs">暂无日志。</string>
     <string name="logs_failed">无法读取或清空日志，请重试。</string>
     <string name="elapsed">耗时：%1$d ms</string>
@@ -138,4 +146,27 @@
     <string name="back_description">返回</string>
     <string name="error_profile_in_use">请先断开连接，再重命名或删除正在使用的配置。</string>
     <string name="probe_saved">探测域名已保存。</string>
+    <string name="diagnostic_offline_title">应用直连检查与运行日志始终可用</string>
+    <string name="diagnostic_offline_detail">连接后可检查完整隧道。</string>
+    <string name="diagnostic_start_direct">开始直连检查</string>
+    <string name="diagnostic_summary_success">%1$d 项检查 · 耗时 %2$.1f 秒</string>
+    <string name="diagnostic_summary_partial">%1$d/%2$d 项通过 · %3$d 项失败</string>
+    <string name="diagnostic_row_passed">通过</string>
+    <string name="diagnostic_row_failed">失败</string>
+    <string name="diagnostic_expanded">已展开</string>
+    <string name="diagnostic_collapsed">已折叠</string>
+    <string name="diagnostic_tls_handshake">TLS 握手</string>
+    <string name="diagnostic_logs_copied">已复制到剪贴板。</string>
+    <string name="diagnostic_logs_loading">正在读取日志…</string>
+    <string name="diagnostic_logs_clearing">清空中…</string>
+    <string name="status_no_profile">无配置</string>
+    <string name="status_no_profile_detail">尚未添加服务器配置</string>
+    <string name="status_wait">请稍候…</string>
+    <string name="status_connecting_detail">正在建立安全隧道</string>
+    <string name="status_disconnecting">断开中</string>
+    <string name="status_disconnecting_detail">正在关闭安全隧道</string>
+    <string name="status_reconnecting_detail">保留上次连接数据</string>
+    <string name="status_cancel_connection">取消连接</string>
+    <string name="status_recovery_rates">上行 %1$s/s · 下行 %2$s/s</string>
+    <string name="status_using_profile">使用配置：%1$s</string>
 </resources>

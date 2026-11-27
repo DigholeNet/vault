@@ -20,8 +20,7 @@ struct IosAboutView: View {
                 )
 
                 ZStack {
-                    RoundedRectangle(cornerRadius: 28, style: .continuous).fill(VaultTheme.heroGradient)
-                    VaultHeroDecoration().clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    VaultHeroBackground()
                     VStack(spacing: 0) {
                         if let icon = appIcon {
                             Image(uiImage: icon)

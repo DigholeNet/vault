@@ -11,21 +11,21 @@
             android:layout_marginTop="6dp" android:text="@string/diagnostics_page_subtitle"
             android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
         <LinearLayout android:id="@+id/diagnosticTabs"
-            android:layout_width="match_parent" android:layout_height="46dp"
-            android:layout_marginTop="18dp" android:background="@drawable/vault_bg_segmented"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" android:background="@drawable/vault_bg_segmented"
             android:baselineAligned="false" android:orientation="horizontal" android:padding="4dp">
             <TextView android:id="@+id/tabChecks"
                 android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
                 android:background="@drawable/vault_selector_tab" android:clickable="true"
                 android:focusable="true" android:gravity="center" android:includeFontPadding="false"
-                android:maxLines="1" android:text="@string/checks"
-                android:textAppearance="@style/TextAppearance.Vault.Supporting" android:paddingTop="6dp" />
+                android:minHeight="48dp" android:text="@string/checks"
+                android:textAppearance="@style/TextAppearance.Vault.Supporting" android:padding="4dp" />
             <TextView android:id="@+id/tabRuntimeLogs"
                 android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
                 android:background="@drawable/vault_selector_tab" android:clickable="true"
                 android:focusable="true" android:gravity="center" android:includeFontPadding="false"
-                android:maxLines="1" android:text="@string/runtime_logs"
-                android:textAppearance="@style/TextAppearance.Vault.Supporting" android:paddingTop="6dp" />
+                android:minHeight="48dp" android:text="@string/runtime_logs"
+                android:textAppearance="@style/TextAppearance.Vault.Supporting" android:padding="4dp" />
         </LinearLayout>
     </LinearLayout>
     <ScrollView android:id="@+id/checksPanel" android:layout_width="match_parent"
@@ -41,46 +41,70 @@
                     android:orientation="vertical" android:padding="18dp">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:text="@string/test_targets" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
-                    <com.google.android.material.textfield.TextInputLayout android:id="@+id/probeDomainsLayout"
-                        style="@style/Widget.Vault.Configure.TextInput" android:layout_width="match_parent"
+                    <LinearLayout android:id="@+id/probeDomainsField" android:layout_width="match_parent"
                         android:layout_height="wrap_content" android:layout_marginTop="12dp"
-                        android:hint="@string/probe_domains" app:helperText="@string/probe_help">
-                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/edtDiagnosticDomains"
-                            style="@style/Widget.Vault.Configure.EditText" android:layout_width="match_parent"
-                            android:layout_height="wrap_content" android:inputType="textNoSuggestions"/>
-                    </com.google.android.material.textfield.TextInputLayout>
+                        android:orientation="vertical" android:gravity="center_vertical" android:minHeight="48dp"
+                        android:paddingHorizontal="13dp" android:paddingVertical="6dp"
+                        android:importantForAccessibility="no"
+                        android:background="@drawable/vault_bg_diagnostic_field">
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:labelFor="@+id/edtDiagnosticDomains" android:text="@string/probe_domains"
+                            android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
+                        <EditText android:id="@id/edtDiagnosticDomains" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="textNoSuggestions"
+                            android:singleLine="true" android:background="@null" android:padding="0dp"
+                            android:textSize="12sp" android:textColor="@color/vault_text"/>
+                    </LinearLayout>
+                    <TextView android:id="@+id/tvProbeHelp" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:text="@string/probe_help" android:accessibilityLiveRegion="polite"
+                        android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
                     <com.google.android.material.button.MaterialButton android:id="@+id/btnSaveProbeDomains"
-                        style="@style/Widget.Vault.Button.Tonal" android:layout_width="wrap_content"
-                        android:layout_height="48dp" android:layout_gravity="end" android:enabled="false"
+                        style="@style/Widget.Vault.Diagnostics.Action" android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" android:layout_marginTop="8dp"
+                        android:layout_gravity="end" android:enabled="false" app:cornerRadius="11dp"
                         android:text="@string/save_description"/>
                     <TextView android:id="@+id/tvProbeStatus" android:layout_width="match_parent"
                         android:layout_height="wrap_content" android:accessibilityLiveRegion="polite"
                         android:textAppearance="@style/TextAppearance.Vault.Supporting" android:visibility="gone"/>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-            <TextView android:id="@+id/tvDiagnosticSummary" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:layout_marginTop="16dp"
-                android:accessibilityLiveRegion="polite" android:background="@drawable/vault_bg_badge"
-                android:padding="18dp" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
-            <TextView android:id="@+id/tvDiagnosticDetails" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:paddingHorizontal="4dp" android:paddingTop="8dp"
-                android:textIsSelectable="true" android:visibility="gone"
-                android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
-            <TextView android:id="@+id/tvDiagnosticElapsed" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:paddingHorizontal="4dp" android:paddingTop="8dp"
-                android:visibility="gone" android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"
-                android:fontFeatureSettings="tnum"/>
-            <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/diagnosticProgress"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginTop="8dp" android:indeterminate="true" android:visibility="gone"/>
+            <com.google.android.material.card.MaterialCardView android:id="@+id/diagnosticSummaryCard"
+                style="@style/Widget.Vault.Card" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="16dp" app:cardCornerRadius="18dp" app:strokeWidth="0dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:gravity="center_vertical" android:minHeight="62dp"
+                    android:paddingHorizontal="16dp" android:paddingVertical="10dp">
+                    <ImageView android:id="@+id/diagnosticSummaryIcon" android:layout_width="28dp" android:layout_height="28dp"
+                        android:importantForAccessibility="no" android:padding="6dp" android:src="@drawable/ic_info"
+                        android:background="@drawable/vault_bg_status_dot"/>
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
+                        <TextView android:id="@+id/tvDiagnosticSummary" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:accessibilityLiveRegion="polite"
+                            android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
+                        <TextView android:id="@+id/tvDiagnosticElapsed" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:layout_marginTop="4dp"
+                            android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"
+                            android:fontFeatureSettings="tnum"/>
+                        <com.google.android.material.progressindicator.LinearProgressIndicator
+                            android:id="@+id/diagnosticProgress" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:layout_marginTop="6dp" android:visibility="gone"/>
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
             <com.google.android.material.button.MaterialButton android:id="@+id/btnRunChecks"
                 style="@style/Widget.Vault.Button" android:layout_width="match_parent"
                 android:layout_height="50dp" android:layout_marginTop="16dp" android:text="@string/run_checks"
-                app:icon="@drawable/ic_diagnostics" app:iconTint="@color/vault_on_primary"/>
+                app:icon="@drawable/ic_diagnostics" app:iconTint="@color/vault_on_primary"
+                app:iconGravity="textStart" app:iconSize="20dp" app:cornerRadius="16dp"/>
             <LinearLayout android:id="@+id/diagnosticRows" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="vertical"/>
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:paddingVertical="12dp" android:text="@string/ping_note"
+                android:layout_height="wrap_content" android:layout_marginTop="4dp" android:orientation="vertical"/>
+            <TextView android:id="@+id/tvDiagnosticDetails" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_marginTop="12dp"
+                android:textIsSelectable="true" android:visibility="gone"
+                android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
+            <TextView android:id="@+id/tvDiagnosticPingNote" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:paddingVertical="12dp" android:text="@string/ping_note" android:visibility="gone"
                 android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
         </LinearLayout>
     </ScrollView>
@@ -88,27 +112,40 @@
         android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical"
         android:visibility="gone" android:paddingHorizontal="20dp" android:paddingTop="16dp"
         android:paddingBottom="0dp">
-        <ScrollView android:id="@+id/logScroll" android:layout_width="match_parent"
-            android:layout_height="0dp" android:layout_weight="1" android:background="@drawable/vault_bg_log">
-            <TextView android:id="@+id/tvLogs" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:breakStrategy="simple"
-                android:fontFamily="monospace" android:hyphenationFrequency="none"
-                android:padding="16dp" android:scrollHorizontally="false" android:textColor="@color/vault_log_text"
-                android:textIsSelectable="true" android:textSize="11sp"/>
-        </ScrollView>
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="10dp" android:text="@string/log_selection_hint"
+        <FrameLayout android:layout_width="match_parent" android:layout_height="0dp"
+            android:layout_weight="1" android:background="@drawable/vault_bg_log">
+            <ScrollView android:id="@+id/logScroll" android:layout_width="match_parent" android:layout_height="match_parent"
+                android:paddingVertical="14dp" android:clipToPadding="true">
+                <TextView android:id="@+id/tvLogs" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:breakStrategy="simple"
+                    android:fontFamily="monospace" android:hyphenationFrequency="none"
+                    android:paddingHorizontal="16dp" android:scrollHorizontally="false" android:textColor="@color/vault_log_text"
+                    android:textIsSelectable="true" android:textSize="11sp"/>
+            </ScrollView>
+            <LinearLayout android:id="@+id/logState" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:layout_gravity="center" android:gravity="center_vertical"
+                android:orientation="horizontal" android:padding="16dp">
+                <ProgressBar android:id="@+id/logProgress" android:layout_width="24dp" android:layout_height="24dp"
+                    android:layout_marginEnd="8dp" android:importantForAccessibility="no" android:visibility="gone"/>
+                <TextView android:id="@+id/tvLogState" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite" android:text="@string/no_logs"
+                    android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
+            </LinearLayout>
+        </FrameLayout>
+        <TextView android:id="@+id/tvLogHint" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="10dp" android:text="@string/log_selection_hint" android:accessibilityLiveRegion="polite"
             android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="10dp" android:orientation="horizontal">
+            android:layout_marginTop="8dp" android:orientation="horizontal">
             <com.google.android.material.button.MaterialButton android:id="@+id/btnClearLogs"
-                style="@style/Widget.Vault.Button.Tonal" android:layout_width="0dp"
-                android:layout_height="48dp" android:layout_weight="1" android:enabled="false"
-                android:text="@string/clear" app:icon="@drawable/ic_log_clear"/>
+                style="@style/Widget.Vault.Diagnostics.Action" android:layout_width="0dp"
+                android:layout_height="wrap_content" android:layout_weight="1" android:enabled="false"
+                android:text="@string/clear" android:textColor="@color/vault_diagnostic_neutral_action_text"
+                app:backgroundTint="@color/vault_surface_subtle"/>
             <com.google.android.material.button.MaterialButton android:id="@+id/btnCopyLogs"
-                style="@style/Widget.Vault.Button.Tonal" android:layout_width="0dp"
-                android:layout_height="48dp" android:layout_marginStart="12dp" android:layout_weight="1"
-                android:enabled="false" android:text="@string/copy" app:icon="@drawable/ic_log_copy"/>
+                style="@style/Widget.Vault.Diagnostics.Action" android:layout_width="0dp"
+                android:layout_height="wrap_content" android:layout_marginStart="18dp" android:layout_weight="1"
+                android:enabled="false" android:text="@string/copy"/>
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

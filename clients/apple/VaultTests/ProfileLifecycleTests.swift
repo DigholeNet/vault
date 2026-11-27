@@ -218,6 +218,44 @@ extension VaultTests {
     }
 
     @MainActor
+    func testEarlyFailure() async throws {
+        let controller = try makeController()
+        controller.connect()
+        try await activate(controller)
+        let profile = TestTunnelManager()
+        profile.testConnection.testStatus = .disconnected
+        controller.prepared?(profile, true)
+        await drainMainQueue()
+        XCTAssertEqual(controller.vpnStatus, .connecting)
+        XCTAssertEqual(profile.testConnection.startCalls, 1)
+
+        profile.testConnection.testStatus = .connecting
+        controller.updateVPNStatus(profile)
+        profile.testConnection.testStatus = .disconnected
+        controller.updateVPNStatus(profile)
+        controller.updateVPNStatus(profile)
+
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
+        XCTAssertEqual(controller.appData.connectionError, "Could not reach the server.")
+    }
+
+    @MainActor
+    func testVPNPermission() async throws {
+        let controller = try makeController()
+        controller.connect()
+        try await activate(controller)
+        controller.preparationError = NEVPNError(.configurationReadWriteFailed)
+        controller.prepared?(nil, false)
+
+        XCTAssertEqual(controller.vpnStatus, .disconnected)
+        XCTAssertTrue(controller.appData.needsVPNPermission)
+        XCTAssertEqual(controller.appData.connectionActionTitle, "Authorize VPN")
+
+        controller.connect()
+        XCTAssertFalse(controller.appData.needsVPNPermission)
+    }
+
+    @MainActor
     func testOnDemandReloadFailure() async throws {
         let controller = try makeController()
         controller.connect()

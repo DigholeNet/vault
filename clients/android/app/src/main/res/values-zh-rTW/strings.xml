@@ -26,7 +26,11 @@
     <string name="profile_active">使用中</string>
     <string name="status_failed">連線失敗</string>
     <string name="retry">重試</string>
-    <string name="error_connection_timeout">無法連線伺服器，請檢查地址和網路後重試。</string>
+    <string name="status_tap_to_retry">點擊重試</string>
+    <string name="status_permission_required">需要 VPN 權限</string>
+    <string name="status_authorize">重新授權</string>
+    <string name="status_permission_detail">需要系統授權才能連線。</string>
+    <string name="error_connection_timeout">無法連線至伺服器。</string>
     <string name="failure_retry_hint">檢查配置後可重試</string>
     <string name="failure_diagnostics_title">需要進一步排查？</string>
     <string name="failure_diagnostics_detail">檢查伺服器位址與網路，或開啟診斷。</string>
@@ -39,6 +43,7 @@
     <!-- Status Fragment -->
     <string name="status_off">未連線</string>
     <string name="status_on">已連線</string>
+    <string name="status_running">運行中</string>
     <string name="status_connecting">連線中…</string>
     <string name="status_tap_to_connect">點擊連線</string>
     <string name="status_tap_to_disconnect">點擊斷線</string>
@@ -62,6 +67,7 @@
     <string name="version_unknown">版本未知</string>
     <string name="website">https://github.com/DigholeNet/vault</string>
     <string name="about_description">一款用於跨區域連線的安全 VPN 用戶端。</string>
+    <string name="about_path_discovery">加密連線，自動探索更佳路徑。</string>
     <string name="copyright">© 2026 Dighole Team</string>
     <string name="no_browser">找不到瀏覽器應用程式</string>
 
@@ -109,6 +115,8 @@
     <string name="not_measured">尚未檢測</string>
     <string name="copy">複製</string>
     <string name="clear">清除</string>
+    <string name="clear_runtime_logs_title">清除執行記錄？</string>
+    <string name="clear_runtime_logs_message">此操作會清除所有執行記錄。</string>
     <string name="no_logs">暫無記錄。</string>
     <string name="logs_failed">無法讀取或清除記錄，請重試。</string>
     <string name="elapsed">耗時：%1$d ms</string>
@@ -138,4 +146,27 @@
     <string name="back_description">返回</string>
     <string name="error_profile_in_use">請先中斷連線，再重新命名或刪除正在使用的設定。</string>
     <string name="probe_saved">探測網域已儲存。</string>
+    <string name="diagnostic_offline_title">應用程式直連檢查與執行記錄一律可用</string>
+    <string name="diagnostic_offline_detail">連線後可檢查完整隧道。</string>
+    <string name="diagnostic_start_direct">開始直連檢查</string>
+    <string name="diagnostic_summary_success">%1$d 項檢查 · 耗時 %2$.1f 秒</string>
+    <string name="diagnostic_summary_partial">%1$d/%2$d 項通過 · %3$d 項失敗</string>
+    <string name="diagnostic_row_passed">通過</string>
+    <string name="diagnostic_row_failed">失敗</string>
+    <string name="diagnostic_expanded">已展開</string>
+    <string name="diagnostic_collapsed">已收合</string>
+    <string name="diagnostic_tls_handshake">TLS 交握</string>
+    <string name="diagnostic_logs_copied">已複製到剪貼簿。</string>
+    <string name="diagnostic_logs_loading">正在讀取記錄…</string>
+    <string name="diagnostic_logs_clearing">清除中…</string>
+    <string name="status_no_profile">無配置</string>
+    <string name="status_no_profile_detail">尚未新增伺服器配置</string>
+    <string name="status_wait">請稍候…</string>
+    <string name="status_connecting_detail">正在建立安全通道</string>
+    <string name="status_disconnecting">斷線中</string>
+    <string name="status_disconnecting_detail">正在關閉安全通道</string>
+    <string name="status_reconnecting_detail">保留上次連線資料</string>
+    <string name="status_cancel_connection">取消連線</string>
+    <string name="status_recovery_rates">上行 %1$s/s · 下行 %2$s/s</string>
+    <string name="status_using_profile">使用設定：%1$s</string>
 </resources>

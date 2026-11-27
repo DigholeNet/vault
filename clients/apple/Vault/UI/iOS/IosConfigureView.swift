@@ -3,8 +3,8 @@ import VaultCore
 
 #if os(iOS)
 struct IosConfigureView: View {
-    @Binding var selectedTab: Int
     let vpnManager: VpnManager
+    var opensNewProfile: Binding<Bool> = .constant(false)
     @EnvironmentObject var appData: AppData
     @EnvironmentObject var config: VaultConfig
     @EnvironmentObject var languageManager: LanguageManager
@@ -30,6 +30,7 @@ struct IosConfigureView: View {
     }
 
     private func save() {
+        IosKeyboardDismissal.dismiss()
         if let originalName, draft.normalized.name != originalName, vpnManager.isProfileActive(originalName) {
             feedback = "Disconnect before renaming or deleting the running profile."
             return
@@ -48,6 +49,11 @@ struct IosConfigureView: View {
         }
         .vaultScreenBackground()
         .navigationBarHidden(true)
+        .onChange(of: opensNewProfile.wrappedValue, initial: true) { _, open in
+            guard open else { return }
+            opensNewProfile.wrappedValue = false
+            edit(nil)
+        }
         .confirmationDialog(
             languageManager.tr("Delete this profile?"),
             isPresented: $confirmDelete,
@@ -205,7 +211,10 @@ struct IosConfigureView: View {
     private var editor: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Button { isEditing = false } label: {
+                Button {
+                    IosKeyboardDismissal.dismiss()
+                    isEditing = false
+                } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 17, weight: .semibold))
                         .frame(width: 44, height: 44)
@@ -307,6 +316,7 @@ struct IosConfigureView: View {
                     }
                     if originalName != nil {
                         Button(languageManager.tr("Delete Profile"), role: .destructive) {
+                            IosKeyboardDismissal.dismiss()
                             confirmDelete = true
                         }
                         .font(.system(size: 13, weight: .semibold))
@@ -323,6 +333,7 @@ struct IosConfigureView: View {
                 .padding(.bottom, 20)
             }
             .scrollDismissesKeyboard(.interactively)
+            .onSubmit { IosKeyboardDismissal.dismiss() }
         }
     }
 

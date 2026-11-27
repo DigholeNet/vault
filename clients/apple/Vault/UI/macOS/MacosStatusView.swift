@@ -10,6 +10,7 @@ struct MacosStatusView: View {
     @StateObject private var model = DiagnosticsViewModel()
     @State private var followsTail = true
     @State private var windowVisible = false
+    @State private var confirmsLogClear = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,7 +47,7 @@ struct MacosStatusView: View {
                             .foregroundStyle(VaultTheme.textSecondary)
                     }
                     Button {
-                        Task { await model.clearLogs(using: vpnManager) }
+                        confirmsLogClear = true
                     } label: {
                         Label(languageManager.tr(model.clearingLogs ? "Clearing…" : "Clear"), systemImage: "trash")
                     }
@@ -65,6 +66,9 @@ struct MacosStatusView: View {
         }
         .background(VaultTheme.background)
         .tint(VaultTheme.primary)
+        .vaultLogClearConfirmation(isPresented: $confirmsLogClear) {
+            Task { await model.clearLogs(using: vpnManager) }
+        }
         .onAppear {
             windowVisible = NSApp.windows.first { $0.identifier?.rawValue == "status" }?
                 .occlusionState.contains(.visible) ?? false
@@ -330,7 +334,7 @@ private struct MacosConnectionDiagnostics: View {
                 Divider().overlay(VaultTheme.outline)
             }
             if let ipv4 = addresses.ipv4, active {
-                VaultAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: Color(vaultHex: "2563EB"))
+                VaultAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: VaultTheme.downlink)
             }
             if let ipv6 = addresses.ipv6, active {
                 VaultAddressRow(title: "IPv6", address: ipv6, symbol: "server.rack")

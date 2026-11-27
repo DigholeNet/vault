@@ -26,7 +26,11 @@
     <string name="profile_active">En uso</string>
     <string name="status_failed">Error de conexión</string>
     <string name="retry">Reintentar</string>
-    <string name="error_connection_timeout">No se pudo conectar con el servidor. Comprueba la dirección y la red e inténtalo de nuevo.</string>
+    <string name="status_tap_to_retry">Toca para reintentar</string>
+    <string name="status_permission_required">Se requiere permiso de VPN</string>
+    <string name="status_authorize">Autorizar VPN</string>
+    <string name="status_permission_detail">Se requiere permiso del sistema para conectar.</string>
+    <string name="error_connection_timeout">No se pudo conectar con el servidor.</string>
     <string name="failure_retry_hint">Comprueba la configuración y vuelve a intentarlo</string>
     <string name="failure_diagnostics_title">¿Necesitas más ayuda?</string>
     <string name="failure_diagnostics_detail">Revisa la dirección del servidor y la red, o abre Diagnóstico.</string>
@@ -39,6 +43,7 @@
     <!-- Status Fragment -->
     <string name="status_off">Desconectado</string>
     <string name="status_on">Conectado</string>
+    <string name="status_running">En ejecución</string>
     <string name="status_connecting">Conectando…</string>
     <string name="status_tap_to_connect">Toca para conectar</string>
     <string name="status_tap_to_disconnect">Toca para desconectar</string>
@@ -62,6 +67,7 @@
     <string name="version_unknown">Versión desconocida</string>
     <string name="website">https://github.com/DigholeNet/vault</string>
     <string name="about_description">Un cliente VPN seguro para conectividad interregional.</string>
+    <string name="about_path_discovery">Conexiones cifradas con detección automática de rutas.</string>
     <string name="copyright">© 2026 Dighole Team</string>
     <string name="no_browser">No se encontró navegador</string>
 
@@ -109,6 +115,8 @@
 <string name="not_measured">Sin medir</string>
 <string name="copy">Copiar</string>
 <string name="clear">Borrar</string>
+    <string name="clear_runtime_logs_title">¿Borrar los registros de ejecución?</string>
+    <string name="clear_runtime_logs_message">Se borrarán todos los registros de ejecución.</string>
 <string name="no_logs">No hay registros.</string>
 <string name="logs_failed">No se pudieron leer o borrar los registros. Inténtalo de nuevo.</string>
 <string name="elapsed">Tiempo: %1$d ms</string>
@@ -138,4 +146,27 @@
     <string name="back_description">Atrás</string>
     <string name="error_profile_in_use">Desconecta antes de renombrar o eliminar el perfil en uso.</string>
     <string name="probe_saved">Dominios de prueba guardados.</string>
+    <string name="diagnostic_offline_title">Las comprobaciones directas y los registros siempre están disponibles</string>
+    <string name="diagnostic_offline_detail">Conéctate para comprobar todo el túnel.</string>
+    <string name="diagnostic_start_direct">Iniciar comprobaciones directas</string>
+    <string name="diagnostic_summary_success">%1$d comprobaciones · %2$.1f s</string>
+    <string name="diagnostic_summary_partial">%1$d/%2$d superadas · %3$d fallidas</string>
+    <string name="diagnostic_row_passed">Superada</string>
+    <string name="diagnostic_row_failed">Fallida</string>
+    <string name="diagnostic_expanded">Expandido</string>
+    <string name="diagnostic_collapsed">Contraído</string>
+    <string name="diagnostic_tls_handshake">Negociación TLS</string>
+    <string name="diagnostic_logs_copied">Copiado al portapapeles.</string>
+    <string name="diagnostic_logs_loading">Cargando registros…</string>
+    <string name="diagnostic_logs_clearing">Borrando registros…</string>
+    <string name="status_no_profile">Sin configuración</string>
+    <string name="status_no_profile_detail">Todavía no se ha añadido un servidor.</string>
+    <string name="status_wait">Espera…</string>
+    <string name="status_connecting_detail">Estableciendo un túnel seguro</string>
+    <string name="status_disconnecting">Desconectando…</string>
+    <string name="status_disconnecting_detail">Cerrando el túnel seguro</string>
+    <string name="status_reconnecting_detail">Conservando los últimos datos de conexión</string>
+    <string name="status_cancel_connection">Cancelar conexión</string>
+    <string name="status_recovery_rates">Subida %1$s/s · Descarga %2$s/s</string>
+    <string name="status_using_profile">Perfil en uso: %1$s</string>
 </resources>

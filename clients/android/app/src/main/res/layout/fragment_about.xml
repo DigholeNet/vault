@@ -32,6 +32,10 @@
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:gravity="center" android:text="@string/about_description"
                     android:textAppearance="@style/TextAppearance.Vault.Body"/>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:gravity="center"
+                    android:text="@string/about_path_discovery"
+                    android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
                 <TextView android:id="@+id/tvWebsite" android:layout_width="match_parent"
                     android:layout_height="wrap_content" android:layout_marginTop="18dp"
                     android:background="@drawable/vault_bg_panel_muted" android:clickable="true"

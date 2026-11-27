@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="horizontal" android:paddingVertical="2dp" android:baselineAligned="false">
+    <TextView android:id="@+id/probeLineLabel" android:layout_width="0dp" android:layout_height="wrap_content"
+        android:layout_weight="1" android:fontFamily="monospace" android:textIsSelectable="true"
+        android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
+    <TextView android:id="@+id/probeLineTime" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_marginStart="8dp" android:fontFamily="monospace" android:textColor="@color/vault_text"
+        android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
+</LinearLayout>

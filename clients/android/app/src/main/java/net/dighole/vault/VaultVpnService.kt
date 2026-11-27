@@ -48,6 +48,7 @@ class VaultVpnService : VpnService() {
 
     companion object {
         const val TAG = "VaultVpnService"
+        private const val INITIAL_CONNECTION_TIMEOUT_MS = 12_000L
         val VPN_MTU: Int get() = TunnelPolicy.mtuMax
 
         const val ACTION_CONNECT = "net.dighole.vault.ACTION_CONNECT"
@@ -209,7 +210,7 @@ class VaultVpnService : VpnService() {
         emitVpnEvent(VpnStatusEvent.Connecting)
         initialConnectionTimeoutJob?.cancel()
         initialConnectionTimeoutJob = scope.launch {
-            delay(15_000)
+            delay(INITIAL_CONNECTION_TIMEOUT_MS)
             sessionGate.update(sessionToken) {
                 if (connectedEvent == null) {
                     Log.e(TAG, "Initial connection timed out")

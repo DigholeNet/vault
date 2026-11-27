@@ -1,6 +1,15 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ passed" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 通过" } } } },
+    "Direct checks and runtime logs are available" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "应用直连检查与运行日志始终可用" } } } },
+    "Connect to run the full tunnel checks." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接后可检查完整隧道。" } } } },
+    "Start Direct Checks" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开始直连检查" } } } },
+    "%lld checks · %@ s" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 项检查 · 耗时 %@ 秒" } } } },
+    "%lld/%lld checks passed · %lld failed" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 项通过 · %lld 项失败" } } } },
+    "Expanded" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已展开" } } } },
+    "Collapsed" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已折叠" } } } },
+    "TLS handshake" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "TLS 握手" } } } },
     "Private networking, made simple." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "私密网络，简单连接。" } } } },
     "Private, secure, open source." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "私密、安全、开源。" } } } },
     "Choose the server for your next connection." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择下次连接使用的服务器。" } } } },
@@ -11,6 +20,17 @@
     "Network details" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "网络详情" } } } },
     "Live traffic" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "实时流量" } } } },
     "Tap to connect" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点击连接" } } } },
+    "Using profile: %@" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用配置：%@" } } } },
+    "No configuration" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无配置" } } } },
+    "No server configuration has been added." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "尚未添加服务器配置" } } } },
+    "Please wait…" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请稍候…" } } } },
+    "Establishing a secure tunnel" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在建立安全隧道" } } } },
+    "Closing the secure tunnel" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在关闭安全隧道" } } } },
+    "Keeping the last connection data" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保留上次连接数据" } } } },
+    "Connecting…" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接中" } } } },
+    "VPN connected" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已链接" } } } },
+    "Running" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "运行中" } } } },
+    "Tap to retry" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点击重试" } } } },
     "Tap to disconnect" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点击断开" } } } },
     "Switch Profile" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换配置" } } } },
     "Preferences" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "偏好设置" } } } },
@@ -24,6 +44,8 @@
     "Encrypted connections with automatic path discovery." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "加密连接，自动发现更优路径。" } } } },
     "Select log text to copy details for troubleshooting." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "日志用于连接排查，可选择文本后复制。" } } } },
     "Copied to clipboard." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制到剪贴板。" } } } },
+    "Clear runtime logs?" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清空运行日志？" } } } },
+    "This clears all runtime logs." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此操作会清空所有运行日志。" } } } },
     "Save changes before connecting." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接前保存更改。" } } } },
     "Test VPN DNS, TCP and HTTPS, plus application access." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "检查 VPN DNS、TCP、HTTPS 以及应用访问。" } } } },
     "Version %@ · BUILD %@" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "版本 %@ · BUILD %@" } } } },
@@ -403,6 +425,10 @@
         }
       }
     },
+    "Authorize VPN" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新授权" } } } },
+    "VPN permission required" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要 VPN 权限" } } } },
+    "System permission is required to connect." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要系统授权才能连接。" } } } },
+    "Could not reach the server." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法连接服务器。" } } } },
     "Unable to connect. Check your network and server configuration." : {
       "localizations" : {
         "zh-Hans" : {

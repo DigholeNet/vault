@@ -12,6 +12,7 @@ final class DelayedLoadVpnManager: VpnManager {
     var loaded: ((NETunnelProviderManager?, Error?) -> Void)?
     var onLoad: (() -> Void)?
     var prepared: ((NETunnelProviderManager?, Bool) -> Void)?
+    var preparationError: Error?
     var onPreparation: (() -> Void)?
     var preparationCalls = 0
     var activationRequests: [OSSystemExtensionRequest] = []
@@ -41,10 +42,10 @@ final class DelayedLoadVpnManager: VpnManager {
 
     override func loadAndCreateProviderManager(
         launch: TunnelLaunchConfiguration,
-        _ complete: @escaping (NETunnelProviderManager?, Bool) -> Void
+        _ complete: @escaping (NETunnelProviderManager?, Bool, Error?) -> Void
     ) {
         preparationCalls += 1
-        prepared = complete
+        prepared = { [weak self] manager, loaded in complete(manager, loaded, self?.preparationError) }
         onPreparation?()
     }
 

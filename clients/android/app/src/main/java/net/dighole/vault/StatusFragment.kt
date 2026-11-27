@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: MIT
 package net.dighole.vault
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.TransitionDrawable
 import android.net.VpnService
 import android.os.Bundle
 import android.util.Log
@@ -10,9 +15,11 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.view.updateLayoutParams
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
@@ -25,10 +32,12 @@ import net.dighole.vault.data.deviceId
 import net.dighole.vault.data.readVaultConfig
 import net.dighole.vault.data.readVaultProfiles
 import net.dighole.vault.data.selectVaultProfile
+import kotlin.math.roundToInt
 
 class StatusFragment : Fragment() {
 
     private lateinit var btnToggleVpn: ImageButton
+    private var connectionIconRes: Int? = null
     private lateinit var tvStatus: TextView
     private lateinit var tvStatusDetail: TextView
     private lateinit var tvIpv4Address: TextView
@@ -48,13 +57,17 @@ class StatusFragment : Fragment() {
     private var vpnState = VpnUiState()
     private var connectJob: Job? = null
     private var awaitingPermission = false
+    private var permissionRequired = false
+    private var hasProfiles: Boolean? = null
+    private var selectedProfileName: String? = null
     private var pendingConnectProfileName: String? = null
 
     private val vpnLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         awaitingPermission = false
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
+        permissionRequired = result.resultCode != android.app.Activity.RESULT_OK
+        if (!permissionRequired) {
             startVpnService()
         } else {
             Log.d("StatusFragment", "VPN permission denied or dialog cancelled")
@@ -66,6 +79,7 @@ class StatusFragment : Fragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         awaitingPermission = savedInstanceState?.getBoolean("awaitingPermission") ?: false
+        permissionRequired = savedInstanceState?.getBoolean("permissionRequired") ?: false
         pendingConnectProfileName = savedInstanceState?.getString("pendingProfileName")
         Log.d("StatusFragment", "onCreate")
     }
@@ -73,6 +87,7 @@ class StatusFragment : Fragment() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean("awaitingPermission", awaitingPermission)
+        outState.putBoolean("permissionRequired", permissionRequired)
         outState.putString("pendingProfileName", pendingConnectProfileName)
     }
 
@@ -88,6 +103,7 @@ class StatusFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         btnToggleVpn = view.findViewById(R.id.btnToggleVpn)
+        connectionIconRes = null
         tvStatus = view.findViewById(R.id.tvStatus)
         tvStatusDetail = view.findViewById(R.id.tvStatusDetail)
         tvIpv4Address = view.findViewById(R.id.tvIpv4Address)
@@ -96,6 +112,7 @@ class StatusFragment : Fragment() {
         publicIpSection = view.findViewById(R.id.publicIpSection)
         tvPublicIpAddress = view.findViewById(R.id.tvPublicIpAddress)
         duration = view.findViewById(R.id.connectionDuration)
+        duration.typeface = Typeface.create(Typeface.MONOSPACE, 300, false)
         sentPackets = view.findViewById(R.id.tvSentPackets)
         receivedPackets = view.findViewById(R.id.tvReceivedPackets)
         sentBytes = view.findViewById(R.id.tvSentBytes)
@@ -104,18 +121,15 @@ class StatusFragment : Fragment() {
         receivedSpeed = view.findViewById(R.id.tvReceivedSpeed)
 
         btnToggleVpn.setOnClickListener {
-            if (vpnState.isConnected || vpnState.isConnecting) {
-                disconnectVpn()
-            } else {
-                connectVpn()
+            when {
+                vpnState.isConnected || vpnState.isConnecting -> disconnectVpn()
+                hasProfiles == false && !permissionRequired &&
+                    (requireContext().applicationContext as VaultApplication).currentVpnStatus !is VpnStatusEvent.Error ->
+                    (activity as? MainActivity)?.openNewProfile()
+                else -> connectVpn()
             }
         }
         view.findViewById<View>(R.id.btnProfile).setOnClickListener { showProfileDialog() }
-        view.findViewById<View>(R.id.failureDiagnosticsCard).setOnClickListener {
-            requireActivity().findViewById<com.google.android.material.bottomnavigation.BottomNavigationView>(
-                R.id.bottomNav
-            ).selectedItemId = R.id.nav_diagnostics
-        }
 
         restoreStateFromPrefs()
         refreshProfiles()
@@ -203,6 +217,7 @@ class StatusFragment : Fragment() {
                 pendingConnectProfileName = config.name
                 val intent = VpnService.prepare(requireContext())
                 if (intent != null) {
+                    permissionRequired = true
                     awaitingPermission = true
                     vpnLauncher.launch(intent)
                 } else {
@@ -213,6 +228,7 @@ class StatusFragment : Fragment() {
             } catch (_e: Exception) {
                 Log.e("StatusFragment", "Failed to connect VPN", _e)
                 awaitingPermission = false
+                permissionRequired = false
                 vpnState = VpnUiState()
                 (requireContext().applicationContext as VaultApplication)
                     .emitVpnStatusEvent(VpnStatusEvent.Error(_e.message))
@@ -230,6 +246,10 @@ class StatusFragment : Fragment() {
                 action = VaultVpnService.ACTION_DISCONNECT
             }
             requireContext().startService(serviceIntent)
+            val app = requireContext().applicationContext as VaultApplication
+            app.emitVpnStatusEvent(VpnStatusEvent.Disconnecting)
+            vpnState = vpnState.applying(VpnStatusEvent.Disconnecting)
+            updateUI()
         } catch (_: Exception) {
             Log.e("StatusFragment", "Failed to disconnect VPN")
         }
@@ -239,8 +259,11 @@ class StatusFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val store = requireContext().readVaultProfiles()
+                hasProfiles = store.profiles.isNotEmpty()
+                selectedProfileName = store.selectedProfileName
                 view?.findViewById<TextView>(R.id.btnProfileText)?.text =
                     store.selectedProfileName ?: getString(R.string.add_profile)
+                updateUI()
             } catch (_: Exception) {
                 view?.findViewById<TextView>(R.id.btnProfileText)?.setText(R.string.config_load_failed)
             }
@@ -301,6 +324,7 @@ class StatusFragment : Fragment() {
     }
 
     private fun startVpnService(profileName: String? = null) {
+        permissionRequired = false
         try {
             val target = profileName ?: pendingConnectProfileName ?: return
             val idBytes = requireContext().deviceId().bytes
@@ -322,139 +346,220 @@ class StatusFragment : Fragment() {
         updateUI()
     }
 
-    private fun statusDetailText(app: VaultApplication, active: Boolean): String? {
-        val error = app.currentVpnStatus as? VpnStatusEvent.Error
-        val runningProfile = if (active) app.activeProfileName ?: app.requestedProfileName else null
-        return when {
-            error != null -> getString(
-                R.string.status_error_prefix,
-                error.messageResId?.let(::getString) ?: error.message.orEmpty()
-            )
-            runningProfile != null -> getString(R.string.profile_disconnect_format, runningProfile)
-            else -> null
-        }
+    private enum class CardState(val title: Int, val action: Int, val usesIndigo: Boolean = false) {
+        NoProfile(R.string.status_no_profile, R.string.add_profile),
+        Disconnected(R.string.status_off, R.string.status_tap_to_connect),
+        Connecting(R.string.status_connecting, R.string.status_wait, true),
+        Connected(R.string.status_on, R.string.status_tap_to_disconnect, true),
+        Reconnecting(R.string.status_reconnecting, R.string.status_tap_to_disconnect, true),
+        Disconnecting(R.string.status_disconnecting, R.string.status_wait),
+        Failure(R.string.status_failed, R.string.status_tap_to_retry),
+        Permission(R.string.status_permission_required, R.string.status_authorize);
+
+        val busy: Boolean get() = this == Connecting || this == Reconnecting || this == Disconnecting
+    }
+
+    private fun cardState(app: VaultApplication): CardState = when {
+        vpnState.isDisconnecting -> CardState.Disconnecting
+        vpnState.isConnecting && vpnState.isConnected -> CardState.Reconnecting
+        vpnState.isConnected -> CardState.Connected
+        vpnState.isConnecting || (!awaitingPermission && connectJob?.isActive == true) -> CardState.Connecting
+        permissionRequired -> CardState.Permission
+        app.currentVpnStatus is VpnStatusEvent.Error -> CardState.Failure
+        hasProfiles == false -> CardState.NoProfile
+        else -> CardState.Disconnected
+    }
+
+    private fun statusDetailText(app: VaultApplication, state: CardState): String? = when (state) {
+        CardState.NoProfile -> getString(R.string.status_no_profile_detail)
+        CardState.Disconnected -> selectedProfileName?.let { getString(R.string.status_using_profile, it) }
+        CardState.Connecting -> getString(R.string.status_connecting_detail)
+        CardState.Reconnecting -> getString(R.string.status_reconnecting_detail)
+        CardState.Disconnecting -> getString(R.string.status_disconnecting_detail)
+        CardState.Permission -> getString(R.string.status_permission_detail)
+        CardState.Connected -> (app.activeProfileName ?: app.requestedProfileName)?.let {
+            getString(R.string.profile_disconnect_format, it)
+        } ?: getString(R.string.status_tap_to_disconnect)
+        CardState.Failure -> (app.currentVpnStatus as? VpnStatusEvent.Error)?.let { error ->
+            error.messageResId?.let(::getString)
+                ?: error.message?.lineSequence()?.firstOrNull()?.takeIf { it.isNotBlank() }
+        } ?: getString(R.string.error_connection_timeout)
     }
 
     private fun updateUI() {
         val root = view ?: return
         val app = requireContext().applicationContext as VaultApplication
-        val preparing = awaitingPermission || connectJob?.isActive == true
-        val active = vpnState.isConnected || vpnState.isConnecting
-        val emphasized = active || preparing
-        val failed = app.currentVpnStatus is VpnStatusEvent.Error && !emphasized
-        val connected = vpnState.isConnected && !vpnState.isConnecting
-        renderStatus(root, preparing, emphasized, failed)
-        renderHero(root, emphasized, failed)
-        renderConnectionControls(root, active, preparing, emphasized, failed)
-        renderStatusDetails(root, app, active, emphasized, failed)
-        root.findViewById<View>(R.id.readyCard).visibility = if (emphasized || failed) View.GONE else View.VISIBLE
-        root.findViewById<View>(R.id.failureDiagnosticsCard).visibility = if (failed) View.VISIBLE else View.GONE
+        val state = cardState(app)
+        val connected = state == CardState.Connected
+        renderStatus(root, state)
+        renderHero(root, state)
+        renderConnectionControls(root, state)
+        renderStatusDetails(root, app, state)
+        root.findViewById<View>(R.id.readyCard).visibility =
+            if (state == CardState.Disconnected && hasProfiles == true) View.VISIBLE else View.GONE
         renderConnectionDuration(app, connected)
-        renderConnectionInfo(root, vpnState.isConnected)
+        renderConnectionInfo(root, connected)
         renderTrafficStats(app.latestTrafficStats)
     }
 
-    private fun renderStatus(root: View, preparing: Boolean, emphasized: Boolean, failed: Boolean) {
-        root.findViewById<View>(R.id.btnProfile).visibility = if (emphasized) View.GONE else View.VISIBLE
-        tvStatus.setText(when {
-            failed -> R.string.status_failed
-            vpnState.isConnecting && vpnState.isConnected -> R.string.status_reconnecting
-            vpnState.isConnecting || preparing -> R.string.status_connecting
-            vpnState.isConnected -> R.string.status_on
-            else -> R.string.status_off
-        })
+    private fun renderStatus(root: View, state: CardState) {
+        root.findViewById<View>(R.id.btnProfile).visibility = when (state) {
+            CardState.Disconnected, CardState.Failure, CardState.Permission -> View.VISIBLE
+            else -> View.GONE
+        }
+        tvStatus.setText(state.title)
+        val showsBadge = state != CardState.Failure && state != CardState.Permission
+        root.findViewById<View>(R.id.headerStatusBadge).visibility = if (showsBadge) View.VISIBLE else View.GONE
+        if (showsBadge) renderStatusBadge(root, state.usesIndigo)
+    }
+
+    private fun renderStatusBadge(root: View, emphasized: Boolean) {
+        root.findViewById<View>(R.id.headerStatusBadge).backgroundTintList =
+            ColorStateList.valueOf(root.context.getColor(when {
+                emphasized -> R.color.vault_indigo_soft
+                else -> R.color.vault_surface_subtle
+            }))
         root.findViewById<TextView>(R.id.tvHeaderStatus).apply {
-            text = tvStatus.text
+            text = if (vpnState.isConnected && !vpnState.isConnecting) getString(R.string.status_running) else tvStatus.text
             setTextColor(ContextCompat.getColor(
                 requireContext(), when {
-                    failed -> R.color.vault_danger
                     emphasized -> R.color.vault_blue_dark
                     else -> R.color.vault_text_secondary
                 }
             ))
         }
         root.findViewById<View>(R.id.headerStatusDot).backgroundTintList =
-            android.content.res.ColorStateList.valueOf(ContextCompat.getColor(
+            ColorStateList.valueOf(ContextCompat.getColor(
                 requireContext(), when {
-                    failed -> R.color.vault_danger
                     emphasized -> R.color.connection_connected
                     else -> R.color.connection_disconnected
                 }
             ))
     }
 
-    private fun renderHero(root: View, emphasized: Boolean, failed: Boolean) {
-        val hero = root.findViewById<View>(R.id.statusHero)
-        hero.setBackgroundResource(when {
-            failed -> R.drawable.vault_bg_hero_error
-            emphasized -> R.drawable.vault_bg_hero_active
-            else -> R.drawable.vault_bg_hero_muted
+    private fun renderHero(root: View, state: CardState) {
+        root.findViewById<View>(R.id.statusHero).setBackgroundResource(when {
+            state == CardState.Connected -> R.drawable.vault_bg_hero_connected
+            state.usesIndigo -> R.drawable.vault_bg_hero_progress
+            else -> R.drawable.vault_bg_hero_neutral
         })
-        hero.layoutParams = hero.layoutParams.apply {
-            height = ((if (emphasized) 258 else 286) * resources.displayMetrics.density).toInt()
-        }
-        val heroVerticalPadding = ((if (emphasized) 8 else 24) * resources.displayMetrics.density).toInt()
-        hero.setPadding(hero.paddingLeft, heroVerticalPadding, hero.paddingRight, heroVerticalPadding)
         tvStatus.setTextColor(ContextCompat.getColor(
-            requireContext(), when {
-                failed -> R.color.vault_danger
-                emphasized -> R.color.vault_hero_text
-                else -> R.color.vault_text_secondary
-            }
+            requireContext(), if (state.usesIndigo) R.color.vault_hero_text else R.color.vault_text_secondary
         ))
+        btnToggleVpn.setBackgroundResource(
+            if (state.usesIndigo) R.drawable.vault_bg_connection_button_connected else R.drawable.vault_bg_connection_button_neutral
+        )
+        btnToggleVpn.setPadding(dp(23), dp(23), dp(23), dp(23))
     }
 
-    private fun renderConnectionControls(
-        root: View,
-        active: Boolean,
-        preparing: Boolean,
-        emphasized: Boolean,
-        failed: Boolean
-    ) {
-        btnToggleVpn.setImageResource(when {
-            failed -> R.drawable.ic_error
-            active -> R.drawable.ic_connected
-            else -> R.drawable.ic_disconnected
-        })
-        btnToggleVpn.isEnabled = !preparing
-        btnToggleVpn.alpha = if (btnToggleVpn.isEnabled) 1f else 0.5f
-        btnToggleVpn.contentDescription = getString(when {
-            failed -> R.string.retry
-            active -> R.string.status_tap_to_disconnect
-            else -> R.string.status_tap_to_connect
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
+
+    private fun setTopMargin(view: View, value: Int) {
+        val margin = dp(value)
+        if ((view.layoutParams as LinearLayout.LayoutParams).topMargin != margin) {
+            view.updateLayoutParams<LinearLayout.LayoutParams> { topMargin = margin }
+        }
+    }
+
+    private fun renderConnectionControls(root: View, state: CardState) {
+        renderConnectionIcon(root, state)
+        val preparing = connectJob?.isActive == true
+        btnToggleVpn.isEnabled = !preparing && !awaitingPermission && state != CardState.Disconnecting
+        btnToggleVpn.contentDescription = getString(when (state) {
+            CardState.Connecting -> R.string.status_cancel_connection
+            CardState.Failure -> R.string.retry
+            else -> state.action
         })
         root.findViewById<TextView>(R.id.tvConnectionAction).apply {
-            visibility = if (emphasized) View.GONE else View.VISIBLE
-            setText(if (failed) R.string.retry else R.string.status_tap_to_connect)
-            setTextColor(ContextCompat.getColor(requireContext(), R.color.vault_blue))
+            visibility = if (state == CardState.Connected) View.GONE else View.VISIBLE
+            setText(state.action)
+            setTextColor(ContextCompat.getColor(
+                requireContext(), if (state.usesIndigo) R.color.vault_hero_text else R.color.vault_blue
+            ))
         }
     }
 
-    private fun renderStatusDetails(
-        root: View,
-        app: VaultApplication,
-        active: Boolean,
-        emphasized: Boolean,
-        failed: Boolean
-    ) {
-        val detail = statusDetailText(app, active)
+    private fun renderConnectionIcon(root: View, state: CardState) {
+        val allowMotion = ValueAnimator.areAnimatorsEnabled()
+        val progress = root.findViewById<com.google.android.material.progressindicator.CircularProgressIndicator>(
+            R.id.connectionProgress
+        )
+        progress.setIndicatorColor(requireContext().getColor(
+            if (state == CardState.Disconnecting) R.color.vault_text_disabled else R.color.status_progress
+        ))
+        val nextIcon = when {
+            state.busy && allowMotion -> 0
+            state == CardState.Disconnecting -> R.drawable.ic_connection_stopping
+            state.busy -> R.drawable.ic_status_progress
+            state == CardState.Connected -> R.drawable.ic_connected
+            state == CardState.NoProfile -> R.drawable.ic_connection_add
+            state == CardState.Failure -> R.drawable.ic_connection_failed
+            state == CardState.Permission -> R.drawable.ic_connection_permission
+            else -> R.drawable.ic_disconnected
+        }
+        val previousIcon = connectionIconRes
+        if (nextIcon == previousIcon) return
+        connectionIconRes = nextIcon
+
+        val fadeDuration = 180L
+        progress.animate().cancel()
+        if (previousIcon != null && allowMotion && btnToggleVpn.isShown) {
+            val context = root.context
+            val icons = Array(2) { index ->
+                val icon = if (index == 0) previousIcon else nextIcon
+                if (icon == 0) ColorDrawable() else requireNotNull(ContextCompat.getDrawable(context, icon))
+            }
+            val transition = TransitionDrawable(icons).apply { isCrossFadeEnabled = true }
+            btnToggleVpn.setImageDrawable(transition)
+            transition.startTransition(fadeDuration.toInt())
+            when {
+                nextIcon == 0 -> {
+                    if (progress.visibility != View.VISIBLE) progress.alpha = 0f
+                    progress.visibility = View.VISIBLE
+                    progress.animate().alpha(1f).setDuration(fadeDuration).start()
+                }
+                progress.visibility == View.VISIBLE -> {
+                    progress.animate().alpha(0f).setDuration(fadeDuration)
+                        .withEndAction { progress.visibility = View.GONE }.start()
+                }
+            }
+        } else {
+            btnToggleVpn.setImageResource(nextIcon)
+            progress.alpha = 1f
+            progress.visibility = if (nextIcon == 0) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun renderStatusDetails(root: View, app: VaultApplication, state: CardState) {
+        val detail = statusDetailText(app, state)
         tvStatusDetail.text = detail.orEmpty()
         tvStatusDetail.visibility = if (detail == null) View.GONE else View.VISIBLE
+        setTopMargin(tvStatusDetail, if (state == CardState.Connected) 17 else 16)
         tvStatusDetail.setTextColor(ContextCompat.getColor(
-            requireContext(), when {
-                failed -> R.color.vault_danger
-                emphasized -> R.color.vault_hero_secondary
-                else -> R.color.vault_text_secondary
-            }
+            requireContext(), if (state.usesIndigo) R.color.vault_hero_secondary else R.color.vault_text_secondary
         ))
         root.findViewById<TextView>(R.id.tvTunnelFeature).apply {
-            setText(if (failed) R.string.failure_retry_hint else R.string.tunnel_features)
+            visibility = if (state == CardState.Connected || state == CardState.Disconnected) View.VISIBLE else View.GONE
             setBackgroundResource(
-                if (emphasized) R.drawable.vault_bg_feature_active else R.drawable.vault_bg_feature
+                if (state == CardState.Connected) R.drawable.vault_bg_feature_connected else R.drawable.vault_bg_feature
             )
+            setTopMargin(this, if (state == CardState.Connected) 24 else 22)
             setTextColor(ContextCompat.getColor(
-                requireContext(), if (emphasized) R.color.vault_hero_secondary else R.color.vault_text_secondary
+                requireContext(), if (state.usesIndigo) R.color.vault_hero_secondary else R.color.vault_text_secondary
             ))
+        }
+        root.findViewById<TextView>(R.id.connectionRecovery).apply {
+            visibility = if (state == CardState.Reconnecting) View.VISIBLE else View.GONE
+            if (state == CardState.Reconnecting) {
+                val addresses = listOfNotNull(
+                    vpnState.ipv4.takeIf { it.isNotEmpty() }?.let { "IPv4  $it" },
+                    vpnState.ipv6.takeIf { it.isNotEmpty() }?.let { "IPv6  $it" }
+                )
+                val stats = app.latestTrafficStats
+                val rates = getString(R.string.status_recovery_rates,
+                    StatusPresentation.bytes(stats?.sendSpeed ?: 0), StatusPresentation.bytes(stats?.receiveSpeed ?: 0))
+                text = (addresses + rates).joinToString("\n")
+            }
         }
     }
 

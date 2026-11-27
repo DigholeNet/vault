@@ -3,17 +3,46 @@ package net.dighole.vault
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.widget.EditText
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.google.android.material.textfield.TextInputLayout
 
 class MainActivity : BaseActivity() {
 
     private lateinit var bottomNav: BottomNavigationView
+    private val inputTaps by lazy {
+        GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(event: MotionEvent) = true
+
+            override fun onSingleTapUp(event: MotionEvent): Boolean {
+                val field = currentFocus as? EditText ?: return false
+                val inputArea = generateSequence(field as View) { it.parent as? View }.firstOrNull {
+                    it is TextInputLayout || it.id == R.id.probeDomainsField
+                } ?: field
+                val bounds = Rect()
+                if (inputArea.getLocalVisibleRect(bounds)) {
+                    val location = IntArray(2)
+                    inputArea.getLocationOnScreen(location)
+                    bounds.offset(location[0], location[1])
+                }
+                if (!bounds.contains(event.rawX.toInt(), event.rawY.toInt())) dismissInputKeyboard()
+                return false
+            }
+        })
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,7 +51,10 @@ class MainActivity : BaseActivity() {
         bottomNav = findViewById(R.id.bottomNav)
 
         bottomNav.isItemActiveIndicatorEnabled = true
-        val root = findViewById<android.view.View>(R.id.mainRoot)
+        val root = findViewById<View>(R.id.mainRoot)
+        root.viewTreeObserver.addOnGlobalFocusChangeListener { previous, next ->
+            if (previous is EditText && next !is EditText) hideInputKeyboard()
+        }
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { target, insets ->
             val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
             val ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())
@@ -77,7 +109,37 @@ class MainActivity : BaseActivity() {
         bottomNav.selectedItemId = itemId
     }
 
+    fun openNewProfile() {
+        navigateTo(R.id.nav_configure)
+        supportFragmentManager.setFragmentResult(ConfigureFragment.NEW_PROFILE_REQUEST, Bundle())
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        val handled = super.dispatchTouchEvent(event)
+        inputTaps.onTouchEvent(event)
+        return handled
+    }
+
+    fun dismissInputKeyboard() {
+        if (currentFocus !is EditText) return
+        findViewById<View>(R.id.mainRoot).requestFocus()
+        hideInputKeyboard()
+    }
+
+    fun dismissKeyboardOnDone(field: EditText) {
+        field.setOnEditorActionListener { _, action, _ ->
+            if (action != EditorInfo.IME_ACTION_DONE) return@setOnEditorActionListener false
+            dismissInputKeyboard()
+            true
+        }
+    }
+
+    private fun hideInputKeyboard() {
+        WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.ime())
+    }
+
     private fun showFragment(tag: String, factory: () -> Fragment) {
+        dismissInputKeyboard()
         val transaction = supportFragmentManager.beginTransaction()
 
         supportFragmentManager.findFragmentByTag(TAG_STATUS)?.let { transaction.hide(it) }

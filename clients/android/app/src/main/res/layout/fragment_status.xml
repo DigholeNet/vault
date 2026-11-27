@@ -27,9 +27,11 @@
                     android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
             </LinearLayout>
             <LinearLayout
+                android:id="@+id/headerStatusBadge"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:background="@drawable/vault_bg_badge"
+                android:backgroundTint="@color/vault_surface_subtle"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
                 <View
@@ -95,36 +97,59 @@
             android:id="@+id/statusHero"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:minHeight="356dp"
             android:layout_marginTop="16dp"
-            android:background="@drawable/vault_bg_panel_muted"
+            android:background="@drawable/vault_bg_hero_neutral"
             android:gravity="center_horizontal"
             android:orientation="vertical"
             android:paddingHorizontal="20dp"
-            android:paddingVertical="24dp">
+            android:paddingTop="28dp"
+            android:paddingBottom="28dp">
             <TextView
                 android:id="@+id/tvStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/status_off"
                 android:textColor="@color/vault_text_secondary"
-                android:textSize="23sp"
+                android:minHeight="24dp"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:textSize="21sp"
                 android:textStyle="bold"/>
-            <ImageButton
-                android:id="@+id/btnToggleVpn"
-                android:layout_width="94dp"
-                android:layout_height="94dp"
-                android:layout_marginTop="12dp"
-                android:background="@drawable/vault_bg_connection_button"
-                android:contentDescription="@string/toggle_vpn_description"
-                android:padding="20dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_disconnected"/>
+            <FrameLayout
+                android:id="@+id/connectionControl"
+                android:layout_width="92dp"
+                android:layout_height="92dp"
+                android:layout_marginTop="36dp">
+                <ImageButton
+                    android:id="@+id/btnToggleVpn"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/vault_bg_connection_button_neutral"
+                    android:contentDescription="@string/toggle_vpn_description"
+                    android:padding="23dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_disconnected"/>
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/connectionProgress"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:importantForAccessibility="no"
+                    android:indeterminate="true"
+                    android:visibility="gone"
+                    app:indicatorColor="@color/status_progress"
+                    app:indicatorInset="0dp"
+                    app:indicatorSize="50dp"
+                    app:trackColor="@android:color/transparent"
+                    app:trackThickness="4dp"/>
+            </FrameLayout>
             <TextView
                 android:id="@+id/connectionDuration"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:fontFamily="sans-serif-light"
+                android:layout_marginTop="17dp"
+                android:includeFontPadding="false"
                 android:fontFeatureSettings="tnum"
                 android:gravity="center"
                 android:letterSpacing="0.08"
@@ -135,16 +160,18 @@
                 android:id="@+id/tvConnectionAction"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="21dp"
+                android:includeFontPadding="false"
                 android:text="@string/status_tap_to_connect"
                 android:textColor="@color/vault_blue"
-                android:textSize="13sp"
+                android:textSize="15sp"
                 android:textStyle="bold"/>
             <TextView
                 android:id="@+id/tvStatusDetail"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="16dp"
+                android:includeFontPadding="false"
                 android:gravity="center"
                 android:textColor="@color/vault_text_secondary"
                 android:textSize="12sp"
@@ -153,11 +180,31 @@
                 android:id="@+id/tvTunnelFeature"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="24dp"
+                android:minWidth="156dp"
+                android:minHeight="32dp"
+                android:includeFontPadding="false"
+                android:gravity="center"
                 android:background="@drawable/vault_bg_feature"
                 android:text="@string/tunnel_features"
                 android:textColor="@color/vault_text_secondary"
-                android:textSize="10sp"/>
+                android:textSize="11sp"/>
+            <TextView
+                android:id="@+id/connectionRecovery"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:minWidth="284dp"
+                android:maxWidth="284dp"
+                android:minHeight="48dp"
+                android:gravity="center_vertical"
+                android:includeFontPadding="false"
+                android:paddingHorizontal="18dp"
+                android:paddingVertical="8dp"
+                android:background="@drawable/vault_bg_recovery"
+                android:textColor="@color/vault_hero_secondary"
+                android:textSize="11sp"
+                android:visibility="gone"/>
         </LinearLayout>
 
         <com.google.android.material.card.MaterialCardView
@@ -181,36 +228,6 @@
                         android:textSize="12sp" android:textStyle="bold"/>
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:layout_marginTop="5dp" android:text="@string/ready_to_connect_detail"
-                        android:textAppearance="@style/TextAppearance.Vault.Supporting" android:textSize="10.5sp"/>
-                </LinearLayout>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/failureDiagnosticsCard"
-            style="@style/Widget.Vault.Card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:foreground="?attr/selectableItemBackground"
-            android:visibility="gone">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:gravity="center_vertical" android:orientation="horizontal" android:padding="18dp">
-                <FrameLayout android:layout_width="28dp" android:layout_height="28dp"
-                    android:background="@drawable/vault_bg_icon_tile" android:padding="6dp">
-                    <ImageView android:layout_width="match_parent" android:layout_height="match_parent"
-                        android:importantForAccessibility="no" android:src="@drawable/ic_diagnostics"
-                        app:tint="@color/vault_blue"/>
-                </FrameLayout>
-                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_marginStart="12dp" android:layout_weight="1" android:orientation="vertical">
-                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="@string/failure_diagnostics_title" android:textColor="@color/vault_text"
-                        android:textSize="12sp" android:textStyle="bold"/>
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:layout_marginTop="5dp" android:text="@string/failure_diagnostics_detail"
                         android:textAppearance="@style/TextAppearance.Vault.Supporting" android:textSize="10.5sp"/>
                 </LinearLayout>
             </LinearLayout>

@@ -3,6 +3,12 @@ import Foundation
 import VaultCore
 
 class AppData: ObservableObject {
+    static let vpnPermissionError = "System permission is required to connect."
+
+    var needsVPNPermission: Bool {
+        vpnStatus == .disconnected && connectionError == Self.vpnPermissionError
+    }
+
     var canToggleConnection: Bool { vpnStatus != .disconnecting || connectionError != nil }
     var vpnOn: Bool { vpnStatus == .connected || vpnStatus == .connecting }
     @Published var vpnStatus: VpnStatus = VpnStatus.disconnected
@@ -19,9 +25,7 @@ class AppData: ObservableObject {
 
     @Published var connectionError: String?
 
-    #if os(macOS)
     @Published var isRecovering = false
-    #endif
 
     // Packet statistics (total)
     @Published var packetsSent: UInt64 = 0

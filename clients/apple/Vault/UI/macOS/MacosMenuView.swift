@@ -25,7 +25,6 @@ struct MacosMenuView: View {
     @EnvironmentObject var config: VaultConfig
     @EnvironmentObject var languageManager: LanguageManager
     @Environment(\.dismiss) private var dismiss
-    @State private var hoveringConnection = false
     @State private var pendingProfileSwitch: String?
     private enum Action: CaseIterable { case connection, settings, diagnostics, quit }
     @State private var focusedAction: Action?
@@ -41,7 +40,9 @@ struct MacosMenuView: View {
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(VaultTheme.textPrimary)
                 Spacer()
-                VaultStatusBadge(title: languageManager.tr(appData.macStatusTitle), active: active, failure: failed)
+                if !failed {
+                    VaultStatusBadge(title: languageManager.tr(appData.macStatusTitle), active: active)
+                }
             }
             Divider().overlay(VaultTheme.outline)
 
@@ -198,106 +199,41 @@ struct MacosMenuView: View {
     }
 
     private var connectionHero: some View {
-        ZStack {
+        VStack(spacing: 0) {
+            Text(languageManager.tr(appData.macStatusTitle))
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(active ? VaultTheme.heroText : VaultTheme.textSecondary)
+            connectionButton.padding(.top, active ? 8 : 16)
+
             if active {
-                RoundedRectangle(cornerRadius: 24, style: .continuous).fill(VaultTheme.heroGradient)
-                VaultHeroDecoration().clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                activeConnectionDetails
             } else {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(failed ? VaultTheme.failureSurface : VaultTheme.surfaceMuted)
+                inactiveConnectionDetails
             }
+
+            if !failed { featureBadge.padding(.top, active ? 8 : 12) }
+        }
+        .padding(.horizontal, active ? 10 : 20)
+        .padding(.top, active ? 16 : 20)
+        .padding(.bottom, active ? 10 : 20)
+        .frame(minHeight: active ? 190 : 286, alignment: .top)
+        .frame(maxWidth: .infinity)
+        .background {
             if active {
-                VStack(spacing: 0) {
-                    Text(languageManager.tr(appData.macStatusTitle))
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(VaultTheme.heroText)
-                    connectionButton.padding(.top, 8)
-                    if let since = appData.connectedSince,
-                       appData.vpnStatus == .connected || (appData.vpnStatus == .connecting && appData.isRecovering) {
-                        ConnectionDurationView(since: since)
-                            .font(.system(size: 24, weight: .light, design: .monospaced))
-                            .foregroundStyle(VaultTheme.heroText)
-                            .padding(.top, 6)
-                    }
-                    if appData.isRecovering {
-                        Text(languageManager.tr("Network changed. Reconnecting…"))
-                            .font(.system(size: 11))
-                            .foregroundStyle(VaultTheme.heroSecondary)
-                            .padding(.top, 4)
-                    } else if let error = appData.connectionError {
-                        Text(languageManager.tr(error))
-                            .font(.system(size: 11))
-                            .foregroundStyle(VaultTheme.heroSecondary)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 4)
-                    } else if let running = appData.runningProfileName {
-                        Text("\(running) · " + languageManager.tr("Tap to disconnect"))
-                            .font(.system(size: 11))
-                            .foregroundStyle(VaultTheme.heroSecondary)
-                            .padding(.top, 4)
-                    }
-                    featureBadge.padding(.top, 8)
-                }
-                .padding(10)
+                VaultHeroBackground()
             } else {
-                VStack(spacing: 0) {
-                    Text(languageManager.tr(appData.macStatusTitle))
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(failed ? VaultTheme.danger : VaultTheme.textSecondary)
-                    connectionIcon
-                        .frame(width: 64, height: 64)
-                        .padding(.top, 16)
-                    if !failed {
-                        Text(languageManager.tr("Establish an encrypted tunnel for secure access to your private network"))
-                            .font(.system(size: 11))
-                            .foregroundStyle(VaultTheme.textSecondary)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 12)
-                    }
-                    if let error = appData.connectionError {
-                        Text(languageManager.tr(error))
-                            .font(.system(size: 11))
-                            .foregroundStyle(VaultTheme.danger)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 6)
-                    }
-                    Button(action: toggleConnection) {
-                        Label(
-                            languageManager.tr(appData.connectionActionTitle),
-                            systemImage: failed ? "arrow.clockwise" : "power"
-                        )
-                    }
-                    .buttonStyle(VaultPrimaryButtonStyle())
-                    .frame(width: 140)
-                    .padding(.top, 12)
-                    .disabled(!appData.canToggleConnection)
-                    .help(languageManager.tr(appData.connectionActionTitle))
-                    .accessibilityLabel(languageManager.tr(appData.connectionActionTitle))
-                    .macosKeyboardAction(
-                        focus: $focusedAction,
-                        id: .connection,
-                        enabled: appData.canToggleConnection,
-                        action: toggleConnection
-                    )
-                    featureBadge.padding(.top, 12)
-                }
-                .padding(20)
+                VaultTheme.surfaceMuted
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: active ? 190 : 286)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(failed ? VaultTheme.failureOutline : (active ? Color.clear : VaultTheme.outline))
+                .strokeBorder(active ? Color.clear : VaultTheme.outline)
         }
     }
 
     private var featureBadge: some View {
-        Text(languageManager.tr(failed ? "Check the configuration, then retry" : "Encrypted tunnel · Auto reconnect"))
+        Text(languageManager.tr("Encrypted tunnel · Auto reconnect"))
             .font(.system(size: 10))
             .foregroundStyle(active ? VaultTheme.heroSecondary : VaultTheme.textSecondary)
             .padding(.horizontal, 12)
@@ -308,42 +244,53 @@ struct MacosMenuView: View {
             )
     }
 
-    private var connectionIcon: some View {
-        ZStack {
-            Circle()
-                .fill(VaultTheme.surface)
-                .overlay(Circle().strokeBorder(failed ? VaultTheme.failureOutline : (active ? Color.clear : VaultTheme.outline)))
-                .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
-            if appData.vpnStatus == .connecting || appData.vpnStatus == .disconnecting {
-                ProgressView().controlSize(.regular).tint(connectionColor)
-            } else {
-                Image(systemName: failed ? "exclamationmark" : "power")
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundStyle(failed ? VaultTheme.danger : connectionColor)
-            }
+    @ViewBuilder
+    private var activeConnectionDetails: some View {
+        if let since = appData.connectedSince,
+           appData.vpnStatus == .connected || (appData.vpnStatus == .connecting && appData.isRecovering) {
+            ConnectionDurationView(since: since)
+                .font(.system(size: 24, weight: .light, design: .monospaced))
+                .foregroundStyle(VaultTheme.heroText)
+                .padding(.top, 6)
+        }
+        if appData.isRecovering {
+            Text(languageManager.tr("Network changed. Reconnecting…"))
+                .font(.system(size: 11))
+                .foregroundStyle(VaultTheme.heroSecondary)
+                .padding(.top, 4)
+        } else if let error = appData.connectionError {
+            Text(languageManager.tr(error))
+                .font(.system(size: 11))
+                .foregroundStyle(VaultTheme.heroSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+        } else if let running = appData.runningProfileName {
+            Text("\(running) · " + languageManager.tr("Tap to disconnect"))
+                .font(.system(size: 11))
+                .foregroundStyle(VaultTheme.heroSecondary)
+                .padding(.top, 4)
         }
     }
 
-    private var connectionButton: some View {
+    @ViewBuilder
+    private var inactiveConnectionDetails: some View {
+        Text(languageManager.tr(appData.connectionError ??
+            "Establish an encrypted tunnel for secure access to your private network"))
+            .font(.system(size: 11))
+            .foregroundStyle(VaultTheme.textSecondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 12)
         Button(action: toggleConnection) {
-            connectionIcon
-                .frame(width: 56, height: 56)
-                .contentShape(.interaction, Circle())
+            Label(
+                languageManager.tr(appData.connectionActionTitle),
+                systemImage: failed && !appData.needsVPNPermission ? "arrow.clockwise" : "power"
+            )
         }
-        .buttonStyle(.plain)
-        .frame(width: 56, height: 56)
-        .contentShape(.interaction, Circle())
-        .onContinuousHover { phase in
-            switch phase {
-            case .active(let point):
-                let dx = point.x - 28
-                let dy = point.y - 28
-                hoveringConnection = dx * dx + dy * dy <= 28 * 28
-            case .ended:
-                hoveringConnection = false
-            }
-        }
-        .animation(.easeOut(duration: 0.15), value: hoveringConnection)
+        .buttonStyle(VaultPrimaryButtonStyle())
+        .frame(width: 140)
+        .padding(.top, 12)
         .disabled(!appData.canToggleConnection)
         .help(languageManager.tr(appData.connectionActionTitle))
         .accessibilityLabel(languageManager.tr(appData.connectionActionTitle))
@@ -351,17 +298,38 @@ struct MacosMenuView: View {
             focus: $focusedAction,
             id: .connection,
             enabled: appData.canToggleConnection,
-            circular: true,
             action: toggleConnection
         )
     }
 
-    private var connectionColor: Color {
-        if appData.isRecovering { return .orange }
-        switch appData.vpnStatus {
-        case .connected, .connecting: return VaultTheme.primary
-        case .disconnecting, .disconnected: return VaultTheme.textDisabled
+    private var connectionButton: some View {
+        let phase = VaultConnectionPhase(
+            status: appData.vpnStatus,
+            failed: failed,
+            permissionRequired: appData.needsVPNPermission,
+            recovering: appData.isRecovering
+        )
+        let enabled = active && appData.canToggleConnection
+        return Button(action: toggleConnection) {
+            VaultConnectionIcon(phase: phase, size: active ? 56 : 64, symbolSize: 28)
         }
+        .buttonStyle(VaultConnectionPressStyle(showsDisabledAppearance: active))
+        .contentShape(.interaction, Circle())
+        .disabled(!enabled)
+        .allowsHitTesting(active)
+        .help(languageManager.tr(appData.connectionActionTitle))
+        .accessibilityLabel(languageManager.tr(appData.connectionActionTitle))
+        .macosKeyboardAction(
+            focus: Binding(
+                get: { active ? focusedAction : nil },
+                set: { focusedAction = $0 }
+            ),
+            id: .connection,
+            enabled: enabled,
+            circular: true,
+            action: toggleConnection
+        )
+        .accessibilityHidden(!active)
     }
 
     private func footerLabel(_ title: String, symbol: String) -> some View {
@@ -383,7 +351,7 @@ struct MacosMenuView: View {
                     Divider().overlay(VaultTheme.outline)
                 }
                 if let ipv4 = addresses.ipv4 {
-                    VaultAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: Color(vaultHex: "2563EB"))
+                    VaultAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: VaultTheme.downlink)
                 }
                 if let ipv6 = addresses.ipv6 {
                     VaultAddressRow(title: "IPv6", address: ipv6, symbol: "server.rack")
@@ -401,7 +369,7 @@ struct MacosMenuView: View {
             )
             Divider().frame(height: 88).overlay(VaultTheme.outline)
             VaultTrafficColumn(
-                title: "Downlink", symbol: "arrow.down", color: Color(vaultHex: "2563EB"),
+                title: "Downlink", symbol: "arrow.down", color: VaultTheme.downlink,
                 packets: appData.packetsReceived, bytes: appData.bytesReceived, rate: appData.bytesReceivedPerSecond
             )
         }
@@ -433,6 +401,7 @@ struct MacosStatusAddressRow: View {
 extension AppData {
     var macStatusTitle: String {
         if isRecovering { return "Reconnecting" }
+        if needsVPNPermission { return "VPN permission required" }
         if connectionError != nil && vpnStatus == .disconnected { return "Connection failed" }
         return VpnStatusUtil.titleKey(for: vpnStatus)
     }
@@ -440,6 +409,7 @@ extension AppData {
     var macStatusColor: Color {
         if isRecovering { return .orange }
         if vpnStatus == .connected { return VaultTheme.primary }
+        if needsVPNPermission { return VaultTheme.connectionPermission }
         if connectionError != nil && vpnStatus == .disconnected { return VaultTheme.danger }
         return VaultTheme.textDisabled
     }

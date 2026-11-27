@@ -3,14 +3,14 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     style="@style/Widget.Vault.Card"
     android:layout_width="match_parent" android:layout_height="wrap_content"
-    android:layout_marginTop="12dp" android:clickable="true" android:focusable="true"
-    android:minHeight="68dp">
+    android:layout_marginTop="12dp" app:cardCornerRadius="18dp">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:padding="16dp">
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:gravity="center_vertical" android:orientation="horizontal">
-            <FrameLayout android:layout_width="26dp" android:layout_height="26dp"
-                android:background="@drawable/vault_bg_icon_tile" android:padding="5dp">
+        android:orientation="vertical" android:paddingHorizontal="16dp">
+        <LinearLayout android:id="@+id/checkHeader" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="center_vertical" android:orientation="horizontal" android:minHeight="68dp"
+            android:paddingVertical="10dp">
+            <FrameLayout android:id="@+id/checkStatusBadge" android:layout_width="26dp" android:layout_height="26dp"
+                android:background="@drawable/vault_bg_status_dot" android:padding="5dp">
                 <ImageView android:id="@+id/checkIcon" android:layout_width="match_parent"
                     android:layout_height="match_parent" android:importantForAccessibility="no"
                     android:src="@drawable/ic_check" app:tint="@color/vault_blue"/>
@@ -29,9 +29,12 @@
                 android:importantForAccessibility="no" android:src="@drawable/ic_chevron"
                 app:tint="@color/vault_text_disabled"/>
         </LinearLayout>
-        <TextView android:id="@+id/checkDetails" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="12dp"
-            android:fontFamily="monospace" android:textIsSelectable="true"
-            android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
+        <LinearLayout android:id="@+id/checkDetails" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+            <View android:layout_width="match_parent" android:layout_height="1dp"
+                android:background="@color/vault_outline" android:importantForAccessibility="no"/>
+            <LinearLayout android:id="@+id/checkProbeLines" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical" android:paddingVertical="8dp"/>
+        </LinearLayout>
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

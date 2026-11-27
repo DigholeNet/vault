@@ -9,6 +9,7 @@ import AppKit
 
 enum VaultTheme {
     static let primary = Color(vaultLight: "4F46E5", dark: "A5B4FC")
+    static let downlink = Color(vaultLight: "2563EB", dark: "7DA7FF")
     static let primaryDark = Color(vaultLight: "3730A3", dark: "C7D2FE")
     static let onPrimary = Color(vaultLight: "FFFFFF", dark: "1E1B4B")
     static let background = Color(vaultLight: "F6F7FB", dark: "0F1220")
@@ -20,11 +21,13 @@ enum VaultTheme {
     static let textSecondary = Color(vaultLight: "64748B", dark: "A7B0C2")
     static let textDisabled = Color(vaultLight: "8A96A8", dark: "8A96A8")
     static let outline = Color(vaultLight: "DEE2EC", dark: "30374E")
+    static let connectionPermission = Color(vaultLight: "A16207", dark: "FACC15")
     static let danger = Color(vaultLight: "DC4655", dark: "FDA4AF")
     static let failureSurface = Color(vaultLight: "FFF1F2", dark: "3B1D2A")
     static let failureOutline = Color(vaultLight: "FECDD3", dark: "6B2D3F")
     static let heroText = Color(vaultHex: "F8FAFF")
     static let heroSecondary = Color(vaultHex: "C7D2FE")
+    static let heroPower = Color(vaultHex: "4F46E5")
     static let heroGradient = LinearGradient(
         colors: [Color(vaultHex: "343B91"), Color(vaultHex: "18244D")],
         startPoint: .topLeading,
@@ -82,19 +85,39 @@ extension View {
     func vaultScreenBackground() -> some View {
         background(VaultTheme.background.ignoresSafeArea())
     }
+
+    func vaultLogClearConfirmation(isPresented: Binding<Bool>, onClear: @escaping () -> Void) -> some View {
+        modifier(VaultLogClearConfirmation(isPresented: isPresented, onClear: onClear))
+    }
+}
+
+private struct VaultLogClearConfirmation: ViewModifier {
+    @EnvironmentObject private var languageManager: LanguageManager
+    @Binding var isPresented: Bool
+    let onClear: () -> Void
+
+    func body(content: Content) -> some View {
+        content.alert(languageManager.tr("Clear runtime logs?"), isPresented: $isPresented) {
+            Button(languageManager.tr("Clear"), role: .destructive, action: onClear)
+            Button(languageManager.tr("Cancel"), role: .cancel) {}
+        } message: {
+            Text(languageManager.tr("This clears all runtime logs."))
+        }
+    }
 }
 
 struct VaultPageHeader: View {
     let title: String
     let subtitle: String
+    @ScaledMetric(relativeTo: .title) private var titleSize = 28.0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 28, weight: .bold))
+                .font(.system(size: titleSize, weight: .bold))
                 .foregroundStyle(VaultTheme.textPrimary)
             Text(subtitle)
-                .font(.system(size: 13))
+                .font(.footnote)
                 .foregroundStyle(VaultTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -106,6 +129,7 @@ struct VaultStatusBadge: View {
     let title: String
     var active = false
     var failure = false
+    @ScaledMetric(relativeTo: .caption) private var titleSize = 12.0
 
     var body: some View {
         HStack(spacing: 7) {
@@ -113,7 +137,8 @@ struct VaultStatusBadge: View {
                 .fill(failure ? VaultTheme.danger : (active ? VaultTheme.primary : VaultTheme.textDisabled))
                 .frame(width: 6, height: 6)
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: titleSize, weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
         }
         .foregroundStyle(failure ? VaultTheme.danger : (active ? VaultTheme.primaryDark : VaultTheme.textSecondary))
         .padding(.horizontal, 12)
@@ -152,7 +177,7 @@ struct VaultSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.system(size: 13, weight: .bold))
+                .font(.subheadline.bold())
                 .foregroundStyle(VaultTheme.textPrimary)
             content
         }
@@ -163,6 +188,8 @@ struct VaultSection<Content: View>: View {
 struct VaultInfoCallout: View {
     let title: String
     let detail: String
+    @ScaledMetric(relativeTo: .footnote) private var titleSize = 13.0
+    @ScaledMetric(relativeTo: .caption) private var detailSize = 12.0
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -170,8 +197,8 @@ struct VaultInfoCallout: View {
                 .foregroundStyle(VaultTheme.primary)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.system(size: 13, weight: .bold))
-                Text(detail).font(.system(size: 12)).foregroundStyle(VaultTheme.textSecondary)
+                Text(title).font(.system(size: titleSize, weight: .bold))
+                Text(detail).font(.system(size: detailSize)).foregroundStyle(VaultTheme.textSecondary)
             }
             .foregroundStyle(VaultTheme.primaryDark)
         }
@@ -183,6 +210,7 @@ struct VaultInfoCallout: View {
 
 struct VaultPrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -191,7 +219,7 @@ struct VaultPrimaryButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity, minHeight: 48)
             .background(VaultTheme.primary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .opacity(isEnabled ? (configuration.isPressed ? 0.78 : 1) : 0.45)
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
     }
 }
 
@@ -213,6 +241,7 @@ struct VaultAddressRow: View {
     let address: String
     let symbol: String
     var color: Color = VaultTheme.primary
+    @ScaledMetric(relativeTo: .caption) private var textSize = 12.0
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -222,11 +251,11 @@ struct VaultAddressRow: View {
                 .frame(width: 18)
                 .accessibilityHidden(true)
             Text(verbatim: title)
-                .font(.system(size: 12))
+                .font(.system(size: textSize))
                 .foregroundStyle(VaultTheme.textSecondary)
             Spacer(minLength: 8)
             Text(verbatim: address)
-                .font(.system(size: 12, design: .monospaced))
+                .font(.system(size: textSize, design: .monospaced))
                 .foregroundStyle(VaultTheme.textPrimary)
                 .multilineTextAlignment(.trailing)
                 .textSelection(.enabled)
@@ -242,34 +271,50 @@ struct VaultTrafficColumn: View {
     let bytes: UInt64
     let rate: UInt64
     @EnvironmentObject var languageManager: LanguageManager
+    @ScaledMetric(relativeTo: .body) private var rateSize = 17.0
+    @ScaledMetric(relativeTo: .caption) private var detailSize = 12.0
 
     var body: some View {
         VStack(spacing: 7) {
             HStack(spacing: 6) {
                 Image(systemName: symbol).foregroundStyle(color)
                 Text(languageManager.tr(title))
-                    .font(.system(size: 12))
+                    .font(.system(size: detailSize))
                     .foregroundStyle(VaultTheme.textSecondary)
             }
             Text(PacketStats.formatBytes(rate) + "/s")
-                .font(.system(size: 17, weight: .bold, design: .monospaced))
+                .font(.system(size: rateSize, weight: .bold, design: .monospaced))
                 .foregroundStyle(color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
             Text(PacketStats.formatBytes(bytes))
-                .font(.system(size: 11))
+                .font(.system(size: detailSize))
+                .monospacedDigit()
                 .foregroundStyle(VaultTheme.textSecondary)
             Text(languageManager.tr("Packets") + " \(packets)")
-                .font(.system(size: 10))
-                .foregroundStyle(VaultTheme.textDisabled)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .font(.system(size: detailSize))
+                .monospacedDigit()
+                .foregroundStyle(VaultTheme.textSecondary)
         }
+        .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
     }
 }
 
-struct VaultHeroDecoration: View {
+struct VaultHeroBackground: View {
+    var showsDecoration = true
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if colorScheme == .dark {
+            Color(vaultHex: "312E81")
+        } else {
+            VaultTheme.heroGradient.overlay {
+                if showsDecoration { VaultHeroDecoration() }
+            }
+        }
+    }
+}
+
+private struct VaultHeroDecoration: View {
     var body: some View {
         ZStack {
             Circle()

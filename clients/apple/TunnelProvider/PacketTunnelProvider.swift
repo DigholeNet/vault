@@ -180,7 +180,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         startTimeoutWorkItem = timeoutWorkItem
         DispatchQueue.main.asyncAfter(
-            deadline: .now() + TunnelConstants.startTimeout,
+            deadline: .now() + TunnelConstants.initialConnectionTimeout,
             execute: timeoutWorkItem
         )
         startNetworkMonitoring()

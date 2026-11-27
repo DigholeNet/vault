@@ -4,39 +4,74 @@ import VaultCore
 #if os(iOS)
 struct IosStatusView: View {
     var vpnManager: VpnManager
-    var onOpenDiagnostics: () -> Void = {}
+    var openNewProfile: () -> Void = {}
     @EnvironmentObject var appData: AppData
     @EnvironmentObject var config: VaultConfig
     @EnvironmentObject var languageManager: LanguageManager
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .title2) private var statusTitleSize = 21.0
+    @ScaledMetric(relativeTo: .title) private var durationSize = 28.0
+    @ScaledMetric(relativeTo: .body) private var actionSize = 15.0
+    @ScaledMetric(relativeTo: .caption) private var detailSize = 12.0
+    @ScaledMetric(relativeTo: .caption) private var badgeSize = 11.0
     @State private var pendingProfileSwitch: String?
 
     private var parsedIPs: (ipv4: String?, ipv6: String?) {
         appData.assignedIp.parsedIPv4AndIPv6()
     }
 
+    private var phase: VaultConnectionPhase {
+        VaultConnectionPhase(
+            status: appData.vpnStatus,
+            failed: appData.connectionError != nil,
+            permissionRequired: appData.needsVPNPermission,
+            recovering: appData.isRecovering
+        )
+    }
+
     private var active: Bool { appData.vpnStatus != .disconnected }
-    private var failed: Bool { appData.vpnStatus == .disconnected && appData.connectionError != nil }
+    private var noProfile: Bool { phase == .disconnected && config.profiles.isEmpty }
+    private var showsStatusBadge: Bool { phase != .failed && phase != .permissionRequired }
+    private var usesIndigoCard: Bool { phase == .connected || phase == .connecting || phase == .reconnecting }
     private var statusTitle: String {
-        failed ? languageManager.tr("Connection failed") : VpnStatusUtil.getStatus(appData.vpnStatus)
+        let key = switch phase {
+        case .disconnected: noProfile ? "No configuration" : "Disconnected"
+        case .connecting: "Connecting…"
+        case .connected: "VPN connected"
+        case .disconnecting: "Disconnecting…"
+        case .reconnecting: "Reconnecting"
+        case .failed: "Connection failed"
+        case .permissionRequired: "VPN permission required"
+        }
+        return languageManager.tr(key)
     }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                HStack(alignment: .center, spacing: 12) {
+                let headerLayout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                    : AnyLayout(HStackLayout(spacing: 12))
+                headerLayout {
                     VaultPageHeader(
                         title: "Vault",
                         subtitle: languageManager.tr("Private networking, made simple.")
                     )
-                    VaultStatusBadge(title: statusTitle, active: active, failure: failed)
+                    if showsStatusBadge {
+                        VaultStatusBadge(
+                            title: phase == .connected ? languageManager.tr("Running") : statusTitle,
+                            active: usesIndigoCard
+                        )
+                    }
                 }
 
-                if !active {
+                if !active && !noProfile {
                     profileSelector
                 }
                 connectionHero
 
-                if appData.vpnStatus == .disconnected && !failed {
+                if phase == .disconnected && !noProfile {
                     VaultInfoCallout(
                         title: languageManager.tr("Ready to connect"),
                         detail: languageManager
@@ -44,25 +79,7 @@ struct IosStatusView: View {
                                 "Review the server configuration, then tap the power button. Network details and live traffic appear after connecting."
                             )
                     )
-                } else if failed {
-                    Button(action: onOpenDiagnostics) {
-                        HStack(spacing: 12) {
-                            VaultIconTile(systemName: "waveform.path.ecg", size: 28)
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(languageManager.tr("Need to investigate further?"))
-                                    .font(.system(size: 12, weight: .bold))
-                                Text(languageManager.tr("Check the server address and network, or open Diagnostics."))
-                                    .font(.system(size: 10.5))
-                                    .foregroundStyle(VaultTheme.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .foregroundStyle(VaultTheme.textPrimary)
-                        .vaultCard(padding: 18, cornerRadius: 18)
-                    }
-                    .buttonStyle(.plain)
-                } else if appData.vpnStatus == .connected {
+                } else if phase == .connected {
                     networkDetails
                     traffic
                 }
@@ -94,84 +111,138 @@ struct IosStatusView: View {
         }
     }
 
+    private var connectionActionTitle: String {
+        switch phase {
+        case .disconnected: noProfile ? "Add Profile" : "Tap to connect"
+        case .connecting, .disconnecting: "Please wait…"
+        case .reconnecting, .connected: "Tap to disconnect"
+        case .failed: "Tap to retry"
+        case .permissionRequired: "Authorize VPN"
+        }
+    }
+
+    private var connectionDetail: String? {
+        switch phase {
+        case .disconnected:
+            noProfile ? languageManager.tr("No server configuration has been added.")
+                : config.selectedProfileName.map { languageManager.tr("Using profile: %@", $0) }
+        case .connecting: languageManager.tr("Establishing a secure tunnel")
+        case .disconnecting: languageManager.tr("Closing the secure tunnel")
+        case .reconnecting: languageManager.tr("Keeping the last connection data")
+        case .connected:
+            (appData.runningProfileName ?? vpnManager.activeProfileName)
+                .map { "\($0) · \(languageManager.tr(connectionActionTitle))" }
+                ?? languageManager.tr(connectionActionTitle)
+        case .failed, .permissionRequired:
+            appData.connectionError.map { languageManager.tr($0) }
+        }
+    }
+
     private var connectionHero: some View {
-        ZStack {
-            if active {
-                RoundedRectangle(cornerRadius: 28, style: .continuous).fill(VaultTheme.heroGradient)
-                VaultHeroDecoration().clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        VStack(spacing: 0) {
+            Text(statusTitle)
+                .font(.system(size: statusTitleSize, weight: .bold))
+                .foregroundStyle(usesIndigoCard ? VaultTheme.heroText : VaultTheme.textSecondary)
+
+            Button {
+                if noProfile { openNewProfile() }
+                else if phase == .disconnected || phase == .failed || phase == .permissionRequired { vpnManager.connect() }
+                else { vpnManager.disconnect() }
+            } label: {
+                statusIcon
+            }
+            .buttonStyle(VaultConnectionPressStyle(showsDisabledAppearance: false))
+            .disabled(phase == .disconnecting || !appData.canToggleConnection)
+            .accessibilityLabel(languageManager.tr(phase == .connecting ? "Cancel Connection" : connectionActionTitle))
+            .accessibilityIdentifier("vpn.connection")
+            .padding(.top, 36)
+
+            if phase == .connected {
+                ConnectionDurationView(
+                    since: appData.connectedSince ?? .now,
+                    size: durationSize,
+                    design: .monospaced,
+                    color: VaultTheme.heroText,
+                    verticalPadding: 0
+                )
+                .padding(.top, 17)
             } else {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(failed ? VaultTheme.failureSurface : VaultTheme.surfaceMuted)
+                Text(languageManager.tr(connectionActionTitle))
+                    .font(.system(size: actionSize, weight: .semibold))
+                    .foregroundStyle(usesIndigoCard ? VaultTheme.heroText : VaultTheme.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 21)
             }
-            VStack(spacing: 0) {
-                Text(statusTitle)
-                    .font(.system(size: 23, weight: .bold))
-                    .foregroundStyle(failed ? VaultTheme.danger : (active ? VaultTheme.heroText : VaultTheme.textSecondary))
 
-                Toggle("", isOn: Binding(
-                    get: { appData.vpnOn },
-                    set: { enabled in
-                        if enabled { vpnManager.connect() } else { vpnManager.disconnect() }
-                    }
-                ))
-                .toggleStyle(CustomToggleStyle(failure: failed))
-                .disabled(!appData.canToggleConnection)
-                .padding(.top, 12)
+            if let detail = connectionDetail {
+                Text(detail)
+                    .font(.system(size: detailSize))
+                    .foregroundStyle(usesIndigoCard ? VaultTheme.heroSecondary : VaultTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, phase == .connected ? 17 : 16)
+            }
 
-                if appData.vpnStatus == .connected, appData.vpnOn, let since = appData.connectedSince {
-                    ConnectionDurationView(since: since)
-                        .font(.system(size: 28, weight: .light, design: .monospaced))
-                        .foregroundStyle(VaultTheme.heroText)
-                        .padding(.top, 8)
-                }
-
-                if !active {
-                    Text(languageManager.tr(failed ? "Retry" : "Tap to connect"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(VaultTheme.primary)
-                        .padding(.top, 10)
-                }
-
-                if let error = appData.connectionError {
-                    Text(languageManager.tr(error))
-                        .font(.system(size: 12))
-                        .foregroundStyle(failed ? VaultTheme.danger : (active ? VaultTheme.heroSecondary : VaultTheme.textSecondary))
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                } else if let running = appData.runningProfileName, active {
-                    Text("\(running) · " + languageManager.tr("Tap to disconnect"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(VaultTheme.heroSecondary)
-                        .padding(.top, 6)
-                } else if let target = appData.switchingProfileName {
-                    Text(languageManager.tr("Switching to") + " \(target)")
-                        .font(.system(size: 12))
-                        .foregroundStyle(VaultTheme.heroSecondary)
-                        .padding(.top, 6)
-                }
-
-                Text(languageManager.tr(failed ? "Check the configuration, then retry" : "Encrypted tunnel · Auto reconnect"))
-                    .font(.system(size: 10))
-                    .foregroundStyle(active ? VaultTheme.heroSecondary : VaultTheme.textSecondary)
+            if phase == .connected || (phase == .disconnected && !noProfile) {
+                Text(languageManager.tr("Encrypted tunnel · Auto reconnect"))
+                    .font(.system(size: badgeSize))
+                    .foregroundStyle(usesIndigoCard ? VaultTheme.heroSecondary : VaultTheme.textSecondary)
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(
-                        (active ? Color.white.opacity(0.09) : VaultTheme.surfaceSubtle),
-                        in: Capsule()
-                    )
-                    .padding(.top, 10)
+                    .padding(.vertical, 8)
+                    .frame(minWidth: 156, minHeight: 32)
+                    .background(usesIndigoCard ? Color.white.opacity(0.09) : VaultTheme.surfaceSubtle, in: Capsule())
+                    .padding(.top, phase == .connected ? 24 : 22)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, active ? 12 : 24)
+
+            if phase == .reconnecting {
+                recoveryDetails.padding(.top, 16)
+            }
         }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 20)
+        .padding(.top, 27)
+        .padding(.bottom, 28)
         .frame(maxWidth: .infinity)
-        .frame(height: active ? 258 : 286)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .strokeBorder(failed ? VaultTheme.failureOutline : (active ? Color.clear : VaultTheme.outline), lineWidth: 1)
+        .frame(minHeight: 356, alignment: .top)
+        .background {
+            if phase == .connected { VaultHeroBackground(showsDecoration: false) }
+            else if usesIndigoCard { Color(vaultHex: "312E81") }
+            else { VaultTheme.surfaceMuted }
         }
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24)
+                .strokeBorder(usesIndigoCard ? Color.clear : VaultTheme.outline, lineWidth: 1)
+        }
+    }
+
+    private var statusIcon: some View {
+        VaultConnectionIcon(
+            phase: phase,
+            size: 92,
+            symbolSize: 46,
+            fill: usesIndigoCard ? VaultTheme.heroText
+                : (colorScheme == .dark ? Color(vaultHex: "2A3045") : VaultTheme.surface),
+            glyphColor: phase == .connected ? VaultTheme.heroPower : nil,
+            showsAddSymbol: noProfile,
+            showsProgressRing: true
+        )
+    }
+
+    private var recoveryDetails: some View {
+        let addresses = [parsedIPs.ipv4.map { "IPv4  \($0)" }, parsedIPs.ipv6.map { "IPv6  \($0)" }].compactMap { $0 }
+        let up = PacketStats.formatBytes(appData.bytesSentPerSecond) + "/s"
+        let down = PacketStats.formatBytes(appData.bytesReceivedPerSecond) + "/s"
+        return VStack(alignment: .leading, spacing: 4) {
+            if !addresses.isEmpty { Text(addresses.joined(separator: " · ")).monospaced() }
+            Text(languageManager.tr("Uplink") + " \(up) · " + languageManager.tr("Downlink") + " \(down)")
+        }
+        .font(.system(size: badgeSize))
+        .foregroundStyle(VaultTheme.heroSecondary)
+        .multilineTextAlignment(.leading)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .frame(idealWidth: 284, maxWidth: 284, minHeight: 48, alignment: .leading)
+        .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
@@ -187,7 +258,7 @@ struct IosStatusView: View {
                         Divider().overlay(VaultTheme.outline)
                     }
                     if let ipv4 = ips.ipv4 {
-                        VaultAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: Color(vaultHex: "2563EB"))
+                        VaultAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: VaultTheme.downlink)
                     }
                     if let ipv6 = ips.ipv6 {
                         VaultAddressRow(title: "IPv6", address: ipv6, symbol: "server.rack")
@@ -199,15 +270,19 @@ struct IosStatusView: View {
 
     private var traffic: some View {
         VaultSection(languageManager.tr("Live traffic")) {
-            HStack(spacing: 0) {
+            let stacked = dynamicTypeSize.isAccessibilitySize
+            let layout = stacked ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 0))
+            layout {
                 VaultTrafficColumn(
                     title: "Uplink", symbol: "arrow.up", color: VaultTheme.primary,
                     packets: appData.packetsSent, bytes: appData.bytesSent,
                     rate: appData.bytesSentPerSecond
                 )
-                Divider().frame(height: 92).overlay(VaultTheme.outline)
+                Rectangle()
+                    .fill(VaultTheme.outline)
+                    .frame(width: stacked ? nil : 1, height: stacked ? 1 : 92)
                 VaultTrafficColumn(
-                    title: "Downlink", symbol: "arrow.down", color: Color(vaultHex: "2563EB"),
+                    title: "Downlink", symbol: "arrow.down", color: VaultTheme.downlink,
                     packets: appData.packetsReceived, bytes: appData.bytesReceived,
                     rate: appData.bytesReceivedPerSecond
                 )
@@ -222,7 +297,7 @@ struct IosStatusView: View {
                 HStack(spacing: 12) {
                     VaultIconTile(systemName: "plus")
                     Text(languageManager.tr("Add Profile"))
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(VaultTheme.textPrimary)
                     Spacer()
                     Image(systemName: "chevron.right").foregroundStyle(VaultTheme.textDisabled)
@@ -253,13 +328,13 @@ struct IosStatusView: View {
                         .foregroundStyle(VaultTheme.primary)
                         .frame(width: 24)
                     Text(config.selectedProfileName ?? languageManager.tr("Add Profile"))
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(VaultTheme.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     Text(languageManager.tr("Switch Profile"))
-                        .font(.system(size: 11))
-                        .foregroundStyle(VaultTheme.textDisabled)
+                        .font(.caption)
+                        .foregroundStyle(VaultTheme.textSecondary)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11))
                         .foregroundStyle(VaultTheme.textDisabled)
@@ -275,41 +350,6 @@ struct IosStatusView: View {
             .buttonStyle(.plain)
             .disabled(appData.switchingProfileName != nil || appData.vpnStatus == .disconnecting)
         }
-    }
-}
-
-struct CustomToggleStyle: ToggleStyle {
-    var failure = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        Button(action: { configuration.isOn.toggle() }) {
-            Image(systemName: failure ? "exclamationmark" : "power")
-                .font(.system(size: 38, weight: .medium))
-                .foregroundStyle(failure ? VaultTheme.danger : (configuration.isOn ? VaultTheme.primary : VaultTheme.textDisabled))
-                .frame(width: 94, height: 94)
-                .background(VaultTheme.surface, in: Circle())
-                .overlay {
-                    Circle().strokeBorder(failure ? VaultTheme.failureOutline : (configuration.isOn ? Color.clear : VaultTheme.outline))
-                }
-                .contentShape(Circle())
-        }
-        .accessibilityLabel(LanguageManager.shared.tr(failure ? "Retry" : (configuration.isOn ? "Disconnect" : "Connect")))
-        .accessibilityIdentifier("vpn.connection")
-        .buttonStyle(ConnectionIconButtonStyle())
-        .frame(width: 94, height: 94)
-    }
-}
-
-private struct ConnectionIconButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .shadow(
-                color: .black.opacity(configuration.isPressed ? 0.04 : 0.08),
-                radius: configuration.isPressed ? 2 : 6,
-                y: configuration.isPressed ? 1 : 3
-            )
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }
 

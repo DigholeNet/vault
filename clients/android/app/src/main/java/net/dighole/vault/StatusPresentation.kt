@@ -31,6 +31,7 @@ internal class ConnectionClock {
 internal data class VpnUiState(
     val isConnected: Boolean = false,
     val isConnecting: Boolean = false,
+    val isDisconnecting: Boolean = false,
     val ipv4: String = "",
     val ipv6: String = "",
     val publicIp: String = ""
@@ -44,7 +45,8 @@ internal data class VpnUiState(
             publicIp = event.publicIp
         )
         // A reconnecting service remains available to disconnect, and keeps its assigned addresses.
-        is VpnStatusEvent.Reconnecting -> copy(isConnected = true, isConnecting = true)
+        is VpnStatusEvent.Reconnecting -> copy(isConnected = true, isConnecting = true, isDisconnecting = false)
+        is VpnStatusEvent.Disconnecting -> VpnUiState(isDisconnecting = true)
         is VpnStatusEvent.Disconnected, is VpnStatusEvent.Error -> VpnUiState()
         is VpnStatusEvent.TrafficStats -> this
     }

@@ -3,19 +3,27 @@ package net.dighole.vault
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.res.ColorStateList
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import kotlin.math.roundToInt
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.view.doOnPreDraw
 import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -36,6 +44,7 @@ class DiagnosticsFragment : Fragment() {
     private var tab = 0
     private var logText = ""
     private var logUpdates: Job? = null
+    private var logCopyFeedback: Job? = null
     private val logMutex = Mutex()
     private var clearingLogs = false
     private var logsRendered = false
@@ -61,6 +70,7 @@ class DiagnosticsFragment : Fragment() {
             view.findViewById<TextView>(R.id.tabRuntimeLogs)
         )
         fun selectDiagnosticTab(index: Int) {
+            if (index != tab) (activity as? MainActivity)?.dismissInputKeyboard()
             tab = index
             tabViews.forEachIndexed { position, textView ->
                 val selected = position == tab
@@ -79,11 +89,8 @@ class DiagnosticsFragment : Fragment() {
         selectDiagnosticTab(tab.coerceIn(0, tabViews.lastIndex))
         bindProbeDomains(view, state)
         view.findViewById<MaterialButton>(R.id.btnRunChecks).setOnClickListener { runChecks() }
-        view.findViewById<MaterialButton>(R.id.btnClearLogs).setOnClickListener { clearLogs() }
-        view.findViewById<MaterialButton>(R.id.btnCopyLogs).setOnClickListener {
-            requireContext().getSystemService(ClipboardManager::class.java)
-                .setPrimaryClip(ClipData.newPlainText(getString(R.string.runtime_logs), logText))
-        }
+        view.findViewById<MaterialButton>(R.id.btnClearLogs).setOnClickListener { confirmClearLogs() }
+        view.findViewById<MaterialButton>(R.id.btnCopyLogs).setOnClickListener { copyLogs() }
         viewLifecycleOwner.lifecycleScope.launch {
             (requireContext().applicationContext as VaultApplication).vpnStatusEvents.collect {
                 if (it !is VpnStatusEvent.TrafficStats) {
@@ -109,7 +116,15 @@ class DiagnosticsFragment : Fragment() {
     }
 
     private fun bindProbeDomains(view: View, state: Bundle?) {
-        view.findViewById<EditText>(R.id.edtDiagnosticDomains).doAfterTextChanged {
+        val field = view.findViewById<EditText>(R.id.edtDiagnosticDomains)
+        (activity as? MainActivity)?.dismissKeyboardOnDone(field)
+        view.findViewById<View>(R.id.probeDomainsField).setOnClickListener {
+            if (field.isEnabled && field.requestFocus()) {
+                field.context.getSystemService(InputMethodManager::class.java)
+                    .showSoftInput(field, InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
+        field.doAfterTextChanged {
             if (!loadingProbeDomains) {
                 view.findViewById<TextView>(R.id.tvProbeStatus).visibility = View.GONE
                 updateProbeValidation()
@@ -143,8 +158,15 @@ class DiagnosticsFragment : Fragment() {
         val valid = SettingsValidation.domains(value.trim())
         val stored = storedProbeDomains
         root.findViewById<EditText>(R.id.edtDiagnosticDomains).isEnabled = stored != null && !savingProbeDomains
-        root.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.probeDomainsLayout).error =
-            if (valid) null else getString(R.string.error_probe)
+        root.findViewById<TextView>(R.id.tvProbeHelp).apply {
+            setText(if (valid) R.string.probe_help else R.string.error_probe)
+            setTextColor(context.getColor(if (valid) R.color.vault_text_secondary else R.color.vault_danger))
+        }
+        val outline = if (valid) R.color.vault_diagnostic_field_outline else R.color.vault_danger
+        val field = root.findViewById<View>(R.id.probeDomainsField)
+        (field.background.mutate() as GradientDrawable).setStroke(
+            resources.displayMetrics.density.roundToInt().coerceAtLeast(1), root.context.getColor(outline)
+        )
         root.findViewById<MaterialButton>(R.id.btnSaveProbeDomains).isEnabled =
             stored != null && !savingProbeDomains && valid && value.trim() != stored
     }
@@ -153,6 +175,7 @@ class DiagnosticsFragment : Fragment() {
         val root = view ?: return
         val value = root.findViewById<EditText>(R.id.edtDiagnosticDomains).text.toString().trim()
         if (!SettingsValidation.domains(value) || savingProbeDomains) return
+        (activity as? MainActivity)?.dismissInputKeyboard()
         savingProbeDomains = true
         updateProbeValidation()
         viewLifecycleOwner.lifecycleScope.launch {
@@ -188,20 +211,10 @@ class DiagnosticsFragment : Fragment() {
         val snapshot = state.snapshot
         root.findViewById<View>(R.id.checksPanel).visibility = if (tab == 0) View.VISIBLE else View.GONE
         root.findViewById<View>(R.id.logsPanel).visibility = if (tab == 1) View.VISIBLE else View.GONE
-        root.findViewById<TextView>(R.id.tvDiagnosticSummary).apply {
-            setText(if (!state.running && snapshot == null && !connected()) R.string.checks_disconnected else state.header)
-            visibility = if (!state.running && snapshot == null && connected()) View.GONE else View.VISIBLE
-        }
-        root.findViewById<MaterialButton>(R.id.btnRunChecks).apply {
-            isEnabled = !state.running
-            setText(if (state.startedAt == 0L) R.string.run_checks else R.string.run_again)
-        }
-        root.findViewById<View>(R.id.diagnosticProgress).visibility = if (state.running) View.VISIBLE else View.GONE
-        root.findViewById<TextView>(R.id.tvDiagnosticElapsed).apply {
-            visibility = if (state.startedAt > 0) View.VISIBLE else View.GONE
-            text = getString(R.string.elapsed, state.elapsedMs)
-        }
+        renderSummary(root, state, connected())
         renderRows(root, state)
+        root.findViewById<View>(R.id.tvDiagnosticPingNote).visibility =
+            if (snapshot == null) View.GONE else View.VISIBLE
         root.findViewById<TextView>(R.id.tvDiagnosticDetails).apply {
             val details = (listOfNotNull(state.error) + snapshot?.routeIssues.orEmpty() + snapshot?.routeUnavailable.orEmpty())
                 .joinToString("\n")
@@ -210,64 +223,187 @@ class DiagnosticsFragment : Fragment() {
         }
     }
 
-    private fun renderRows(root: View, state: DiagnosticsState) {
-        val snapshot = state.snapshot
-        val rows = root.findViewById<LinearLayout>(R.id.diagnosticRows)
-        rows.removeAllViews()
-        labels.filter { snapshot == null || it.key in snapshot.plannedChecks }.forEach { (stage, label) ->
-            val check = snapshot?.checks?.firstOrNull { it.stage == stage }
-            val active = state.running && snapshot?.activeStage == stage && check == null
-            val summary = when {
-                active -> getString(R.string.checking)
-                check == null || check.attempted == 0u -> getString(R.string.not_measured)
-                else -> symbol(check.state) + " " + getString(R.string.probe_detail,
-                    check.passed.toLong(), check.attempted.toLong(),
-                    if (check.sampleCount > 0u) "${check.durationMs} ms" else "—")
-            }
-            val details = snapshot?.probes.orEmpty().filter { it.request.stage == stage }.joinToString("\n\n", transform = ::probeDetail)
-            addRow(rows, stage.name, getString(label), summary, details)
+    private fun renderSummary(root: View, state: DiagnosticsState, connected: Boolean) {
+        val idle = state.startedAt == 0L
+        val passed = state.header == R.string.checks_passed
+        val warning = !idle && !state.running && !passed
+        val tint = when {
+            idle -> R.color.vault_text_secondary
+            warning -> R.color.vault_diagnostic_warning
+            else -> R.color.vault_blue_dark
         }
-        snapshot?.domainStates?.forEach { domain ->
-            val details = snapshot.probes.filter { it.request.domain == domain.domain }
-                .joinToString("\n\n", transform = ::probeDetail)
-            addRow(rows, domain.domain, domain.domain, symbol(domain.state), details)
+        val surface = when {
+            idle -> R.color.vault_surface_subtle
+            warning -> R.color.vault_diagnostic_warning_surface
+            else -> R.color.vault_indigo_soft
         }
-    }
-
-    private fun symbol(state: DiagnosticState): String = when (state) {
-        DiagnosticState.PASSED -> "✓"
-        DiagnosticState.FAILED -> "!"
-        DiagnosticState.INCOMPLETE -> "—"
-    }
-
-    private fun addRow(rows: LinearLayout, key: String, title: String, summary: String, details: String) {
-        val row = layoutInflater.inflate(R.layout.diagnostic_row, rows, false)
-        row.findViewById<TextView>(R.id.checkTitle).text = title
-        row.findViewById<TextView>(R.id.checkSummary).text = summary
-        row.findViewById<android.widget.ImageView>(R.id.checkIcon).apply {
-            setImageResource(if (summary.startsWith("✓")) R.drawable.ic_check else R.drawable.ic_info)
-            imageTintList = android.content.res.ColorStateList.valueOf(
-                androidx.core.content.ContextCompat.getColor(
-                    requireContext(),
-                    if (summary.startsWith("✓")) R.color.vault_blue else R.color.vault_text_disabled
-                )
+        root.findViewById<MaterialCardView>(R.id.diagnosticSummaryCard).apply {
+            visibility = if (idle && connected) View.GONE else View.VISIBLE
+            setCardBackgroundColor(context.getColor(surface))
+        }
+        root.findViewById<TextView>(R.id.tvDiagnosticSummary).apply {
+            setText(if (idle) R.string.diagnostic_offline_title else state.header)
+            setTextColor(context.getColor(tint))
+        }
+        root.findViewById<ImageView>(R.id.diagnosticSummaryIcon).apply {
+            setImageResource(when {
+                passed -> R.drawable.ic_check
+                state.running -> R.drawable.ic_diagnostics
+                else -> R.drawable.ic_info
+            })
+            val iconTint = if (passed) R.color.vault_on_primary else tint
+            imageTintList = ColorStateList.valueOf(context.getColor(iconTint))
+            backgroundTintList = ColorStateList.valueOf(
+                if (passed) context.getColor(R.color.vault_blue) else android.graphics.Color.TRANSPARENT
             )
         }
-        row.findViewById<TextView>(R.id.checkDetails).apply {
-            text = details
-            visibility = if (key in expanded) View.VISIBLE else View.GONE
+        bindSummaryProgress(root, state, idle, warning)
+        renderRunButton(root, state.running, idle, connected)
+    }
+
+    private fun renderRunButton(root: View, running: Boolean, idle: Boolean, connected: Boolean) {
+        root.findViewById<MaterialButton>(R.id.btnRunChecks).apply {
+            isEnabled = !running
+            val surfaceColor = if (running) R.color.vault_indigo_soft else R.color.vault_blue
+            val contentColor = if (running) R.color.vault_blue_dark else R.color.vault_on_primary
+            backgroundTintList = ColorStateList.valueOf(context.getColor(surfaceColor))
+            iconTint = ColorStateList.valueOf(context.getColor(contentColor))
+            setTextColor(context.getColor(contentColor))
+            setText(when {
+                running -> R.string.checking
+                !idle -> R.string.run_again
+                connected -> R.string.run_checks
+                else -> R.string.diagnostic_start_direct
+            })
         }
-        row.findViewById<android.widget.ImageView>(R.id.checkChevron).apply {
-            visibility = if (details.isEmpty()) View.GONE else View.VISIBLE
-            rotation = if (key in expanded) 90f else 0f
+    }
+
+    private fun bindSummaryProgress(root: View, state: DiagnosticsState, idle: Boolean, warning: Boolean) {
+        val snapshot = state.snapshot
+        val count = snapshot?.plannedChecks?.size ?: 0
+        val textColor = when {
+            warning -> R.color.vault_diagnostic_warning
+            state.running -> R.color.vault_blue
+            else -> R.color.vault_text_secondary
         }
-        row.setOnClickListener {
-            if (details.isEmpty()) return@setOnClickListener
-            if (key in expanded) expanded.remove(key) else expanded.add(key)
-            row.findViewById<TextView>(R.id.checkDetails).visibility = if (key in expanded) View.VISIBLE else View.GONE
-            row.findViewById<android.widget.ImageView>(R.id.checkChevron).rotation = if (key in expanded) 90f else 0f
+        root.findViewById<TextView>(R.id.tvDiagnosticElapsed).apply {
+            text = when {
+                idle -> getString(R.string.diagnostic_offline_detail)
+                state.running -> getString(R.string.elapsed, android.os.SystemClock.elapsedRealtime() - state.startedAt)
+                snapshot == null -> ""
+                warning -> getString(R.string.diagnostic_summary_partial,
+                    snapshot.checks.count { it.state == DiagnosticState.PASSED }, count,
+                    snapshot.checks.count { it.state == DiagnosticState.FAILED })
+                else -> getString(R.string.diagnostic_summary_success, count, state.elapsedMs / 1000.0)
+            }
+            visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+            setTextColor(context.getColor(textColor))
         }
+        root.findViewById<LinearProgressIndicator>(R.id.diagnosticProgress).apply {
+            visibility = if (state.running && count > 0) View.VISIBLE else View.GONE
+            max = count.coerceAtLeast(1)
+            progress = snapshot?.checks?.size ?: 0
+        }
+    }
+
+    private data class ResultRow(
+        val key: String,
+        val title: String,
+        val summary: String,
+        val state: DiagnosticState?,
+        val probes: List<DiagnosticProbe>
+    )
+
+    private fun renderRows(root: View, state: DiagnosticsState) {
+        val rows = root.findViewById<LinearLayout>(R.id.diagnosticRows)
+        rows.removeAllViews()
+        val snapshot = state.snapshot ?: return
+        val probesByStage = snapshot.probes.groupBy { it.request.stage }
+        labels.filter { it.key in snapshot.plannedChecks }.forEach { (stage, label) ->
+            val check = snapshot.checks.firstOrNull { it.stage == stage }
+            val summary = when {
+                state.running && snapshot.activeStage == stage && check == null -> getString(R.string.checking)
+                check == null || check.attempted == 0u -> getString(R.string.not_measured)
+                else -> getString(R.string.probe_detail, check.passed.toLong(), check.attempted.toLong(),
+                    if (check.sampleCount > 0u) "${check.durationMs} ms" else "—")
+            }
+            addRow(rows, ResultRow(stage.name, getString(label), summary, check?.state, probesByStage[stage].orEmpty()))
+        }
+        if (!state.running) {
+            val probesByDomain = snapshot.probes.groupBy { it.request.domain }
+            snapshot.domainStates.forEach { domain ->
+                val label = when (domain.state) {
+                    DiagnosticState.PASSED -> R.string.diagnostic_row_passed
+                    DiagnosticState.FAILED -> R.string.diagnostic_row_failed
+                    DiagnosticState.INCOMPLETE -> R.string.not_measured
+                }
+                addRow(rows, ResultRow(domain.domain, domain.domain, getString(label), domain.state,
+                    probesByDomain[domain.domain].orEmpty()))
+            }
+        }
+    }
+
+    private fun addRow(rows: LinearLayout, result: ResultRow) {
+        val row = layoutInflater.inflate(R.layout.diagnostic_row, rows, false) as MaterialCardView
+        row.findViewById<TextView>(R.id.checkTitle).text = result.title
+        row.findViewById<TextView>(R.id.checkSummary).apply {
+            text = result.summary
+            setTextColor(context.getColor(rowTint(result.state)))
+        }
+        val canExpand = result.probes.isNotEmpty()
+        row.findViewById<View>(R.id.checkChevron).visibility = if (canExpand) View.VISIBLE else View.GONE
+        if (canExpand) {
+            row.findViewById<View>(R.id.checkHeader).apply {
+                isFocusable = true
+                setOnClickListener {
+                    if (!expanded.add(result.key)) expanded.remove(result.key)
+                    bindRowExpansion(row, result)
+                }
+            }
+        }
+        bindRowExpansion(row, result)
         rows.addView(row)
+    }
+
+    private fun rowTint(state: DiagnosticState?): Int = when (state) {
+        DiagnosticState.PASSED -> R.color.vault_blue
+        DiagnosticState.FAILED -> R.color.vault_diagnostic_warning
+        else -> R.color.vault_text_secondary
+    }
+
+    private fun bindRowExpansion(row: MaterialCardView, result: ResultRow) {
+        val isExpanded = result.probes.isNotEmpty() && result.key in expanded
+        row.strokeColor = row.context.getColor(if (isExpanded) R.color.vault_diagnostic_expanded_outline else R.color.vault_outline)
+        row.findViewById<View>(R.id.checkHeader).stateDescription = if (result.probes.isEmpty()) null else
+            getString(if (isExpanded) R.string.diagnostic_expanded else R.string.diagnostic_collapsed)
+        row.findViewById<View>(R.id.checkChevron).rotation = if (isExpanded) 90f else 0f
+        val passed = result.state == DiagnosticState.PASSED
+        val badge = when {
+            passed && isExpanded -> R.color.vault_blue
+            passed -> R.color.vault_indigo_soft
+            else -> R.color.vault_surface_subtle
+        }
+        row.findViewById<View>(R.id.checkStatusBadge).backgroundTintList = ColorStateList.valueOf(row.context.getColor(badge))
+        row.findViewById<ImageView>(R.id.checkIcon).apply {
+            setImageResource(if (passed) R.drawable.ic_check else R.drawable.ic_info)
+            imageTintList = ColorStateList.valueOf(context.getColor(
+                if (passed && isExpanded) R.color.vault_on_primary else rowTint(result.state)))
+        }
+        row.findViewById<View>(R.id.checkDetails).visibility = if (isExpanded) View.VISIBLE else View.GONE
+        val details = row.findViewById<LinearLayout>(R.id.checkProbeLines)
+        if (isExpanded && details.childCount == 0) {
+            result.probes.forEach { probe ->
+                addProbeLine(details, probeDetail(probe), probe.durationMs)
+                probe.tlsDurationMs?.let { addProbeLine(details, getString(R.string.diagnostic_tls_handshake), it) }
+            }
+        }
+    }
+
+    private fun addProbeLine(details: LinearLayout, label: String, duration: ULong) {
+        val line = layoutInflater.inflate(R.layout.diagnostic_probe_line, details, false)
+        line.findViewById<TextView>(R.id.probeLineLabel).text = label
+        line.findViewById<TextView>(R.id.probeLineTime).text = "$duration ms"
+        details.addView(line)
     }
 
     private fun probeDetail(probe: DiagnosticProbe): String {
@@ -278,12 +414,35 @@ class DiagnosticsFragment : Fragment() {
             is DiagnosticOperation.Ping -> "${operation.address} seq=${operation.sequence} size=${operation.packetSize} · "
             DiagnosticOperation.Route -> ""
         }
-        val tls = probe.tlsDurationMs?.let { "\nTLS $it ms" }.orEmpty()
-        return "${probe.request.domain} · ${probe.durationMs} ms\n$target${probe.detail}$tls"
+        return "${probe.request.domain} · $target${probe.detail}"
     }
 
     private fun runChecks() {
+        (activity as? MainActivity)?.dismissInputKeyboard()
+        expanded.clear()
         model.run(requireContext())
+    }
+
+    private fun copyLogs() {
+        val root = view ?: return
+        requireContext().getSystemService(ClipboardManager::class.java)
+            .setPrimaryClip(ClipData.newPlainText(getString(R.string.runtime_logs), logText))
+        val hint = root.findViewById<TextView>(R.id.tvLogHint)
+        hint.setText(R.string.diagnostic_logs_copied)
+        hint.setTextColor(root.context.getColor(R.color.vault_blue))
+        logCopyFeedback?.cancel()
+        logCopyFeedback = viewLifecycleOwner.lifecycleScope.launch {
+            delay(2000)
+            hint.setText(R.string.log_selection_hint)
+            hint.setTextColor(root.context.getColor(R.color.vault_text_secondary))
+        }
+    }
+
+    private fun showLogState(root: View, message: Int?, loading: Boolean = false) {
+        root.findViewById<View>(R.id.logState).visibility = if (message == null) View.GONE else View.VISIBLE
+        root.findViewById<View>(R.id.logScroll).visibility = if (message == null) View.VISIBLE else View.INVISIBLE
+        root.findViewById<View>(R.id.logProgress).visibility = if (loading) View.VISIBLE else View.GONE
+        if (message != null) root.findViewById<TextView>(R.id.tvLogState).setText(message)
     }
 
     /** Poll only while the log tab is visible; unchanged content never resets selection or scroll. */
@@ -292,6 +451,7 @@ class DiagnosticsFragment : Fragment() {
         if (!visible) { logUpdates?.cancel(); logUpdates = null; return }
         if (logUpdates?.isActive == true) return
         logsRendered = false
+        if (logText.isEmpty()) view?.let { showLogState(it, R.string.diagnostic_logs_loading, loading = true) }
         logUpdates = viewLifecycleOwner.lifecycleScope.launch {
             while (isActive) {
                 refreshLogs(false)
@@ -307,11 +467,12 @@ class DiagnosticsFragment : Fragment() {
             val text = root.findViewById<TextView>(R.id.tvLogs)
             if (!clear && text.selectionStart >= 0 && text.selectionEnd > text.selectionStart) return@withLock
             val scroll = root.findViewById<android.widget.ScrollView>(R.id.logScroll)
+            showLogState(root, if (content.isEmpty()) R.string.no_logs else null)
             val followTail = clear || !logsRendered || !scroll.canScrollVertically(1)
             val previousY = scroll.scrollY
             if (content != logText || !logsRendered) {
                 logText = content
-                text.text = content.ifEmpty { getString(R.string.no_logs) }
+                text.text = content
                 logsRendered = true
                 // Apply the final offset after layout and focus restoration. fullScroll
                 // also changes focus, which can reveal the selectable text's start again.
@@ -326,15 +487,28 @@ class DiagnosticsFragment : Fragment() {
         } catch (cancelled: CancellationException) { throw cancelled
         } catch (_: Exception) {
             logsRendered = false
-            view?.findViewById<TextView>(R.id.tvLogs)?.setText(R.string.logs_failed)
-            view?.findViewById<MaterialButton>(R.id.btnCopyLogs)?.isEnabled = false
+            view?.let {
+                showLogState(it, R.string.logs_failed)
+                it.findViewById<MaterialButton>(R.id.btnCopyLogs).isEnabled = false
+                it.findViewById<MaterialButton>(R.id.btnClearLogs).isEnabled = false
+            }
         }
+    }
+
+    private fun confirmClearLogs() {
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.clear_runtime_logs_title)
+            .setMessage(R.string.clear_runtime_logs_message)
+            .setNegativeButton(R.string.cancel_description, null)
+            .setPositiveButton(R.string.clear) { _, _ -> clearLogs() }
+            .show()
     }
 
     private fun clearLogs() {
         if (clearingLogs) return
         clearingLogs = true
         updateLogUpdates()
+        view?.let { showLogState(it, R.string.diagnostic_logs_clearing, loading = true) }
         view?.findViewById<MaterialButton>(R.id.btnCopyLogs)?.isEnabled = false
         view?.findViewById<MaterialButton>(R.id.btnClearLogs)?.isEnabled = false
         viewLifecycleOwner.lifecycleScope.launch {
@@ -357,6 +531,8 @@ class DiagnosticsFragment : Fragment() {
     override fun onDestroyView() {
         logUpdates?.cancel()
         logUpdates = null
+        logCopyFeedback?.cancel()
+        logCopyFeedback = null
         logsRendered = false
         storedProbeDomains = null
         savingProbeDomains = false

@@ -29,6 +29,7 @@ class ConfigureFragment : Fragment() {
     private var loaded = false
     private var loading = false
     private var editing = false
+    private var opensNewProfile = false
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View =
         inflater.inflate(R.layout.fragment_configure, container, false)
@@ -46,11 +47,17 @@ class ConfigureFragment : Fragment() {
             }
         }
         LanguageSelector(this, view.findViewById(R.id.languageSpinner)).bind()
-        fields.forEach { it.doAfterTextChanged { if (loaded && !loading) updateValidation() } }
+        fields.forEach { field ->
+            field.doAfterTextChanged { if (loaded && !loading) updateValidation() }
+            (activity as? MainActivity)?.dismissKeyboardOnDone(field)
+        }
         view.findViewById<View>(R.id.action_save).setOnClickListener { save() }
         view.findViewById<View>(R.id.action_back).setOnClickListener { setEditing(false) }
         view.findViewById<View>(R.id.action_add_profile).setOnClickListener { editNewProfile() }
         view.findViewById<View>(R.id.action_delete_profile).setOnClickListener { confirmDelete() }
+        parentFragmentManager.setFragmentResultListener(NEW_PROFILE_REQUEST, viewLifecycleOwner) { _, _ ->
+            if (loaded) editNewProfile() else opensNewProfile = true
+        }
         loadConfiguration(state)
     }
 
@@ -70,7 +77,12 @@ class ConfigureFragment : Fragment() {
                 if (draft != null) fields.zip(draft).forEach { (field, value) -> field.setText(value) }
                 else showProfile(originalName)
                 loaded = true
-                setEditing(state?.getBoolean("editing") == true)
+                if (opensNewProfile) {
+                    opensNewProfile = false
+                    editNewProfile()
+                } else {
+                    setEditing(state?.getBoolean("editing") == true)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -163,6 +175,7 @@ class ConfigureFragment : Fragment() {
     }
 
     private fun setEditing(value: Boolean) {
+        if (editing && !value) (activity as? MainActivity)?.dismissInputKeyboard()
         editing = value
         view?.findViewById<View>(R.id.profileList)?.visibility = if (value) View.GONE else View.VISIBLE
         view?.findViewById<View>(R.id.profileEditor)?.visibility = if (value) View.VISIBLE else View.GONE
@@ -219,6 +232,7 @@ class ConfigureFragment : Fragment() {
 
     fun save() {
         if (saving || !updateValidation()) return
+        (activity as? MainActivity)?.dismissInputKeyboard()
         val v = fields.map { it.text.toString() }
         val config = VaultConfig(
             name = v[0].trim(), host = v[1].trim(), port = v[2].toInt(), password = v[3],
@@ -255,6 +269,7 @@ class ConfigureFragment : Fragment() {
 
     private fun confirmDelete() {
         val name = originalName ?: return
+        (activity as? MainActivity)?.dismissInputKeyboard()
         if (isActiveProfile(name)) {
             showActiveProfileError()
             return
@@ -325,6 +340,7 @@ class ConfigureFragment : Fragment() {
     }
 
     companion object {
+        const val NEW_PROFILE_REQUEST = "newProfile"
         fun newInstance() = ConfigureFragment()
     }
 }

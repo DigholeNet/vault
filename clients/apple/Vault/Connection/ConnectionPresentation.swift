@@ -32,7 +32,9 @@ extension AppData {
         case .connected: return "Disconnect"
         case .connecting: return isRecovering ? "Disconnect" : "Cancel Connection"
         case .disconnecting: return connectionError == nil ? "Disconnecting…" : "Disconnect"
-        case .disconnected: return connectionError == nil ? "Connect" : "Retry"
+        case .disconnected:
+            if needsVPNPermission { return "Authorize VPN" }
+            return connectionError == nil ? "Connect" : "Retry"
         }
     }
 }
