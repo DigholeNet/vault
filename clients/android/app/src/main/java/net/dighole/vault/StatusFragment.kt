@@ -343,6 +343,18 @@ class StatusFragment : Fragment() {
         val emphasized = active || preparing
         val failed = app.currentVpnStatus is VpnStatusEvent.Error && !emphasized
         val connected = vpnState.isConnected && !vpnState.isConnecting
+        renderStatus(root, preparing, emphasized, failed)
+        renderHero(root, emphasized, failed)
+        renderConnectionControls(root, active, preparing, emphasized, failed)
+        renderStatusDetails(root, app, active, emphasized, failed)
+        root.findViewById<View>(R.id.readyCard).visibility = if (emphasized || failed) View.GONE else View.VISIBLE
+        root.findViewById<View>(R.id.failureDiagnosticsCard).visibility = if (failed) View.VISIBLE else View.GONE
+        renderConnectionDuration(app, connected)
+        renderConnectionInfo(root, vpnState.isConnected)
+        renderTrafficStats(app.latestTrafficStats)
+    }
+
+    private fun renderStatus(root: View, preparing: Boolean, emphasized: Boolean, failed: Boolean) {
         root.findViewById<View>(R.id.btnProfile).visibility = if (emphasized) View.GONE else View.VISIBLE
         tvStatus.setText(when {
             failed -> R.string.status_failed
@@ -369,6 +381,9 @@ class StatusFragment : Fragment() {
                     else -> R.color.connection_disconnected
                 }
             ))
+    }
+
+    private fun renderHero(root: View, emphasized: Boolean, failed: Boolean) {
         val hero = root.findViewById<View>(R.id.statusHero)
         hero.setBackgroundResource(when {
             failed -> R.drawable.vault_bg_hero_error
@@ -387,6 +402,15 @@ class StatusFragment : Fragment() {
                 else -> R.color.vault_text_secondary
             }
         ))
+    }
+
+    private fun renderConnectionControls(
+        root: View,
+        active: Boolean,
+        preparing: Boolean,
+        emphasized: Boolean,
+        failed: Boolean
+    ) {
         btnToggleVpn.setImageResource(when {
             failed -> R.drawable.ic_error
             active -> R.drawable.ic_connected
@@ -404,6 +428,15 @@ class StatusFragment : Fragment() {
             setText(if (failed) R.string.retry else R.string.status_tap_to_connect)
             setTextColor(ContextCompat.getColor(requireContext(), R.color.vault_blue))
         }
+    }
+
+    private fun renderStatusDetails(
+        root: View,
+        app: VaultApplication,
+        active: Boolean,
+        emphasized: Boolean,
+        failed: Boolean
+    ) {
         val detail = statusDetailText(app, active)
         tvStatusDetail.text = detail.orEmpty()
         tvStatusDetail.visibility = if (detail == null) View.GONE else View.VISIBLE
@@ -423,15 +456,14 @@ class StatusFragment : Fragment() {
                 requireContext(), if (emphasized) R.color.vault_hero_secondary else R.color.vault_text_secondary
             ))
         }
-        root.findViewById<View>(R.id.readyCard).visibility = if (emphasized || failed) View.GONE else View.VISIBLE
-        root.findViewById<View>(R.id.failureDiagnosticsCard).visibility = if (failed) View.VISIBLE else View.GONE
+    }
+
+    private fun renderConnectionDuration(app: VaultApplication, connected: Boolean) {
         duration.visibility = if (connected) View.VISIBLE else View.GONE
         if (connected) {
             renderDuration(app.ensureConnectionStarted())
             if (!isHidden && isResumed) startDurationUpdates(app.ensureConnectionStarted())
         } else stopDurationUpdates()
-        renderConnectionInfo(root, vpnState.isConnected)
-        renderTrafficStats(app.latestTrafficStats)
     }
 
     private fun renderConnectionInfo(root: View, connected: Boolean) {
