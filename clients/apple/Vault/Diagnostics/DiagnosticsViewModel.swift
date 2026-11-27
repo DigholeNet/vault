@@ -7,7 +7,12 @@ protocol RuntimeLogStore {
     @MainActor func clearLogs() async throws -> Bool
 }
 
-extension VpnManager: RuntimeLogStore {}
+protocol DiagnosticsRunner {
+    @MainActor func requestDiagnostics(onProgress: ((DiagnosticsResult) -> Void)?, completion: @escaping (DiagnosticsResult?) -> Void)
+    @MainActor func cancelDiagnostics()
+}
+
+extension VpnManager: RuntimeLogStore, DiagnosticsRunner {}
 
 /// Both apps use the same request, progress and log refresh lifecycle.
 @MainActor
@@ -15,6 +20,7 @@ final class DiagnosticsViewModel: ObservableObject {
     @Published private(set) var result: DiagnosticsResult?
     @Published private(set) var running = false
     @Published private(set) var cancelRequested = false
+    @Published private(set) var wasCancelled = false
     @Published private(set) var startedAt: TimeInterval?
     @Published private(set) var progressReceived = ProcessInfo.processInfo.systemUptime
     @Published private(set) var completedAt: Date?
@@ -38,34 +44,49 @@ final class DiagnosticsViewModel: ObservableObject {
 
     var passed: Bool { DiagnosticsPresentation.passed(result) }
     var incomplete: Bool { DiagnosticsPresentation.incomplete(result) }
+    var statusTitle: String {
+        if cancelRequested { return "Cancelling…" }
+        if wasCancelled { return "Checks cancelled" }
+        return DiagnosticsPresentation.resultTitle(result, running: running)
+    }
     var diagnosticText: String { ([result?.summary ?? ""] + (result?.lines ?? [])).joined(separator: "\n") }
 
-    func run(using manager: VpnManager) {
+    func run(using manager: any DiagnosticsRunner) {
         guard !running else { return }
         generation &+= 1
         let token = generation
         running = true
         cancelRequested = false
+        wasCancelled = false
         let now = ProcessInfo.processInfo.systemUptime
         startedAt = now
         progressReceived = now
         completedAt = nil
         result = DiagnosticsResult(message: "RUNNING")
         manager.requestDiagnostics(onProgress: { [weak self] progress in
-            guard let self, self.running, self.generation == token else { return }
+            guard let self, self.running, !self.cancelRequested, self.generation == token else { return }
             if self.result?.activeCheck != progress.activeCheck {
                 self.progressReceived = ProcessInfo.processInfo.systemUptime
             }
             self.result = progress
         }, completion: { [weak self] reply in
             guard let self, self.generation == token else { return }
-            self.result = reply ?? DiagnosticsResult(message: "INCOMPLETE - provider returned no usable response")
+            self.wasCancelled = self.cancelRequested
+            if self.wasCancelled {
+                self.result = DiagnosticsResult(
+                    snapshot: reply?.snapshot ?? self.result?.snapshot,
+                    message: "Checks cancelled"
+                )
+            } else {
+                self.result = reply ?? DiagnosticsResult(message: "INCOMPLETE - provider returned no usable response")
+            }
             self.running = false
+            self.cancelRequested = false
             self.completedAt = Date()
         })
     }
 
-    func cancel(using manager: VpnManager) {
+    func cancel(using manager: any DiagnosticsRunner) {
         guard running, !cancelRequested else { return }
         cancelRequested = true
         manager.cancelDiagnostics()

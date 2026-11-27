@@ -36,7 +36,10 @@
 
     <!-- Navigation -->
     <string name="nav_status">Estado</string>
+    <string name="nav_status_compact">VPN</string>
     <string name="nav_configure">Configurar</string>
+    <string name="nav_configure_compact">Ajustes</string>
+    <string name="nav_diagnostics_compact">Pruebas</string>
     <string name="nav_about">Acerca de</string>
 
     <!-- Status Fragment -->
@@ -56,8 +59,8 @@
     <string name="server_host">Servidor</string>
     <string name="port">Puerto</string>
     <string name="password">Contraseña</string>
-    <string name="dns_ipv4_servers">DNS IPv4 (separados por coma)</string>
-    <string name="dns_ipv6_servers">DNS IPv6 (separados por coma)</string>
+    <string name="dns_ipv4_servers">DNS IPv4</string>
+    <string name="dns_ipv6_servers">DNS IPv6</string>
     <string name="error_port_invalid">Número de puerto inválido</string>
     <string name="error_password_required">La contraseña es requerida</string>
 
@@ -85,8 +88,7 @@
 <string name="device_id">ID del dispositivo</string>
 <string name="mtu">MTU</string>
 <string name="mtu_help">1280–1427. Vacío para automático.</string>
-<string name="dns_ipv4_help">Vacío para 1.1.1.1,8.8.8.8. Se usa si el túnel tiene IPv4.</string>
-    <string name="dns_ipv6_help">Vacío para Google DNS: 2001:4860:4860::8888,2001:4860:4860::8844. Se usa si el túnel tiene IPv6.</string>
+    <string name="dns_defaults_help">Déjalo vacío para usar los valores predeterminados. Solo se usan las familias asignadas al túnel.</string>
 <string name="probe_domains">Dominios de prueba</string>
 <string name="probe_help">Dominios separados por comas. Vacío para valores predeterminados.</string>
 <string name="error_host_invalid">Introduce una IP o nombre de servidor sin esquema URL.</string>
@@ -102,6 +104,10 @@
 <string name="run_checks">Iniciar</string>
 <string name="run_again">Repetir</string>
 <string name="checking">Comprobando conexión…</string>
+    <string name="cancel_checks">Cancelar comprobaciones</string>
+    <string name="checks_cancelling">Cancelando…</string>
+    <string name="checks_cancelled">Comprobaciones canceladas</string>
+    <string name="checks_cancelled_detail">Los resultados completados siguen disponibles.</string>
 <string name="checks_intro">Comprueba DNS, TCP y HTTPS de la VPN y el acceso de la aplicación.</string>
 <string name="checks_disconnected">Comprueba el acceso directo de la aplicación sin conectarte. Las comprobaciones del túnel estarán disponibles tras conectar. Los registros siguen disponibles.</string>
 <string name="checks_passed">Comprobaciones superadas</string>

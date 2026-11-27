@@ -7,6 +7,10 @@ struct IosDiagnosticsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject var appData: AppData
     @EnvironmentObject var languageManager: LanguageManager
+    @State private var pageWidth: CGFloat = .infinity
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var pageInset: CGFloat { pageWidth <= 360 ? 16 : 20 }
+
     @StateObject private var model = DiagnosticsViewModel()
     @State private var tab = 0
     @State private var lastCopy: Date?
@@ -21,15 +25,16 @@ struct IosDiagnosticsView: View {
                 title: tr("Diagnostics"),
                 subtitle: tr("Diagnose connections and troubleshoot network issues.")
             )
-            .padding(.horizontal, 20)
+            .padding(.horizontal, pageInset)
 
             diagnosticTabs
-                .padding(.horizontal, 20)
+                .padding(.horizontal, pageInset)
                 .padding(.top, 16)
                 .padding(.bottom, 16)
 
             if tab == 0 { checks } else { logs }
         }
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { pageWidth = $0 }
         .vaultScreenBackground()
         .navigationBarHidden(true)
         .vaultLogClearConfirmation(isPresented: $confirmsLogClear) {
@@ -41,15 +46,13 @@ struct IosDiagnosticsView: View {
         }
     }
 
-    private let diagnosticTabBackground = Color(vaultLight: "ECEDF6", dark: "20253A")
-
     private var diagnosticTabs: some View {
         HStack(spacing: 0) {
             diagnosticTab(title: tr("Connection Checks"), index: 0)
             diagnosticTab(title: tr("Runtime Logs"), index: 1)
         }
         .padding(4)
-        .background(diagnosticTabBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(VaultTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func diagnosticTab(title: String, index: Int) -> some View {
@@ -85,7 +88,7 @@ struct IosDiagnosticsView: View {
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text(tr("Test targets"))
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.subheadline.bold())
                         .foregroundStyle(VaultTheme.textPrimary)
                     ProbeDomainsEditor(stacked: true)
                 }
@@ -97,14 +100,24 @@ struct IosDiagnosticsView: View {
 
                 Button {
                     IosKeyboardDismissal.dismiss()
-                    expandedChecks.removeAll()
-                    model.run(using: vpnManager)
+                    if model.running {
+                        model.cancel(using: vpnManager)
+                    } else {
+                        expandedChecks.removeAll()
+                        model.run(using: vpnManager)
+                    }
                 } label: {
-                    Label(runTitle, systemImage: "waveform.path.ecg").font(.footnote.weight(.semibold)).imageScale(.large)
+                    if model.running {
+                        Text(runTitle)
+                    } else {
+                        Label(runTitle, systemImage: "waveform.path.ecg").imageScale(.large)
+                    }
                 }
-                .buttonStyle(DiagnosticButtonStyle(kind: model.running ? .running : .primary))
+                .buttonStyle(DiagnosticButtonStyle(
+                    kind: model.cancelRequested ? .cancelling : (model.running ? .cancel : .primary)
+                ))
                 .accessibilityIdentifier("diagnostics.run")
-                .disabled(model.running)
+                .disabled(model.cancelRequested)
 
                 if let result = model.result, result.snapshot != nil {
                     VStack(spacing: 12) {
@@ -115,7 +128,7 @@ struct IosDiagnosticsView: View {
                 }
 
                 if let result = model.result, !model.running {
-                    if !model.passed {
+                    if !model.passed && !model.wasCancelled {
                         Text(result.summary)
                             .font(.system(size: 12))
                             .textSelection(.enabled)
@@ -130,10 +143,12 @@ struct IosDiagnosticsView: View {
                                 } label: {
                                     HStack {
                                         let state = DiagnosticsPresentation.domainState(result, domain: domain)
-                                        Image(systemName: state == .passed ? "checkmark.circle.fill"
-                                            : (state == .failed ? "exclamationmark.circle.fill" : "minus.circle"))
+                                        VaultStatusIcon(
+                                            kind: state == .passed ? .passed : (state == .failed ? .failed : .skipped),
+                                            size: 22
+                                        )
                                             .foregroundStyle(state == .passed ? VaultTheme.primary
-                                                : (state == .failed ? .orange : VaultTheme.textSecondary))
+                                                : (state == .failed ? VaultTheme.danger : VaultTheme.textSecondary))
                                         Text(domain).foregroundStyle(VaultTheme.textPrimary)
                                         Spacer()
                                         Image(systemName: "chevron.right")
@@ -155,43 +170,57 @@ struct IosDiagnosticsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, pageInset)
             .padding(.bottom, 20)
         }
         .scrollDismissesKeyboard(.interactively)
     }
 
     private var runTitle: String {
-        if model.running { return tr("Checking connection…") }
+        if model.running { return tr(model.cancelRequested ? "Cancelling…" : "Cancel checks") }
         if model.result != nil { return tr("Run Again") }
         return tr(appData.vpnStatus == .connected ? "Start" : "Start Direct Checks")
     }
 
     private var resultHeader: some View {
         let idle = !model.running && model.result == nil
-        let warning = !idle && !model.running && !model.passed
-        let tint = idle ? VaultTheme.textSecondary : (warning ? diagnosticWarning : VaultTheme.primaryDark)
+        let hasIssue = !idle && !model.running && !model.wasCancelled && !model.passed
+        let neutral = idle || model.wasCancelled
+        let issueTint = model.incomplete ? VaultTheme.diagnosticWarning : VaultTheme.danger
+        let issueSurface = model.incomplete ? diagnosticWarningSurface : VaultTheme.failureSurface
+        let tint = neutral || model.cancelRequested ? VaultTheme.textSecondary
+            : (hasIssue ? issueTint : VaultTheme.primaryDark)
         return HStack(alignment: .center, spacing: 12) {
             if model.running {
                 ProgressView().tint(VaultTheme.primary).frame(width: 28, height: 28)
             } else {
-                Image(systemName: idle ? "info.circle" : (warning ? "exclamationmark" : "checkmark"))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(model.passed ? VaultTheme.onPrimary : tint)
+                Group {
+                    if neutral {
+                        Image(systemName: "info.circle")
+                            .symbolRenderingMode(.monochrome)
+                            .font(.system(size: 18, weight: .semibold))
+                    } else {
+                        VaultStatusIcon(kind: hasIssue ? .failed : .passed, size: 24)
+                    }
+                }
+                    .foregroundStyle(model.passed ? VaultTheme.primary : tint)
                     .frame(width: 28, height: 28)
-                    .background(model.passed ? VaultTheme.primary : .clear, in: Circle())
                     .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(tr(idle ? "Direct checks and runtime logs are available" :
-                    DiagnosticsPresentation.resultTitle(model.result, running: model.running)))
+                    model.statusTitle))
                     .font(.footnote.bold())
-                    .foregroundStyle(tint)
+                    .foregroundStyle(model.passed || model.wasCancelled ? VaultTheme.textPrimary : tint)
                 if idle {
                     Text(tr("Connect to run the full tunnel checks."))
                         .font(.caption)
                         .foregroundStyle(VaultTheme.textSecondary)
-                } else if model.running, let startedAt = model.startedAt {
+                } else if model.wasCancelled {
+                    Text(tr("Completed results are still available."))
+                        .font(.caption)
+                        .foregroundStyle(VaultTheme.textSecondary)
+                } else if model.running, !model.cancelRequested, let startedAt = model.startedAt {
                     TimelineView(.periodic(from: .now, by: 0.1)) { _ in
                         let elapsed = max(0, Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))
                         Text(tr("Elapsed") + "  \(elapsed) ms")
@@ -202,16 +231,16 @@ struct IosDiagnosticsView: View {
                         ProgressView(value: Double(model.result?.checks?.count ?? 0), total: Double(planned))
                             .tint(VaultTheme.primary)
                     }
-                } else if let result = model.result, let snapshot = result.snapshot {
+                } else if !model.running, let result = model.result, let snapshot = result.snapshot {
                     let count = snapshot.plannedChecks.count
                     let passed = snapshot.checks.filter { $0.state == .passed }.count
                     let failed = snapshot.checks.filter { $0.state == .failed }.count
                     let seconds = (Double(snapshot.durationMs) / 1_000).formatted(.number.precision(.fractionLength(1)))
-                    Text(warning
+                    Text(hasIssue
                         ? languageManager.tr("%lld/%lld checks passed · %lld failed", Int64(passed), Int64(count), Int64(failed))
                         : languageManager.tr("%lld checks · %@ s", Int64(count), seconds))
                         .font(.caption).monospacedDigit()
-                        .foregroundStyle(warning ? tint : VaultTheme.textSecondary)
+                        .foregroundStyle(hasIssue ? tint : VaultTheme.textSecondary)
                 }
             }
         }
@@ -219,16 +248,18 @@ struct IosDiagnosticsView: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
         .background(
-            idle ? VaultTheme.surfaceSubtle : (warning ? diagnosticWarningSurface : VaultTheme.indigoSoft),
+            idle ? VaultTheme.surfaceMuted : (hasIssue ? issueSurface : VaultTheme.surface),
             in: RoundedRectangle(cornerRadius: 18)
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: 18).strokeBorder(VaultTheme.outline)
+        }
     }
 
-    private let diagnosticWarning = Color(vaultLight: "92400E", dark: "FCD34D")
     private let diagnosticWarningSurface = Color(vaultLight: "FFFBEB", dark: "372A19")
 
     private func checkCard(_ id: String, result: DiagnosticsResult) -> some View {
-        let row = DiagnosticsPresentation.checkRow(id, result: result, running: model.running)
+        let row = DiagnosticsPresentation.checkRow(id, result: result, running: model.running && !model.cancelRequested)
         let probes = result.probes?.filter { $0.stage == id } ?? []
         let expanded = expandedChecks.contains(id) && !probes.isEmpty
 
@@ -272,7 +303,7 @@ struct IosDiagnosticsView: View {
         _ id: String, row: DiagnosticsPresentation.CheckRow, expandable: Bool, expanded: Bool
     ) -> some View {
         let passed = row.state == .passed
-        let tint = passed ? VaultTheme.primary : (row.state == .failed ? diagnosticWarning : VaultTheme.textSecondary)
+        let tint = passed ? VaultTheme.primary : (row.state == .failed ? VaultTheme.danger : VaultTheme.textSecondary)
         let duration = row.durationMs.map { "\($0) ms" }
         let result = row.hasMeasurements ? languageManager.tr("%@ passed", row.resultText) : tr(row.resultText)
         return HStack(spacing: 10) {
@@ -280,13 +311,11 @@ struct IosDiagnosticsView: View {
                 if row.active {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: passed ? "checkmark" : (row.state == .failed ? "exclamationmark" : "minus"))
-                        .font(.system(size: 13, weight: .semibold))
+                    VaultStatusIcon(kind: passed ? .passed : (row.state == .failed ? .failed : .skipped), size: 22)
                 }
             }
-            .foregroundStyle(expanded && passed ? VaultTheme.onPrimary : tint)
+            .foregroundStyle(tint)
             .frame(width: 26, height: 26)
-            .background(expanded && passed ? VaultTheme.primary : (passed ? VaultTheme.indigoSoft : VaultTheme.surfaceSubtle), in: Circle())
             .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -339,7 +368,7 @@ struct IosDiagnosticsView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if model.logText.isEmpty {
                     Text(tr("No log content found."))
-                        .foregroundStyle(VaultTheme.textDisabled)
+                        .foregroundStyle(VaultTheme.textSecondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(VaultTheme.background)
                 } else {
@@ -354,20 +383,28 @@ struct IosDiagnosticsView: View {
                     .strokeBorder(VaultTheme.outline)
             }
 
-            Text(tr(lastCopy != nil ? "Copied to clipboard." : "Select log text to copy details for troubleshooting."))
-                .font(.caption)
-                .foregroundStyle(lastCopy != nil ? VaultTheme.primary : VaultTheme.textSecondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+                if lastCopy != nil {
+                    VaultStatusIcon(kind: .passed, size: 16)
+                }
+                Text(tr(lastCopy != nil ? "Copied to clipboard." : "Select log text to copy details for troubleshooting."))
+                    .font(.caption)
+            }
+            .foregroundStyle(lastCopy != nil ? VaultTheme.primary : VaultTheme.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
             if let message = model.logMessage {
                 Text(tr(message)).font(.caption).foregroundStyle(VaultTheme.textSecondary)
             }
-            HStack(spacing: 18) {
-                Button {
+            let actionLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: 8))
+                : AnyLayout(HStackLayout(spacing: 16))
+            actionLayout {
+                Button(role: .destructive) {
                     confirmsLogClear = true
                 } label: {
                     Text(tr("Clear"))
                 }
-                .buttonStyle(DiagnosticButtonStyle(kind: .neutral))
+                .buttonStyle(DiagnosticButtonStyle(kind: .destructive))
                 .disabled(model.clearingLogs || model.loadingLogs || model.logText.isEmpty)
                 Button {
                     UIPasteboard.general.string = model.logText
@@ -379,7 +416,7 @@ struct IosDiagnosticsView: View {
                 .disabled(model.clearingLogs || model.loadingLogs || model.logText.isEmpty)
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, pageInset)
         .padding(.bottom, 8)
         .task(id: lastCopy) {
             guard lastCopy != nil else { return }
@@ -392,19 +429,21 @@ struct IosDiagnosticsView: View {
 }
 
 private struct DiagnosticButtonStyle: ButtonStyle {
-    enum Kind { case primary, running, tonal, neutral }
+    enum Kind { case primary, cancel, cancelling, tonal, destructive }
     var kind: Kind
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
-        let runAction = kind == .primary || kind == .running
-        let fill = kind == .primary ? VaultTheme.primary :
-            (kind == .neutral ? VaultTheme.surfaceSubtle : VaultTheme.indigoSoft)
-        let text = kind == .primary ? VaultTheme.onPrimary :
-            (kind == .neutral ? VaultTheme.textSecondary : VaultTheme.primaryDark)
+        let runAction = kind == .primary || kind == .cancel || kind == .cancelling
+        let (fill, text): (Color, Color) = switch kind {
+        case .primary: (VaultTheme.primary, VaultTheme.onPrimary)
+        case .cancelling: (VaultTheme.surfaceMuted, VaultTheme.textSecondary)
+        case .destructive: (VaultTheme.surfaceMuted, VaultTheme.danger)
+        case .cancel, .tonal: (VaultTheme.indigoSoft, VaultTheme.primaryDark)
+        }
         return configuration.label
             .font(.caption.weight(.semibold))
-            .foregroundStyle(isEnabled || kind == .running ? text : VaultTheme.textDisabled)
+            .foregroundStyle(isEnabled || kind == .cancelling ? text : VaultTheme.textDisabled)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: runAction ? 50 : 44)
             .background(fill, in: RoundedRectangle(cornerRadius: runAction ? 16 : 14))
@@ -423,8 +462,8 @@ private struct IosDiagnosticsDetailView: View {
             ForEach((result.probes ?? []).filter { $0.domain == domain }, id: \.id) { probe in
                 Section {
                     HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: probe.succeeded ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                            .foregroundStyle(probe.succeeded ? VaultTheme.primary : .orange)
+                        VaultStatusIcon(kind: probe.succeeded ? .passed : .failed, size: 20)
+                            .foregroundStyle(probe.succeeded ? VaultTheme.primary : VaultTheme.danger)
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(alignment: .top) {
                                 Text(languageManager.tr(DiagnosticsPresentation.label(for: probe.stage)))

@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
-    <path android:fillColor="@android:color/transparent" android:strokeColor="@color/vault_danger"
-        android:strokeWidth="3" android:pathData="M24,6 A18,18 0,1 0,24,42 A18,18 0,1 0,24,6"/>
-    <path android:fillColor="@android:color/transparent" android:strokeColor="@color/vault_danger"
-        android:strokeWidth="3.2" android:strokeLineCap="round" android:pathData="M24,14 V27"/>
-    <path android:fillColor="@color/vault_danger" android:pathData="M24,33 A1.8,1.8 0,1 0,24,36.6 A1.8,1.8 0,1 0,24,33"/>
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@android:color/black"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M21,12 A9,9 0,1 1,3,12 A9,9 0,1 1,21,12 Z M12,7.5 v5 m0,3.5 v0.15"/>
 </vector>

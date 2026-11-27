@@ -49,6 +49,38 @@ final class DiagnosticsPresentationTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testCancellationWaitsForCompletionAndPreservesResults() {
+        let model = DiagnosticsViewModel()
+        let runner = ControlledDiagnosticsRunner()
+        let native = snapshot()
+
+        model.run(using: runner)
+        runner.progress?(DiagnosticsResult(snapshot: native))
+        model.cancel(using: runner)
+        model.cancel(using: runner)
+        model.run(using: runner)
+        XCTAssertEqual(runner.cancelCalls, 1)
+        XCTAssertEqual(runner.runCalls, 1)
+        XCTAssertTrue(model.running)
+        XCTAssertEqual(model.statusTitle, "Cancelling…")
+
+        runner.progress?(DiagnosticsResult(message: "late progress"))
+        XCTAssertEqual(model.result?.checks, native.checks)
+        runner.finish?(nil)
+        XCTAssertFalse(model.running)
+        XCTAssertFalse(model.cancelRequested)
+        XCTAssertTrue(model.wasCancelled)
+        XCTAssertEqual(model.statusTitle, "Checks cancelled")
+        XCTAssertEqual(model.result?.checks, native.checks)
+
+        model.run(using: runner)
+        XCTAssertEqual(runner.runCalls, 2)
+        XCTAssertFalse(model.wasCancelled)
+        runner.finish?(DiagnosticsResult(snapshot: native))
+        XCTAssertTrue(model.passed)
+    }
+
     func testNativeSnapshotPresentation() throws {
         let native = snapshot()
         let result = DiagnosticsResult(snapshot: native)
@@ -175,5 +207,24 @@ extension DiagnosticsPresentationTests {
         XCTAssertEqual(PacketStats.formatBytes(0), "0.00 B")
         XCTAssertEqual(PacketStats.formatBytes(1024), "1.00 KB")
         XCTAssertEqual(PacketStats.formatBytes(1536), "1.50 KB")
+    }
+}
+
+
+@MainActor
+private final class ControlledDiagnosticsRunner: DiagnosticsRunner {
+    var progress: ((DiagnosticsResult) -> Void)?
+    var finish: ((DiagnosticsResult?) -> Void)?
+    var runCalls = 0
+    var cancelCalls = 0
+
+    func requestDiagnostics(onProgress: ((DiagnosticsResult) -> Void)?, completion: @escaping (DiagnosticsResult?) -> Void) {
+        runCalls += 1
+        progress = onProgress
+        finish = completion
+    }
+
+    func cancelDiagnostics() {
+        cancelCalls += 1
     }
 }

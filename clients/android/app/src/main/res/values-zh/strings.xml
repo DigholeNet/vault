@@ -36,7 +36,10 @@
 
     <!-- Navigation -->
     <string name="nav_status">状态</string>
+    <string name="nav_status_compact">状态</string>
     <string name="nav_configure">配置</string>
+    <string name="nav_configure_compact">配置</string>
+    <string name="nav_diagnostics_compact">诊断</string>
     <string name="nav_about">关于</string>
 
     <!-- Status Fragment -->
@@ -56,8 +59,8 @@
     <string name="server_host">服务器地址</string>
     <string name="port">端口</string>
     <string name="password">密码</string>
-    <string name="dns_ipv4_servers">IPv4 DNS（逗号分隔）</string>
-    <string name="dns_ipv6_servers">IPv6 DNS（逗号分隔）</string>
+    <string name="dns_ipv4_servers">IPv4 DNS</string>
+    <string name="dns_ipv6_servers">IPv6 DNS</string>
     <string name="error_port_invalid">端口号无效</string>
     <string name="error_password_required">密码不能为空</string>
 
@@ -85,8 +88,7 @@
     <string name="device_id">设备 ID</string>
     <string name="mtu">MTU</string>
     <string name="mtu_help">1280–1427，留空表示自动。</string>
-    <string name="dns_ipv4_help">留空使用 1.1.1.1,8.8.8.8。隧道分配 IPv4 时生效。</string>
-    <string name="dns_ipv6_help">留空使用 Google DNS：2001:4860:4860::8888,2001:4860:4860::8844。隧道分配 IPv6 时生效。</string>
+    <string name="dns_defaults_help">留空使用默认值，仅应用隧道已分配的地址族。</string>
     <string name="probe_domains">探测域名</string>
     <string name="probe_help">域名以逗号分隔，留空使用默认值。</string>
     <string name="error_host_invalid">请输入服务器 IP 或域名，不要包含 URL 协议。</string>
@@ -102,6 +104,10 @@
     <string name="run_checks">开始</string>
     <string name="run_again">重新检测</string>
     <string name="checking">正在检查连接…</string>
+    <string name="cancel_checks">取消检查</string>
+    <string name="checks_cancelling">正在取消…</string>
+    <string name="checks_cancelled">检查已取消</string>
+    <string name="checks_cancelled_detail">已完成的结果仍可查看。</string>
     <string name="checks_intro">检查 VPN DNS、TCP、HTTPS 以及应用访问。</string>
     <string name="checks_disconnected">未连接时可检查应用直连网络；连接后可检查完整隧道。运行日志始终可用。</string>
     <string name="checks_passed">连接检查通过</string>

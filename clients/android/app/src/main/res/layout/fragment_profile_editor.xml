@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="52dp"
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp"
         android:gravity="center_vertical" android:orientation="horizontal" android:paddingHorizontal="12dp">
         <com.google.android.material.button.MaterialButton android:id="@+id/action_back"
             style="@style/Widget.Material3.Button.IconButton" android:layout_width="48dp"
@@ -19,11 +19,11 @@
     <ScrollView android:layout_width="match_parent" android:layout_height="0dp"
         android:layout_weight="1" android:fillViewport="true">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="vertical" android:paddingHorizontal="20dp" android:paddingBottom="20dp">
+            android:orientation="vertical" android:paddingHorizontal="@dimen/vault_page_inset" android:paddingBottom="20dp">
             <com.google.android.material.card.MaterialCardView style="@style/Widget.Vault.Card"
                 android:layout_width="match_parent" android:layout_height="wrap_content">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="vertical" android:padding="12dp">
+                    android:orientation="vertical" android:padding="16dp">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:text="@string/basic_information" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
                     <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
@@ -44,9 +44,9 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
             <com.google.android.material.card.MaterialCardView style="@style/Widget.Vault.Card"
-                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp">
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="vertical" android:padding="12dp">
+                    android:orientation="vertical" android:padding="16dp">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:text="@string/server_section" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
                     <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
@@ -73,31 +73,34 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
             <com.google.android.material.card.MaterialCardView style="@style/Widget.Vault.Card"
-                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp">
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="vertical" android:padding="12dp">
+                    android:orientation="vertical" android:padding="16dp">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:text="DNS" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
                     <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
                         android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp" android:hint="@string/dns_ipv4_servers" app:helperText="@string/dns_ipv4_help">
+                        android:layout_marginTop="8dp" android:hint="@string/dns_ipv4_servers">
                         <com.google.android.material.textfield.TextInputEditText android:id="@+id/edtDnsIpv4"
                             style="@style/Widget.Vault.Configure.EditText" android:layout_width="match_parent"
                             android:layout_height="wrap_content" android:inputType="textNoSuggestions"/>
                     </com.google.android.material.textfield.TextInputLayout>
                     <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
                         android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp" android:hint="@string/dns_ipv6_servers" app:helperText="@string/dns_ipv6_help">
+                        android:layout_marginTop="8dp" android:hint="@string/dns_ipv6_servers">
                         <com.google.android.material.textfield.TextInputEditText android:id="@+id/edtDnsIpv6"
                             style="@style/Widget.Vault.Configure.EditText" android:layout_width="match_parent"
                             android:layout_height="wrap_content" android:inputType="textNoSuggestions"/>
                     </com.google.android.material.textfield.TextInputLayout>
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:text="@string/dns_defaults_help"
+                        android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
             <com.google.android.material.card.MaterialCardView style="@style/Widget.Vault.Card"
-                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp">
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="vertical" android:padding="12dp">
+                    android:orientation="vertical" android:padding="16dp">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:text="@string/advanced_settings" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
                     <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Vault.Configure.TextInput"
@@ -111,7 +114,8 @@
             </com.google.android.material.card.MaterialCardView>
             <com.google.android.material.button.MaterialButton android:id="@+id/action_delete_profile"
                 style="@style/Widget.Material3.Button.TextButton" android:layout_width="match_parent"
-                android:layout_height="48dp" android:text="@string/delete_profile" android:textColor="@color/vault_danger"/>
+                android:layout_height="wrap_content" android:minHeight="48dp" android:layout_marginTop="12dp"
+                app:backgroundTint="@color/vault_failure_surface" android:text="@string/delete_profile" android:textColor="@color/vault_danger"/>
             <TextView android:id="@+id/tvSaveStatus" android:layout_width="match_parent"
                 android:layout_height="wrap_content" android:accessibilityLiveRegion="polite"
                 android:gravity="center" android:paddingVertical="4dp" android:text="@string/save_hint"

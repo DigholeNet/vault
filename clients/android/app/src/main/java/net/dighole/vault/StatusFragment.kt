@@ -14,6 +14,7 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.LinearLayout
 import android.widget.ImageButton
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -127,7 +128,9 @@ class StatusFragment : Fragment() {
                 else -> connectVpn()
             }
         }
+        view.findViewById<View>(R.id.tvConnectionAction).setOnClickListener { btnToggleVpn.performClick() }
         view.findViewById<View>(R.id.btnProfile).setOnClickListener { showProfileDialog() }
+        adaptStatusLayout(view)
 
         restoreStateFromPrefs()
         refreshProfiles()
@@ -434,17 +437,55 @@ class StatusFragment : Fragment() {
             ))
     }
 
+    private fun adaptStatusLayout(root: View) {
+        if (resources.configuration.screenWidthDp > 360 && resources.configuration.fontScale < 1.3f) return
+
+        val header = root.findViewById<LinearLayout>(R.id.statusHeader)
+        header.orientation = LinearLayout.VERTICAL
+        header.gravity = android.view.Gravity.START
+        header.getChildAt(0).layoutParams = LinearLayout.LayoutParams(-1, -2)
+        (header.getChildAt(1).layoutParams as LinearLayout.LayoutParams).topMargin = dp(8)
+
+        val profile = root.findViewById<LinearLayout>(R.id.btnProfile)
+        profile.orientation = LinearLayout.VERTICAL
+        profile.gravity = android.view.Gravity.START
+        profile.getChildAt(0).layoutParams = LinearLayout.LayoutParams(-1, -2)
+        val profileAction = profile.getChildAt(1)
+        (profileAction.layoutParams as LinearLayout.LayoutParams).topMargin = dp(4)
+
+        val rows = listOf(R.id.publicIpSection, R.id.rowIpv4, R.id.rowIpv6)
+        rows.forEach { id ->
+            val row = root.findViewById<LinearLayout>(id)
+            row.orientation = LinearLayout.VERTICAL
+            row.gravity = android.view.Gravity.START
+            val address = row.getChildAt(1) as TextView
+            address.layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
+                topMargin = dp(4)
+            }
+            address.gravity = android.view.Gravity.START
+        }
+
+        val traffic = root.findViewById<LinearLayout>(R.id.trafficColumns)
+        traffic.orientation = LinearLayout.VERTICAL
+        for (index in listOf(0, 2)) {
+            traffic.getChildAt(index).layoutParams = LinearLayout.LayoutParams(-1, -2)
+        }
+        traffic.getChildAt(1).layoutParams = LinearLayout.LayoutParams(-1, dp(1)).apply {
+            topMargin = dp(12)
+            bottomMargin = dp(12)
+        }
+    }
+
     private fun renderHero(root: View, state: CardState) {
         root.findViewById<View>(R.id.statusHero).setBackgroundResource(when {
             state == CardState.Connected -> R.drawable.vault_bg_hero_connected
-            state.usesIndigo -> R.drawable.vault_bg_hero_progress
             else -> R.drawable.vault_bg_hero_neutral
         })
         tvStatus.setTextColor(ContextCompat.getColor(
-            requireContext(), if (state.usesIndigo) R.color.vault_hero_text else R.color.vault_text_secondary
+            requireContext(), if (state == CardState.Connected) R.color.vault_hero_text else R.color.vault_text
         ))
         btnToggleVpn.setBackgroundResource(
-            if (state.usesIndigo) R.drawable.vault_bg_connection_button_connected else R.drawable.vault_bg_connection_button_neutral
+            if (state == CardState.Connected) R.drawable.vault_bg_connection_button_connected else R.drawable.vault_bg_connection_button_neutral
         )
         val buttonPadding = dp(19)
         btnToggleVpn.setPadding(buttonPadding, buttonPadding, buttonPadding, buttonPadding)
@@ -464,8 +505,10 @@ class StatusFragment : Fragment() {
         root.findViewById<TextView>(R.id.tvConnectionAction).apply {
             visibility = if (state == CardState.Connected) View.GONE else View.VISIBLE
             setText(state.action)
-            setTextColor(ContextCompat.getColor(
-                requireContext(), if (state.usesIndigo) R.color.vault_hero_text else R.color.vault_blue
+            isEnabled = btnToggleVpn.isEnabled
+            setTextColor(requireContext().getColor(
+                if (state == CardState.Connecting || state == CardState.Disconnecting) R.color.vault_text_secondary
+                else R.color.vault_blue
             ))
         }
     }
@@ -475,9 +518,7 @@ class StatusFragment : Fragment() {
         val progress = root.findViewById<com.google.android.material.progressindicator.CircularProgressIndicator>(
             R.id.connectionProgress
         )
-        progress.setIndicatorColor(requireContext().getColor(
-            if (state == CardState.Disconnecting) R.color.vault_text_disabled else R.color.status_progress
-        ))
+        progress.setIndicatorColor(requireContext().getColor(R.color.status_progress))
         val nextIcon = when {
             state.busy && allowMotion -> 0
             state == CardState.Disconnecting -> R.drawable.ic_connection_stopping
@@ -526,7 +567,7 @@ class StatusFragment : Fragment() {
         tvStatusDetail.text = detail.orEmpty()
         tvStatusDetail.visibility = if (detail == null) View.GONE else View.VISIBLE
         tvStatusDetail.setTextColor(ContextCompat.getColor(
-            requireContext(), if (state.usesIndigo) R.color.vault_hero_secondary else R.color.vault_text_secondary
+            requireContext(), if (state == CardState.Connected) R.color.vault_hero_secondary else R.color.vault_text_secondary
         ))
     }
 

@@ -25,8 +25,9 @@
     "Please wait…" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请稍候…" } } } },
     "Establishing a secure tunnel" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在建立安全隧道" } } } },
     "Closing the secure tunnel" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在关闭安全隧道" } } } },
+    "Disconnecting" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在断开" } } } },
     "Connecting…" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接中" } } } },
-    "VPN connected" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已链接" } } } },
+    "VPN connected" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已连接" } } } },
     "Running" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "运行中" } } } },
     "Tap to retry" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点击重试" } } } },
     "Tap to disconnect" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点击断开" } } } },
@@ -777,6 +778,9 @@
         }
       }
     },
+    "Cancel checks" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消检查" } } } },
+    "Checks cancelled" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "检查已取消" } } } },
+    "Completed results are still available." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已完成的结果仍可查看。" } } } },
     "Cancelling…" : {
       "localizations" : {
         "zh-Hans" : {

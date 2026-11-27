@@ -8,9 +8,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingHorizontal="20dp"
+        android:paddingHorizontal="@dimen/vault_page_inset"
         android:paddingBottom="20dp">
         <LinearLayout
+            android:id="@+id/statusHeader"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
@@ -46,7 +47,7 @@
                     android:layout_height="wrap_content"
                     android:text="@string/status_off"
                     android:textColor="@color/vault_blue_dark"
-                    android:textSize="11sp"
+                    android:textSize="12sp"
                     android:textStyle="bold"/>
             </LinearLayout>
         </LinearLayout>
@@ -54,43 +55,49 @@
         <LinearLayout
             android:id="@+id/btnProfile"
             android:layout_width="match_parent"
-            android:layout_height="54dp"
+            android:layout_height="wrap_content" android:minHeight="54dp"
             android:layout_marginTop="20dp"
             android:background="@drawable/vault_bg_profile"
             android:clickable="true"
             android:focusable="true"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingHorizontal="18dp">
-            <ImageView
-                android:layout_width="20dp"
-                android:layout_height="20dp"
-                android:importantForAccessibility="no"
-                android:src="@drawable/ic_server_rack"
-                app:tint="@color/vault_blue"/>
-            <TextView
-                android:id="@+id/btnProfileText"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="14dp"
-                android:layout_weight="1"
-                android:text="@string/add_profile"
-                android:textColor="@color/vault_text"
-                android:textSize="13sp"
-                android:textStyle="bold"/>
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/switch_profile_short"
-                android:textColor="@color/vault_text_disabled"
-                android:textSize="10sp"/>
-            <ImageView
-                android:layout_width="16dp"
-                android:layout_height="16dp"
-                android:layout_marginStart="8dp"
-                android:importantForAccessibility="no"
-                android:src="@drawable/ic_chevron"
-                app:tint="@color/vault_text_disabled"/>
+            android:paddingHorizontal="16dp" android:paddingVertical="8dp">
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_server_rack"
+                    app:tint="@color/vault_text_secondary"/>
+                <TextView
+                    android:id="@+id/btnProfileText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:layout_weight="1"
+                    android:text="@string/add_profile"
+                    android:textColor="@color/vault_text"
+                    android:textSize="14sp"
+                    android:textStyle="bold"/>
+            </LinearLayout>
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:orientation="horizontal">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/switch_profile_short"
+                    android:textColor="@color/vault_text_secondary"
+                    android:textSize="12sp"/>
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_marginStart="8dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_chevron"
+                    app:tint="@color/vault_text_secondary"/>
+            </LinearLayout>
         </LinearLayout>
 
         <LinearLayout
@@ -102,7 +109,7 @@
             android:background="@drawable/vault_bg_hero_neutral"
             android:gravity="center_horizontal"
             android:orientation="vertical"
-            android:paddingHorizontal="20dp"
+            android:paddingHorizontal="@dimen/vault_page_inset"
             android:paddingVertical="20dp">
             <TextView
                 android:id="@+id/tvStatus"
@@ -187,7 +194,7 @@
                 android:gravity="top" android:orientation="horizontal" android:padding="18dp">
                 <ImageView android:layout_width="30dp" android:layout_height="30dp"
                     android:importantForAccessibility="no" android:padding="5dp"
-                    android:src="@drawable/ic_info" app:tint="@color/vault_blue"/>
+                    android:src="@drawable/ic_info" app:tint="@color/vault_text_secondary"/>
                 <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
                     android:layout_marginStart="12dp" android:layout_weight="1" android:orientation="vertical">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
@@ -216,12 +223,15 @@
                     android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:layout_marginTop="10dp" android:gravity="center_vertical"
                     android:orientation="horizontal" android:visibility="gone">
-                    <ImageView android:layout_width="18dp" android:layout_height="18dp"
-                        android:importantForAccessibility="no" android:src="@drawable/ic_public_ip"
-                        app:tint="@color/vault_blue"/>
-                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:layout_marginStart="10dp" android:text="@string/status_wan"
-                        android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
+                    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:gravity="center_vertical" android:orientation="horizontal">
+                        <ImageView android:layout_width="18dp" android:layout_height="18dp"
+                            android:importantForAccessibility="no" android:src="@drawable/ic_globe"
+                            app:tint="@color/vault_text_secondary"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:layout_marginStart="10dp" android:text="@string/status_wan"
+                            android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
+                    </LinearLayout>
                     <TextView android:id="@+id/tvPublicIpAddress" android:layout_width="0dp"
                         android:layout_height="wrap_content" android:layout_marginStart="12dp"
                         android:layout_weight="1" android:fontFamily="monospace" android:gravity="end"
@@ -235,12 +245,15 @@
                     <LinearLayout android:id="@+id/rowIpv4" android:layout_width="match_parent"
                         android:layout_height="wrap_content" android:layout_marginTop="6dp"
                         android:gravity="center_vertical" android:orientation="horizontal" android:visibility="gone">
-                        <ImageView android:layout_width="18dp" android:layout_height="18dp"
-                            android:importantForAccessibility="no" android:src="@drawable/ic_server_rack"
-                            app:tint="@color/status_downlink"/>
-                        <TextView android:id="@+id/labelIpv4" android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" android:layout_marginStart="10dp"
-                            android:text="IPv4" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
+                        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:gravity="center_vertical" android:orientation="horizontal">
+                            <ImageView android:layout_width="18dp" android:layout_height="18dp"
+                                android:importantForAccessibility="no" android:src="@drawable/ic_server_rack"
+                                app:tint="@color/status_downlink"/>
+                            <TextView android:id="@+id/labelIpv4" android:layout_width="wrap_content"
+                                android:layout_height="wrap_content" android:layout_marginStart="10dp"
+                                android:text="IPv4" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
+                        </LinearLayout>
                         <TextView android:id="@+id/tvIpv4Address" android:layout_width="0dp"
                             android:layout_height="wrap_content" android:layout_marginStart="12dp"
                             android:layout_weight="1" android:fontFamily="monospace" android:gravity="end"
@@ -249,12 +262,15 @@
                     <LinearLayout android:id="@+id/rowIpv6" android:layout_width="match_parent"
                         android:layout_height="wrap_content" android:layout_marginTop="8dp"
                         android:gravity="center_vertical" android:orientation="horizontal" android:visibility="gone">
-                        <ImageView android:layout_width="18dp" android:layout_height="18dp"
-                            android:importantForAccessibility="no" android:src="@drawable/ic_server_rack"
-                            app:tint="@color/vault_blue"/>
-                        <TextView android:id="@+id/labelIpv6" android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" android:layout_marginStart="10dp"
-                            android:text="IPv6" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
+                        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:gravity="center_vertical" android:orientation="horizontal">
+                            <ImageView android:layout_width="18dp" android:layout_height="18dp"
+                                android:importantForAccessibility="no" android:src="@drawable/ic_server_rack"
+                                app:tint="@color/vault_text_secondary"/>
+                            <TextView android:id="@+id/labelIpv6" android:layout_width="wrap_content"
+                                android:layout_height="wrap_content" android:layout_marginStart="10dp"
+                                android:text="IPv6" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
+                        </LinearLayout>
                         <TextView android:id="@+id/tvIpv6Address" android:layout_width="0dp"
                             android:layout_height="wrap_content" android:layout_marginStart="12dp"
                             android:layout_weight="1" android:fontFamily="monospace" android:gravity="end"
@@ -275,8 +291,8 @@
                 android:orientation="vertical" android:paddingHorizontal="18dp" android:paddingVertical="14dp">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:text="@string/live_traffic" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp" android:baselineAligned="false" android:orientation="horizontal">
+                <LinearLayout android:id="@+id/trafficColumns" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="10dp" android:baselineAligned="false" android:orientation="horizontal">
                     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
                         android:layout_weight="1" android:gravity="center" android:orientation="vertical">
                         <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
@@ -290,7 +306,7 @@
                         <TextView android:id="@+id/tvSentSpeed" android:layout_width="wrap_content"
                             android:layout_height="wrap_content" android:layout_marginTop="5dp"
                             android:fontFamily="monospace" android:text="0.00 B/s"
-                            android:textColor="@color/status_uplink" android:includeFontPadding="false" android:textSize="17sp" android:textStyle="bold"/>
+                            android:textColor="@color/vault_text" android:includeFontPadding="false" android:textSize="17sp" android:textStyle="bold"/>
                         <TextView android:id="@+id/tvSentBytes" android:layout_width="wrap_content"
                             android:layout_height="wrap_content" android:layout_marginTop="4dp"
                             android:text="0.00 B" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
@@ -313,7 +329,7 @@
                         <TextView android:id="@+id/tvReceivedSpeed" android:layout_width="wrap_content"
                             android:layout_height="wrap_content" android:layout_marginTop="5dp"
                             android:fontFamily="monospace" android:text="0.00 B/s"
-                            android:textColor="@color/status_downlink" android:includeFontPadding="false" android:textSize="17sp" android:textStyle="bold"/>
+                            android:textColor="@color/vault_text" android:includeFontPadding="false" android:textSize="17sp" android:textStyle="bold"/>
                         <TextView android:id="@+id/tvReceivedBytes" android:layout_width="wrap_content"
                             android:layout_height="wrap_content" android:layout_marginTop="4dp"
                             android:text="0.00 B" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>

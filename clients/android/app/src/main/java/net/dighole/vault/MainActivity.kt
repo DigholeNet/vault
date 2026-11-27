@@ -14,6 +14,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
@@ -23,6 +24,7 @@ import com.google.android.material.textfield.TextInputLayout
 class MainActivity : BaseActivity() {
 
     private lateinit var bottomNav: BottomNavigationView
+    private var showingProfileEditor = false
     private val inputTaps by lazy {
         GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(event: MotionEvent) = true
@@ -51,17 +53,17 @@ class MainActivity : BaseActivity() {
         bottomNav = findViewById(R.id.bottomNav)
 
         bottomNav.isItemActiveIndicatorEnabled = true
+        applyCompactNavigationLabels()
         val root = findViewById<View>(R.id.mainRoot)
         root.viewTreeObserver.addOnGlobalFocusChangeListener { previous, next ->
             if (previous is EditText && next !is EditText) hideInputKeyboard()
         }
-        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { target, insets ->
-            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-            val ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())
+        ViewCompat.setOnApplyWindowInsetsListener(root) { target, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
             target.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
-            bottomNav.visibility = if (insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()))
-                android.view.View.GONE else android.view.View.VISIBLE
-            androidx.core.view.WindowInsetsCompat.CONSUMED
+            updateNavigationVisibility(insets)
+            WindowInsetsCompat.CONSUMED
         }
         requestNotificationPermissionIfNeeded()
 
@@ -109,6 +111,31 @@ class MainActivity : BaseActivity() {
         bottomNav.selectedItemId = itemId
     }
 
+    private fun applyCompactNavigationLabels() {
+        val configuration = resources.configuration
+        if (configuration.screenWidthDp > 360 && configuration.fontScale < 1.3f) return
+        for ((id, shortTitle) in listOf(
+            R.id.nav_status to R.string.nav_status_compact,
+            R.id.nav_configure to R.string.nav_configure_compact,
+            R.id.nav_diagnostics to R.string.nav_diagnostics_compact
+        )) {
+            val item = bottomNav.menu.findItem(id)
+            item.contentDescription = item.title
+            item.setTitle(shortTitle)
+        }
+    }
+
+    fun setProfileEditorVisible(visible: Boolean) {
+        showingProfileEditor = visible
+        val root = findViewById<View>(R.id.mainRoot)
+        updateNavigationVisibility(ViewCompat.getRootWindowInsets(root))
+    }
+
+    private fun updateNavigationVisibility(insets: WindowInsetsCompat?) {
+        val hide = showingProfileEditor || insets?.isVisible(WindowInsetsCompat.Type.ime()) == true
+        findViewById<View>(R.id.bottomNavFrame).visibility = if (hide) View.GONE else View.VISIBLE
+    }
+
     fun openNewProfile() {
         navigateTo(R.id.nav_configure)
         supportFragmentManager.setFragmentResult(ConfigureFragment.NEW_PROFILE_REQUEST, Bundle())
@@ -140,6 +167,7 @@ class MainActivity : BaseActivity() {
 
     private fun showFragment(tag: String, factory: () -> Fragment) {
         dismissInputKeyboard()
+        if (tag != TAG_CONFIGURE) setProfileEditorVisible(false)
         val transaction = supportFragmentManager.beginTransaction()
 
         supportFragmentManager.findFragmentByTag(TAG_STATUS)?.let { transaction.hide(it) }

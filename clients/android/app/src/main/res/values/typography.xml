@@ -15,11 +15,11 @@
         <item name="android:textColor">@color/vault_text</item>
     </style>
     <style name="TextAppearance.Vault.CardTitle" parent="TextAppearance.Vault.Body">
-        <item name="android:textSize">13sp</item>
+        <item name="android:textSize">16sp</item>
         <item name="android:textStyle">bold</item>
     </style>
     <style name="TextAppearance.Vault.InfoCalloutTitle" parent="TextAppearance.Vault.CardTitle">
-        <item name="android:textColor">@color/vault_blue_dark</item>
+        <item name="android:textColor">@color/vault_text</item>
     </style>
     <style name="TextAppearance.Vault.Supporting" parent="TextAppearance.Material3.BodySmall">
         <item name="android:textSize">12sp</item>
@@ -27,7 +27,7 @@
         <item name="android:textColor">@color/vault_text_secondary</item>
     </style>
     <style name="TextAppearance.Vault.Navigation" parent="TextAppearance.Material3.LabelSmall">
-        <item name="android:textSize">10sp</item>
+        <item name="android:textSize">12sp</item>
     </style>
     <style name="TextAppearance.Vault.Navigation.Active" parent="TextAppearance.Vault.Navigation">
         <item name="android:textStyle">bold</item>

@@ -11,20 +11,18 @@ struct MacosStatusView: View {
     @State private var followsTail = true
     @State private var windowVisible = false
     @State private var confirmsLogClear = false
+    @State private var lastLogCopy: Date?
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Picker("", selection: $tab) {
-                    Text(languageManager.tr("Connection Diagnostics")).tag(0)
-                    Text(languageManager.tr("Runtime Logs")).tag(1)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 286)
-                Spacer()
-                if tab == 0 { MacosDiagnosticsAction(vpnManager: vpnManager, model: model) }
+            Picker("", selection: $tab) {
+                Text(languageManager.tr("Connection Diagnostics")).tag(0)
+                Text(languageManager.tr("Runtime Logs")).tag(1)
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 286)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
             Divider().overlay(VaultTheme.outline)
             if tab == 0 {
@@ -41,7 +39,13 @@ struct MacosStatusView: View {
                 }
                 Spacer()
                 if tab == 1 {
-                    if let message = model.logMessage {
+                    if lastLogCopy != nil {
+                        HStack(spacing: 4) {
+                            VaultStatusIcon(kind: .passed, size: 16)
+                            Text(languageManager.tr("Copied to clipboard.")).font(.caption)
+                        }
+                        .foregroundStyle(VaultTheme.primary)
+                    } else if let message = model.logMessage {
                         Text(languageManager.tr(message))
                             .font(.caption)
                             .foregroundStyle(VaultTheme.textSecondary)
@@ -51,7 +55,7 @@ struct MacosStatusView: View {
                     } label: {
                         Label(languageManager.tr(model.clearingLogs ? "Clearing…" : "Clear"), systemImage: "trash")
                     }
-                    .buttonStyle(VaultSecondaryButtonStyle())
+                    .buttonStyle(VaultSecondaryButtonStyle(isDestructive: true))
                     .frame(width: 130)
                     .disabled(model.clearingLogs || model.filteredLogText.isEmpty)
                 }
@@ -66,6 +70,13 @@ struct MacosStatusView: View {
         }
         .background(VaultTheme.background)
         .tint(VaultTheme.primary)
+        .task(id: lastLogCopy) {
+            guard lastLogCopy != nil else { return }
+            do {
+                try await Task.sleep(for: .seconds(2))
+                lastLogCopy = nil
+            } catch { return }
+        }
         .vaultLogClearConfirmation(isPresented: $confirmsLogClear) {
             Task { await model.clearLogs(using: vpnManager) }
         }
@@ -115,7 +126,7 @@ struct MacosStatusView: View {
                         .background(VaultTheme.surfaceMuted)
                 } else if model.filteredLogText.isEmpty {
                     Text(languageManager.tr("No matching logs."))
-                        .foregroundStyle(VaultTheme.textDisabled)
+                        .foregroundStyle(VaultTheme.textSecondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(VaultTheme.surfaceMuted)
                 } else {
@@ -131,7 +142,9 @@ struct MacosStatusView: View {
 
     private func copy(_ text: String) {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        if NSPasteboard.general.setString(text, forType: .string), tab == 1 {
+            lastLogCopy = .now
+        }
     }
 }
 
@@ -140,15 +153,14 @@ struct MacosStatusView: View {
 private struct MacosDiagnosticsAction: View {
     let vpnManager: VpnManager
     @ObservedObject var model: DiagnosticsViewModel
-    @EnvironmentObject var appData: AppData
     @EnvironmentObject var languageManager: LanguageManager
 
     var body: some View {
         if model.running {
-            Button(languageManager.tr(model.cancelRequested ? "Cancelling…" : "Cancel")) {
+            Button(languageManager.tr(model.cancelRequested ? "Cancelling…" : "Cancel checks")) {
                 model.cancel(using: vpnManager)
             }
-            .buttonStyle(VaultSecondaryButtonStyle())
+            .buttonStyle(VaultSecondaryButtonStyle(isPending: model.cancelRequested))
             .frame(width: 180)
             .disabled(model.cancelRequested)
         } else {
@@ -157,7 +169,7 @@ private struct MacosDiagnosticsAction: View {
             } label: {
                 Label(languageManager.tr(model.result == nil ? "Run Diagnostics" : "Run Again"), systemImage: "arrow.clockwise")
             }
-            .buttonStyle(VaultSecondaryButtonStyle())
+            .buttonStyle(VaultPrimaryButtonStyle())
             .frame(width: 180)
             .disabled(model.running)
         }
@@ -180,7 +192,11 @@ private struct MacosConnectionDiagnostics: View {
             VStack(alignment: .leading, spacing: 18) {
                 ProbeDomainsEditor().vaultCard()
                 if running || result != nil {
-                    resultHeader.vaultCard()
+                    VStack(alignment: .leading, spacing: 16) {
+                        resultHeader
+                        MacosDiagnosticsAction(vpnManager: vpnManager, model: model)
+                    }
+                    .vaultCard()
                     sessionAddresses.vaultCard(padding: 14)
                     checkTable
                     Text(languageManager.tr(DiagnosticsPresentation.pingNote))
@@ -197,7 +213,7 @@ private struct MacosConnectionDiagnostics: View {
                             }
                         }
                     }
-                    if running {
+                    if running && !model.cancelRequested {
                         Text(languageManager.tr(result?.activeCheck == "icmp"
                                 ? "Completing optional tunnel observations…"
                                 : "Results update as each check completes."))
@@ -213,7 +229,7 @@ private struct MacosConnectionDiagnostics: View {
                                         VStack(alignment: .leading, spacing: 12) {
                                             ForEach(probes.filter { $0.domain == domain }, id: \.id) { probe in
                                                 HStack(alignment: .top, spacing: 8) {
-                                                    Image(systemName: probe.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                                    VaultStatusIcon(kind: probe.succeeded ? .passed : .failed, size: 20)
                                                         .foregroundStyle(probe.succeeded ? VaultTheme.primary : VaultTheme.danger)
                                                     VStack(alignment: .leading, spacing: 4) {
                                                         Text(languageManager.tr(DiagnosticsPresentation.label(for: probe.stage)))
@@ -248,7 +264,7 @@ private struct MacosConnectionDiagnostics: View {
                                 }
                                 .padding(.vertical, 5)
                             }
-                            if !running && !result.summary.hasPrefix("OK") {
+                            if !running && !model.wasCancelled && !result.summary.hasPrefix("OK") {
                                 Text(result.summary)
                                     .font(.body)
                                     .foregroundStyle(VaultTheme.textSecondary)
@@ -268,10 +284,7 @@ private struct MacosConnectionDiagnostics: View {
                                 :
                                 "Run application access checks without connecting. Tunnel checks are available after connecting. Logs remain available.")
                         )
-                        Button(languageManager.tr("Run Diagnostics"), action: diagnose)
-                            .buttonStyle(VaultPrimaryButtonStyle())
-                            .frame(width: 220)
-                            .disabled(model.running)
+                        MacosDiagnosticsAction(vpnManager: vpnManager, model: model)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 48)
@@ -284,18 +297,28 @@ private struct MacosConnectionDiagnostics: View {
 
     private var resultHeader: some View {
         HStack(alignment: .top, spacing: 14) {
-            if running {
+            if running && !model.cancelRequested {
                 ProgressView().controlSize(.large).padding(8)
-            } else {
-                Image(systemName: passed ? "checkmark.circle.fill" : (incomplete ? "clock.fill" : "exclamationmark.circle.fill"))
+            } else if model.wasCancelled || model.cancelRequested {
+                Image(systemName: "info.circle")
+                    .symbolRenderingMode(.monochrome)
                     .font(.system(size: 28))
-                    .foregroundStyle(passed ? VaultTheme.primary : (incomplete ? .orange : VaultTheme.danger))
+                    .foregroundStyle(VaultTheme.textSecondary)
+                    .frame(width: 34, height: 34)
+                    .accessibilityHidden(true)
+            } else {
+                VaultStatusIcon(kind: passed ? .passed : .failed, size: 34)
+                    .foregroundStyle(passed ? VaultTheme.primary
+                        : (incomplete ? VaultTheme.diagnosticWarning : VaultTheme.danger))
             }
             VStack(alignment: .leading, spacing: 6) {
-                Text(languageManager.tr(DiagnosticsPresentation.resultTitle(result, running: running)))
+                Text(languageManager.tr(model.statusTitle))
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(VaultTheme.textPrimary)
-                if running, let startedAt {
+                if model.wasCancelled {
+                    Text(languageManager.tr("Completed results are still available."))
+                        .foregroundStyle(VaultTheme.textSecondary)
+                } else if running, !model.cancelRequested, let startedAt {
                     TimelineView(.periodic(from: .now, by: 0.1)) { _ in
                         Text(languageManager
                             .tr("Elapsed") + "  \(max(0, Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))) ms")
@@ -309,7 +332,7 @@ private struct MacosConnectionDiagnostics: View {
                     )
                     .tint(VaultTheme.primary)
                     .frame(maxWidth: 300)
-                } else {
+                } else if !running {
                     HStack(spacing: 10) {
                         if let completedAt { Text(completedAt, style: .time) }
                         if let duration = result?.durationMs {
@@ -334,7 +357,7 @@ private struct MacosConnectionDiagnostics: View {
                 Divider().overlay(VaultTheme.outline)
             }
             if let ipv4 = addresses.ipv4, active {
-                VaultAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack", color: VaultTheme.downlink)
+                VaultAddressRow(title: "IPv4", address: ipv4, symbol: "server.rack")
             }
             if let ipv6 = addresses.ipv6, active {
                 VaultAddressRow(title: "IPv6", address: ipv6, symbol: "server.rack")
@@ -364,16 +387,17 @@ private struct MacosConnectionDiagnostics: View {
             .padding(14)
             .background(VaultTheme.surfaceMuted)
             ForEach(DiagnosticsPresentation.visibleChecks(result), id: \.self) { id in
-                let row = DiagnosticsPresentation.checkRow(id, result: result, running: running)
+                let row = DiagnosticsPresentation.checkRow(id, result: result, running: running && !model.cancelRequested)
                 HStack(spacing: 8) {
                     if row.active {
-                        ProgressView().controlSize(.mini).frame(width: 14)
+                        ProgressView().controlSize(.mini).frame(width: 22)
                     } else {
-                        Image(systemName: row.state == .passed ? "checkmark.circle.fill"
-                            : (row.state == .failed ? "xmark.circle.fill" : "minus.circle"))
+                        VaultStatusIcon(
+                            kind: row.state == .passed ? .passed : (row.state == .failed ? .failed : .skipped),
+                            size: 22
+                        )
                             .foregroundStyle(row.state == .passed ? VaultTheme.primary
-                                : (row.state == .failed ? VaultTheme.danger : VaultTheme.textDisabled))
-                            .frame(width: 14)
+                                : (row.state == .failed ? VaultTheme.danger : VaultTheme.textSecondary))
                     }
                     Text(languageManager.tr(checkLabel(id))).font(.body)
                     Spacer()
@@ -418,6 +442,5 @@ private struct MacosConnectionDiagnostics: View {
     private var passed: Bool { model.passed }
     private var incomplete: Bool { model.incomplete }
     private func checkLabel(_ id: String) -> String { DiagnosticsPresentation.label(for: id) }
-    private func diagnose() { model.run(using: vpnManager) }
 }
 #endif

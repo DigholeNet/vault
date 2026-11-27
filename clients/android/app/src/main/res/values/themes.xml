@@ -36,7 +36,7 @@
         <item name="strokeWidth">1dp</item>
     </style>
     <style name="Widget.Vault.InfoCallout" parent="Widget.Vault.Card">
-        <item name="cardBackgroundColor">@color/vault_indigo_soft</item>
+        <item name="cardBackgroundColor">@color/vault_surface</item>
         <item name="strokeWidth">0dp</item>
     </style>
     <style name="Widget.Vault.Button" parent="Widget.Material3.Button">

@@ -36,7 +36,10 @@
 
     <!-- Navigation -->
     <string name="nav_status">状態</string>
+    <string name="nav_status_compact">状態</string>
     <string name="nav_configure">設定</string>
+    <string name="nav_configure_compact">設定</string>
+    <string name="nav_diagnostics_compact">診断</string>
     <string name="nav_about">について</string>
 
     <!-- Status Fragment -->
@@ -56,8 +59,8 @@
     <string name="server_host">サーバーアドレス</string>
     <string name="port">ポート</string>
     <string name="password">パスワード</string>
-    <string name="dns_ipv4_servers">IPv4 DNS（カンマ区切り）</string>
-    <string name="dns_ipv6_servers">IPv6 DNS（カンマ区切り）</string>
+    <string name="dns_ipv4_servers">IPv4 DNS</string>
+    <string name="dns_ipv6_servers">IPv6 DNS</string>
     <string name="error_port_invalid">ポート番号が無効です</string>
     <string name="error_password_required">パスワードを入力してください</string>
 
@@ -85,8 +88,7 @@
 <string name="device_id">デバイス ID</string>
 <string name="mtu">MTU</string>
 <string name="mtu_help">1280–1427。空欄で自動設定。</string>
-<string name="dns_ipv4_help">空欄で 1.1.1.1,8.8.8.8。トンネルに IPv4 がある場合に使用。</string>
-    <string name="dns_ipv6_help">空欄で Google DNS：2001:4860:4860::8888,2001:4860:4860::8844。トンネルに IPv6 がある場合に使用。</string>
+    <string name="dns_defaults_help">空欄の場合は既定値を使用します。トンネルに割り当てられたアドレスファミリーのみ使用します。</string>
 <string name="probe_domains">診断ドメイン</string>
 <string name="probe_help">ドメインをカンマで区切ります。空欄で既定値。</string>
 <string name="error_host_invalid">URL ではなく、サーバーの IP またはホスト名を入力してください。</string>
@@ -102,6 +104,10 @@
 <string name="run_checks">開始</string>
 <string name="run_again">再チェック</string>
 <string name="checking">接続を確認中…</string>
+    <string name="cancel_checks">診断をキャンセル</string>
+    <string name="checks_cancelling">キャンセル中…</string>
+    <string name="checks_cancelled">診断をキャンセルしました</string>
+    <string name="checks_cancelled_detail">完了した結果は引き続き確認できます。</string>
 <string name="checks_intro">VPN の DNS、TCP、HTTPS とアプリからのアクセスを確認します。</string>
 <string name="checks_disconnected">未接続でもアプリケーションの直接アクセスを診断できます。接続後はすべてのトンネル診断を実行できます。ログは常に表示できます。</string>
 <string name="checks_passed">接続チェックに成功しました</string>

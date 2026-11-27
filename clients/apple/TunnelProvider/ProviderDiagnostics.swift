@@ -6,8 +6,13 @@ import VaultCore
 final class ProviderDiagnostics {
     private var cancellation: DiagnosticsCancellation?
     private var runID: String?
+    private var cancelledRuns = [String]()
 
     func cancel(run: String? = nil) {
+        if let run, !cancelledRuns.contains(run) {
+            cancelledRuns.append(run)
+            if cancelledRuns.count > 32 { cancelledRuns.removeFirst() }
+        }
         guard run == nil || run == runID else { return }
         cancellation?.cancel()
         cancellation = nil
@@ -22,7 +27,7 @@ final class ProviderDiagnostics {
         completionHandler: ((Data?) -> Void)?
     ) {
         dispatchPrecondition(condition: .onQueue(.main))
-        guard let current = context(), current.provider == request.provider,
+        guard !cancelledRuns.contains(request.run), let current = context(), current.provider == request.provider,
               current.generation == request.generation, current.connectionGeneration == request.connectionGeneration,
               request.timeout.isFinite, request.timeout > 0, request.timeout <= 6,
               self.cancellation == nil || self.cancellation?.isCancelled == true

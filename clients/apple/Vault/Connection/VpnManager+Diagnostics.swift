@@ -6,8 +6,8 @@ import VaultCore
 struct VpnDiagnosticState {
     var generation: UInt64 = 0
     var cancellation: DiagnosticsCancellation?
-    var cancelledByUser = false
     var runID: String?
+    var completion: ((DiagnosticsResult?) -> Void)?
 }
 
 extension VpnManager {
@@ -34,16 +34,12 @@ extension VpnManager {
         let connectedDate = connection?.connectedDate
         diagnosticState.cancellation = cancellation
         diagnosticState.runID = run
-        diagnosticState.cancelledByUser = false
+        diagnosticState.completion = completion
         sendProviderCommand(.init(.diagnosticContext), timeout: 3) { data in
             guard !cancellation.isCancelled, self.diagnosticState.generation == generation,
                   self.vpnStatus == .connected, let data,
                   var context = try? JSONDecoder().decode(AppleDiagnosticContext.self, from: data) else {
-                if self.diagnosticState.cancellation === cancellation {
-                    self.diagnosticState.cancellation = nil
-                    self.diagnosticState.runID = nil
-                }
-                completion(DiagnosticsResult(message: "INCOMPLETE - live diagnostic context unavailable"))
+                self.finishDiagnostics(cancellation, result: DiagnosticsResult(message: "INCOMPLETE - live diagnostic context unavailable"))
                 return
             }
             context.domains = self.config.diagnosticDomains
@@ -77,6 +73,7 @@ extension VpnManager {
                 let finalData = self.diagnosticCommand(.init(.diagnosticContext), timeout: 3, cancellation: cancellation)
                 let finalContext = finalData.flatMap { try? JSONDecoder().decode(AppleDiagnosticContext.self, from: $0) }
                 DispatchQueue.main.async {
+                    guard self.diagnosticState.cancellation === cancellation else { return }
                     let changed = cancellation.isCancelled || self.diagnosticState.generation != generation
                         || self.vpnStatus != .connected || self.activeVPN?.connection !== connection
                         || self.activeVPN?.connection.connectedDate != connectedDate
@@ -85,13 +82,8 @@ extension VpnManager {
                         result.message = "INCOMPLETE - tunnel session changed; run diagnostics again"
                         self.sendProviderCommand(.init(.cancelDiagnostics, token: run), timeout: 3) { _ in }
                     }
-                    if self.diagnosticState.cancelledByUser { result.message = "INCOMPLETE - diagnostics cancelled" }
-                    if self.diagnosticState.cancellation === cancellation {
-                        self.diagnosticState.cancellation = nil
-                        self.diagnosticState.runID = nil
-                    }
                     FileLogger.shared.log("[probe] final summary: \(result.summary) duration=\(result.durationMs ?? 0)ms")
-                    completion(result)
+                    self.finishDiagnostics(cancellation, result: result)
                 }
             }
         }
@@ -108,8 +100,7 @@ extension VpnManager {
             ipv6: nil, mtu: 1427, dns: [], domains: config.diagnosticDomains
         )
         diagnosticState.cancellation = cancellation
-        diagnosticState.runID = run
-        diagnosticState.cancelledByUser = false
+        diagnosticState.completion = completion
         DispatchQueue.global(qos: .utility).async {
             var result: DiagnosticsResult
             do {
@@ -135,17 +126,12 @@ extension VpnManager {
                 result = DiagnosticsResult(message: "INCOMPLETE - Rust diagnostics: \(error)")
             }
             DispatchQueue.main.async {
+                guard self.diagnosticState.cancellation === cancellation else { return }
                 if cancellation.isCancelled || self.diagnosticState.generation != generation {
-                    result.message = self.diagnosticState.cancelledByUser
-                        ? "INCOMPLETE - diagnostics cancelled"
-                        : "INCOMPLETE - network state changed; run diagnostics again"
-                }
-                if self.diagnosticState.cancellation === cancellation {
-                    self.diagnosticState.cancellation = nil
-                    self.diagnosticState.runID = nil
+                    result.message = "INCOMPLETE - network state changed; run diagnostics again"
                 }
                 FileLogger.shared.log("[probe] final summary: \(result.summary) duration=\(result.durationMs ?? 0)ms")
-                completion(result)
+                self.finishDiagnostics(cancellation, result: result)
             }
         }
     }
@@ -181,14 +167,21 @@ extension VpnManager {
         cancellation: DiagnosticsCancellation
     ) -> Data? {
         precondition(!Thread.isMainThread)
+        guard !cancellation.isCancelled else { return nil }
         let lock = NSLock()
         let semaphore = DispatchSemaphore(value: 0)
         var response: Data?
-        sendProviderCommand(request, timeout: timeout) { data in
-            lock.lock()
-            response = data
-            lock.unlock()
-            semaphore.signal()
+        DispatchQueue.main.async {
+            guard !cancellation.isCancelled else {
+                semaphore.signal()
+                return
+            }
+            self.sendProviderCommand(request, timeout: timeout) { data in
+                lock.lock()
+                response = data
+                lock.unlock()
+                semaphore.signal()
+            }
         }
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         while !cancellation.isCancelled, ProcessInfo.processInfo.systemUptime < deadline {
@@ -203,9 +196,20 @@ extension VpnManager {
     }
 
     func cancelDiagnostics() {
-        guard let cancellation = diagnosticState.cancellation, let run = diagnosticState.runID else { return }
-        diagnosticState.cancelledByUser = true
+        guard let cancellation = diagnosticState.cancellation else { return }
         cancellation.cancel()
-        sendProviderCommand(.init(.cancelDiagnostics, token: run), timeout: 3) { _ in }
+        if let run = diagnosticState.runID {
+            sendProviderCommand(.init(.cancelDiagnostics, token: run), timeout: 3) { _ in }
+        }
+        finishDiagnostics(cancellation, result: nil)
+    }
+
+    private func finishDiagnostics(_ cancellation: DiagnosticsCancellation, result: DiagnosticsResult?) {
+        guard diagnosticState.cancellation === cancellation else { return }
+        let completion = diagnosticState.completion
+        diagnosticState.cancellation = nil
+        diagnosticState.runID = nil
+        diagnosticState.completion = nil
+        completion?(result)
     }
 }

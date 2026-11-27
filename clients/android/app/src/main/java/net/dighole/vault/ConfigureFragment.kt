@@ -212,6 +212,7 @@ class ConfigureFragment : Fragment() {
     private fun setEditing(value: Boolean) {
         if (editing && !value) (activity as? MainActivity)?.dismissInputKeyboard()
         editing = value
+        (activity as? MainActivity)?.setProfileEditorVisible(value && !isHidden)
         view?.findViewById<View>(R.id.profileList)?.visibility = if (value) View.GONE else View.VISIBLE
         view?.findViewById<View>(R.id.profileEditor)?.visibility = if (value) View.VISIBLE else View.GONE
         if (value) {
@@ -353,6 +354,7 @@ class ConfigureFragment : Fragment() {
 
     override fun onHiddenChanged(hidden: Boolean) {
         super.onHiddenChanged(hidden)
+        (activity as? MainActivity)?.setProfileEditorVisible(editing && !hidden)
         if (!hidden && fields.isNotEmpty()) updateValidation()
     }
 

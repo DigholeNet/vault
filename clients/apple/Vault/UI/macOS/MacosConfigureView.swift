@@ -10,10 +10,10 @@ struct MacosConfigureView: View {
         var id: String { rawValue }
         var symbol: String {
             switch self {
-            case .general: "gearshape"
+            case .general: "sun.max"
             case .profiles: "server.rack"
             case .status: "network"
-            case .about: "questionmark.app"
+            case .about: "info.circle"
             }
         }
     }
@@ -59,7 +59,8 @@ struct MacosConfigureView: View {
                             .font(.system(size: 15, weight: page == item ? .semibold : .regular))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16)
-                            .frame(height: 48)
+                            .frame(minHeight: 36)
+                            .padding(.vertical, 2)
                             .background(
                                 page == item ? VaultTheme.indigoSoft : .clear,
                                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -67,6 +68,7 @@ struct MacosConfigureView: View {
                             .foregroundStyle(page == item ? VaultTheme.primary : VaultTheme.textSecondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(page == item ? .isSelected : [])
                     .keyboardShortcut(KeyEquivalent(Character(String((Page.allCases.firstIndex(of: item) ?? 0) + 1))))
                 }
                 Spacer()
@@ -79,7 +81,7 @@ struct MacosConfigureView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Group {
                     if page == .about {
-                        ScrollView { about.padding(.top, 20) }
+                        ScrollView { about }
                     } else {
                         Form {
                             switch page {
@@ -115,7 +117,7 @@ struct MacosConfigureView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(VaultTheme.background)
+            .background(page == .about ? VaultTheme.surface : VaultTheme.background)
         }
         .background(VaultTheme.background)
         .tint(VaultTheme.primary)
@@ -172,17 +174,32 @@ struct MacosConfigureView: View {
                     Button { requestEdit(.new) } label: {
                         Image(systemName: "plus")
                     }
+                    .controlSize(.large)
                     .help(languageManager.tr("Add Profile"))
                     .accessibilityLabel(languageManager.tr("Add Profile"))
                     Button(role: .destructive) { confirmDelete = true } label: {
                         Image(systemName: "trash")
                     }
+                    .controlSize(.large)
                     .help(languageManager.tr("Delete Profile"))
                     .accessibilityLabel(languageManager.tr("Delete Profile"))
                     .disabled(originalName == nil || isActiveProfile)
                 }
                 if let profile = config.profiles.first(where: { $0.name == originalName }) {
-                    ProfileServerLabel(host: profile.host, port: profile.port)
+                    HStack {
+                        ProfileServerLabel(host: profile.host, port: profile.port)
+                        Spacer()
+                        if profile.name == config.selectedProfileName {
+                            HStack(spacing: 4) {
+                                VaultStatusIcon(kind: .passed, size: 20)
+                                Text(languageManager.tr("In use"))
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .foregroundStyle(VaultTheme.primary)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(languageManager.tr("Used for connection"))
+                        }
+                    }
                 }
             }
             Section(languageManager.tr("Connection")) {

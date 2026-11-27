@@ -173,10 +173,13 @@ final class VaultUITests: XCTestCase {
         let addProfile = app.buttons["Add Profile"]
         let keyboard = app.keyboards.firstMatch
         selectTab("Configure", in: app, ready: addProfile)
+        attachScreenshot("iOS Profiles", app: app)
         addProfile.tap()
 
         let name = app.textFields["Profile Name"]
         XCTAssertTrue(name.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.tabBars.buttons["Configure"].exists)
+        attachScreenshot("iOS Profile Editor", app: app)
         name.tap()
         XCTAssertTrue(keyboard.waitForExistence(timeout: 5), app.debugDescription)
         app.textFields["Host"].tap()
@@ -196,6 +199,8 @@ final class VaultUITests: XCTestCase {
         let description = app.staticTexts["A secure VPN client for cross-regional connectivity."]
         selectTab("About", in: app, ready: description)
         XCTAssertEqual(description.label, "A secure VPN client for cross-regional connectivity.")
+        XCTAssertTrue(app.staticTexts["https://github.com/DigholeNet/vault"].exists
+            || app.links["https://github.com/DigholeNet/vault"].exists)
         XCTAssertFalse(app.buttons["View Logs"].exists)
         XCTAssertFalse(app.buttons["Copy"].exists)
         attachScreenshot("iOS About", app: app)

@@ -19,6 +19,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.dighole.vault.data.parseConfigList
@@ -33,12 +34,16 @@ import java.net.InetAddress
 
 internal data class DiagnosticsState(
     val running: Boolean = false,
+    val cancellationRequested: Boolean = false,
     val startedAt: Long = 0,
     val elapsedMs: Long = 0,
     val header: Int = R.string.checks_intro,
     val snapshot: DiagnosticSnapshot? = null,
     val error: String? = null
-)
+) {
+    val cancelling: Boolean get() = running && cancellationRequested
+    val cancelled: Boolean get() = !running && cancellationRequested
+}
 
 /** Android supplies live VPN metadata and its Network handle; Rust runs every probe. */
 internal class DiagnosticsViewModel : ViewModel() {
@@ -49,6 +54,13 @@ internal class DiagnosticsViewModel : ViewModel() {
     private val lifetime = Any()
     private var engine: DiagnosticEngine? = null
     private var transport: DiagnosticTransport? = null
+
+    fun requestCancellation() {
+        val state = mutableState.value
+        if (!state.running || state.cancellationRequested) return
+        mutableState.update { it.copy(cancellationRequested = true) }
+        cancel()
+    }
 
     fun cancel() {
         synchronized(lifetime) {
@@ -62,7 +74,7 @@ internal class DiagnosticsViewModel : ViewModel() {
 
     @Suppress("TooGenericExceptionCaught") // Keep platform/FFI failures out of the UI event loop.
     fun run(context: Context) {
-        if (job?.isActive == true) return
+        if (mutableState.value.running) return
         val app = context.applicationContext as VaultApplication
         mutableState.value = DiagnosticsState(running = true, startedAt = SystemClock.elapsedRealtime(), header = R.string.checking)
         job = scope.launch(start = CoroutineStart.LAZY) {
@@ -90,16 +102,20 @@ internal class DiagnosticsViewModel : ViewModel() {
                     runEngine(app, generation, tunnelConfig(app, generation, properties, connected), network)
                 }
             } catch (cancelled: CancellationException) {
-                mutableState.value = mutableState.value.copy(header = R.string.checks_incomplete)
+                mutableState.update { it.copy(header = R.string.checks_incomplete) }
                 throw cancelled
             } catch (error: Exception) {
-                mutableState.value = mutableState.value.copy(header = R.string.checks_incomplete, error = error.message)
+                mutableState.update { it.copy(header = R.string.checks_incomplete, error = error.message) }
             } finally {
                 monitor?.cancel()
                 callback?.let { manager.unregisterNetworkCallback(it) }
-                mutableState.value = mutableState.value.let {
-                    it.copy(running = false, elapsedMs = it.snapshot?.durationMs?.toLong()
-                        ?: (SystemClock.elapsedRealtime() - it.startedAt))
+                mutableState.update {
+                    it.copy(
+                        running = false,
+                        header = if (it.cancellationRequested) R.string.checks_cancelled else it.header,
+                        elapsedMs = it.snapshot?.durationMs?.toLong() ?: (SystemClock.elapsedRealtime() - it.startedAt),
+                        error = if (it.cancellationRequested) null else it.error
+                    )
                 }
             }
         }
@@ -132,7 +148,8 @@ internal class DiagnosticsViewModel : ViewModel() {
                 ensureActive()
                 check(app.vpnGeneration == generation) { "VPN session changed" }
                 val request = core.nextRequest() ?: break
-                mutableState.value = mutableState.value.copy(snapshot = core.snapshot())
+                val progress = core.snapshot()
+                mutableState.update { if (it.cancelling) it else it.copy(snapshot = progress) }
                 val now = core.elapsedMs()
                 if (request.deadlineMs <= now) continue
                 val io = if (request.scope == DiagnosticScope.TUNNEL) {
@@ -153,15 +170,17 @@ internal class DiagnosticsViewModel : ViewModel() {
                 }
             }
             val result = core.snapshot()
-            mutableState.value = mutableState.value.copy(snapshot = result, header = when (result.state) {
+            val header = when (result.state) {
                 DiagnosticState.PASSED -> R.string.checks_passed
                 DiagnosticState.FAILED -> R.string.checks_failed
                 DiagnosticState.INCOMPLETE -> R.string.checks_incomplete
-            })
+            }
+            mutableState.update { it.copy(snapshot = result, header = header) }
         } finally {
             synchronized(lifetime) {
                 core.cancel()
-                mutableState.value = mutableState.value.copy(snapshot = core.snapshot())
+                val finalSnapshot = core.snapshot()
+                mutableState.update { it.copy(snapshot = finalSnapshot) }
                 engine = null
                 core.close()
             }

@@ -88,7 +88,9 @@ class DiagnosticsFragment : Fragment() {
         }
         selectDiagnosticTab(tab.coerceIn(0, tabViews.lastIndex))
         bindProbeDomains(view, state)
-        view.findViewById<MaterialButton>(R.id.btnRunChecks).setOnClickListener { runChecks() }
+        view.findViewById<MaterialButton>(R.id.btnRunChecks).setOnClickListener {
+            if (model.state.value.running) model.requestCancellation() else runChecks()
+        }
         view.findViewById<MaterialButton>(R.id.btnClearLogs).setOnClickListener { confirmClearLogs() }
         view.findViewById<MaterialButton>(R.id.btnCopyLogs).setOnClickListener { copyLogs() }
         viewLifecycleOwner.lifecycleScope.launch {
@@ -102,7 +104,7 @@ class DiagnosticsFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch { model.state.collect { render() } }
         viewLifecycleOwner.lifecycleScope.launch {
             model.state.collectLatest { state ->
-                if (state.running) {
+                if (state.running && !state.cancelling) {
                     while (true) {
                         if (!isHidden && isResumed) view.findViewById<TextView>(R.id.tvDiagnosticElapsed).text =
                             getString(R.string.elapsed, android.os.SystemClock.elapsedRealtime() - state.startedAt)
@@ -225,52 +227,74 @@ class DiagnosticsFragment : Fragment() {
 
     private fun renderSummary(root: View, state: DiagnosticsState, connected: Boolean) {
         val idle = state.startedAt == 0L
-        val passed = state.header == R.string.checks_passed
-        val warning = !idle && !state.running && !passed
+        val passed = !state.cancellationRequested && state.header == R.string.checks_passed
+        val hasIssue = !idle && !state.running && !state.cancelled && !passed
+        val failed = hasIssue && state.header == R.string.checks_failed
         val tint = when {
-            idle -> R.color.vault_text_secondary
-            warning -> R.color.vault_diagnostic_warning
+            idle || state.cancellationRequested -> R.color.vault_text_secondary
+            failed -> R.color.vault_danger
+            hasIssue -> R.color.vault_diagnostic_warning
             else -> R.color.vault_blue_dark
         }
         val surface = when {
             idle -> R.color.vault_surface_subtle
-            warning -> R.color.vault_diagnostic_warning_surface
-            else -> R.color.vault_indigo_soft
+            failed -> R.color.vault_failure_surface
+            hasIssue -> R.color.vault_diagnostic_warning_surface
+            else -> R.color.vault_surface
         }
         root.findViewById<MaterialCardView>(R.id.diagnosticSummaryCard).apply {
             visibility = if (idle && connected) View.GONE else View.VISIBLE
             setCardBackgroundColor(context.getColor(surface))
         }
         root.findViewById<TextView>(R.id.tvDiagnosticSummary).apply {
-            setText(if (idle) R.string.diagnostic_offline_title else state.header)
-            setTextColor(context.getColor(tint))
+            setText(when {
+                idle -> R.string.diagnostic_offline_title
+                state.cancelling -> R.string.checks_cancelling
+                state.cancelled -> R.string.checks_cancelled
+                else -> state.header
+            })
+            setTextColor(context.getColor(if (passed) R.color.vault_text else tint))
         }
+        root.findViewById<View>(R.id.diagnosticSummarySpinner).visibility =
+            if (state.running) View.VISIBLE else View.GONE
         root.findViewById<ImageView>(R.id.diagnosticSummaryIcon).apply {
+            visibility = if (state.running) View.INVISIBLE else View.VISIBLE
             setImageResource(when {
                 passed -> R.drawable.ic_check
-                state.running -> R.drawable.ic_diagnostics
+                hasIssue -> R.drawable.ic_error
                 else -> R.drawable.ic_info
             })
-            val iconTint = if (passed) R.color.vault_on_primary else tint
+            val iconTint = when {
+                idle || state.cancelled -> R.color.vault_text_secondary
+                passed -> R.color.vault_blue
+                else -> tint
+            }
             imageTintList = ColorStateList.valueOf(context.getColor(iconTint))
-            backgroundTintList = ColorStateList.valueOf(
-                if (passed) context.getColor(R.color.vault_blue) else android.graphics.Color.TRANSPARENT
-            )
         }
-        bindSummaryProgress(root, state, idle, warning)
-        renderRunButton(root, state.running, idle, connected)
+        bindSummaryProgress(root, state, idle, tint.takeIf { hasIssue })
+        renderRunButton(root, state, idle, connected)
     }
 
-    private fun renderRunButton(root: View, running: Boolean, idle: Boolean, connected: Boolean) {
+    private fun renderRunButton(root: View, state: DiagnosticsState, idle: Boolean, connected: Boolean) {
         root.findViewById<MaterialButton>(R.id.btnRunChecks).apply {
-            isEnabled = !running
-            val surfaceColor = if (running) R.color.vault_indigo_soft else R.color.vault_blue
-            val contentColor = if (running) R.color.vault_blue_dark else R.color.vault_on_primary
+            isEnabled = !state.cancelling
+            val surfaceColor = when {
+                state.cancelling -> R.color.vault_surface_muted
+                state.running -> R.color.vault_indigo_soft
+                else -> R.color.vault_blue
+            }
+            val contentColor = when {
+                state.cancelling -> R.color.vault_text_secondary
+                state.running -> R.color.vault_blue_dark
+                else -> R.color.vault_on_primary
+            }
             backgroundTintList = ColorStateList.valueOf(context.getColor(surfaceColor))
+            setIconResource(if (state.running) 0 else R.drawable.ic_diagnostics)
             iconTint = ColorStateList.valueOf(context.getColor(contentColor))
             setTextColor(context.getColor(contentColor))
             setText(when {
-                running -> R.string.checking
+                state.cancelling -> R.string.checks_cancelling
+                state.running -> R.string.cancel_checks
                 !idle -> R.string.run_again
                 connected -> R.string.run_checks
                 else -> R.string.diagnostic_start_direct
@@ -278,20 +302,21 @@ class DiagnosticsFragment : Fragment() {
         }
     }
 
-    private fun bindSummaryProgress(root: View, state: DiagnosticsState, idle: Boolean, warning: Boolean) {
+    private fun bindSummaryProgress(root: View, state: DiagnosticsState, idle: Boolean, issueTint: Int?) {
         val snapshot = state.snapshot
         val count = snapshot?.plannedChecks?.size ?: 0
-        val textColor = when {
-            warning -> R.color.vault_diagnostic_warning
+        val textColor = issueTint ?: when {
             state.running -> R.color.vault_blue
             else -> R.color.vault_text_secondary
         }
         root.findViewById<TextView>(R.id.tvDiagnosticElapsed).apply {
             text = when {
                 idle -> getString(R.string.diagnostic_offline_detail)
+                state.cancelling -> ""
+                state.cancelled -> getString(R.string.checks_cancelled_detail)
                 state.running -> getString(R.string.elapsed, android.os.SystemClock.elapsedRealtime() - state.startedAt)
                 snapshot == null -> ""
-                warning -> getString(R.string.diagnostic_summary_partial,
+                issueTint != null -> getString(R.string.diagnostic_summary_partial,
                     snapshot.checks.count { it.state == DiagnosticState.PASSED }, count,
                     snapshot.checks.count { it.state == DiagnosticState.FAILED })
                 else -> getString(R.string.diagnostic_summary_success, count, state.elapsedMs / 1000.0)
@@ -300,7 +325,7 @@ class DiagnosticsFragment : Fragment() {
             setTextColor(context.getColor(textColor))
         }
         root.findViewById<LinearProgressIndicator>(R.id.diagnosticProgress).apply {
-            visibility = if (state.running && count > 0) View.VISIBLE else View.GONE
+            visibility = if (state.running && !state.cancelling && count > 0) View.VISIBLE else View.GONE
             max = count.coerceAtLeast(1)
             progress = snapshot?.checks?.size ?: 0
         }
@@ -322,7 +347,7 @@ class DiagnosticsFragment : Fragment() {
         labels.filter { it.key in snapshot.plannedChecks }.forEach { (stage, label) ->
             val check = snapshot.checks.firstOrNull { it.stage == stage }
             val summary = when {
-                state.running && snapshot.activeStage == stage && check == null -> getString(R.string.checking)
+                state.running && !state.cancelling && snapshot.activeStage == stage && check == null -> getString(R.string.checking)
                 check == null || check.attempted == 0u -> getString(R.string.not_measured)
                 else -> getString(R.string.probe_detail, check.passed.toLong(), check.attempted.toLong(),
                     if (check.sampleCount > 0u) "${check.durationMs} ms" else "—")
@@ -367,7 +392,7 @@ class DiagnosticsFragment : Fragment() {
 
     private fun rowTint(state: DiagnosticState?): Int = when (state) {
         DiagnosticState.PASSED -> R.color.vault_blue
-        DiagnosticState.FAILED -> R.color.vault_diagnostic_warning
+        DiagnosticState.FAILED -> R.color.vault_danger
         else -> R.color.vault_text_secondary
     }
 
@@ -377,17 +402,13 @@ class DiagnosticsFragment : Fragment() {
         row.findViewById<View>(R.id.checkHeader).stateDescription = if (result.probes.isEmpty()) null else
             getString(if (isExpanded) R.string.diagnostic_expanded else R.string.diagnostic_collapsed)
         row.findViewById<View>(R.id.checkChevron).rotation = if (isExpanded) 90f else 0f
-        val passed = result.state == DiagnosticState.PASSED
-        val badge = when {
-            passed && isExpanded -> R.color.vault_blue
-            passed -> R.color.vault_indigo_soft
-            else -> R.color.vault_surface_subtle
-        }
-        row.findViewById<View>(R.id.checkStatusBadge).backgroundTintList = ColorStateList.valueOf(row.context.getColor(badge))
         row.findViewById<ImageView>(R.id.checkIcon).apply {
-            setImageResource(if (passed) R.drawable.ic_check else R.drawable.ic_info)
-            imageTintList = ColorStateList.valueOf(context.getColor(
-                if (passed && isExpanded) R.color.vault_on_primary else rowTint(result.state)))
+            setImageResource(when (result.state) {
+                DiagnosticState.PASSED -> R.drawable.ic_check
+                DiagnosticState.FAILED -> R.drawable.ic_error
+                else -> R.drawable.ic_diagnostic_skipped
+            })
+            imageTintList = ColorStateList.valueOf(context.getColor(rowTint(result.state)))
         }
         row.findViewById<View>(R.id.checkDetails).visibility = if (isExpanded) View.VISIBLE else View.GONE
         val details = row.findViewById<LinearLayout>(R.id.checkProbeLines)
@@ -429,12 +450,20 @@ class DiagnosticsFragment : Fragment() {
             .setPrimaryClip(ClipData.newPlainText(getString(R.string.runtime_logs), logText))
         val hint = root.findViewById<TextView>(R.id.tvLogHint)
         hint.setText(R.string.diagnostic_logs_copied)
-        hint.setTextColor(root.context.getColor(R.color.vault_blue))
+        val tint = root.context.getColor(R.color.vault_blue)
+        hint.setTextColor(tint)
+        val copiedIcon = root.context.getDrawable(R.drawable.ic_check)?.mutate()?.apply {
+            val size = (16 * resources.displayMetrics.density).roundToInt()
+            setBounds(0, 0, size, size)
+            setTint(tint)
+        }
+        hint.setCompoundDrawablesRelative(copiedIcon, null, null, null)
         logCopyFeedback?.cancel()
         logCopyFeedback = viewLifecycleOwner.lifecycleScope.launch {
             delay(2000)
             hint.setText(R.string.log_selection_hint)
             hint.setTextColor(root.context.getColor(R.color.vault_text_secondary))
+            hint.setCompoundDrawablesRelative(null, null, null, null)
         }
     }
 

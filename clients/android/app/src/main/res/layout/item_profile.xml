@@ -12,10 +12,10 @@
             android:background="?attr/selectableItemBackground" android:clickable="true"
             android:focusable="true" android:gravity="center_vertical" android:orientation="horizontal">
             <FrameLayout android:layout_width="36dp" android:layout_height="36dp"
-                android:background="@drawable/vault_bg_icon_tile" android:padding="8dp">
+                android:padding="8dp">
                 <ImageView android:layout_width="match_parent" android:layout_height="match_parent"
                     android:importantForAccessibility="no" android:src="@drawable/ic_server_rack"
-                    app:tint="@color/vault_blue"/>
+                    app:tint="@color/vault_text_secondary"/>
             </FrameLayout>
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_marginStart="10dp" android:layout_weight="1" android:orientation="vertical">
@@ -31,8 +31,8 @@
             android:layout_height="wrap_content" android:layout_marginHorizontal="6dp"
             android:gravity="center_horizontal" android:orientation="vertical">
             <ImageView android:layout_width="24dp" android:layout_height="24dp"
-                android:background="@drawable/vault_bg_icon_tile" android:contentDescription="@string/used_for_connection"
-                android:padding="5dp" app:srcCompat="@drawable/ic_check" app:tint="@color/vault_blue"/>
+                android:contentDescription="@string/used_for_connection"
+                app:srcCompat="@drawable/ic_check" app:tint="@color/vault_blue"/>
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginTop="4dp" android:text="@string/profile_active"
                 android:textColor="@color/vault_blue" android:textSize="9sp" android:textStyle="bold"/>

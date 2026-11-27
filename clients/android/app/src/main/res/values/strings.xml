@@ -36,7 +36,10 @@
 
     <!-- Navigation -->
     <string name="nav_status">Status</string>
+    <string name="nav_status_compact">VPN</string>
     <string name="nav_configure">Configure</string>
+    <string name="nav_configure_compact">Setup</string>
+    <string name="nav_diagnostics_compact">Tests</string>
     <string name="nav_about">About</string>
 
     <!-- Status Fragment -->
@@ -57,8 +60,8 @@
     <string name="server_host">Server Host</string>
     <string name="port">Port</string>
     <string name="password">Password</string>
-    <string name="dns_ipv4_servers">IPv4 DNS (comma separated)</string>
-    <string name="dns_ipv6_servers">IPv6 DNS (comma separated)</string>
+    <string name="dns_ipv4_servers">IPv4 DNS</string>
+    <string name="dns_ipv6_servers">IPv6 DNS</string>
     <string name="error_port_invalid">Invalid port number</string>
     <string name="error_password_required">Password is required</string>
 
@@ -86,8 +89,7 @@
     <string name="device_id">Device ID</string>
     <string name="mtu">MTU</string>
     <string name="mtu_help">1280–1427. Leave empty for automatic.</string>
-    <string name="dns_ipv4_help">Leave empty for 1.1.1.1,8.8.8.8. Used when the tunnel has IPv4.</string>
-    <string name="dns_ipv6_help">Leave empty for Google DNS: 2001:4860:4860::8888,2001:4860:4860::8844. Used when the tunnel has IPv6.</string>
+    <string name="dns_defaults_help">Leave empty for defaults. Only assigned tunnel families are used.</string>
     <string name="probe_domains">Probe domains</string>
     <string name="probe_help">Domains separated by commas. Leave empty for defaults.</string>
     <string name="error_host_invalid">Enter a server IP or hostname without a URL scheme.</string>
@@ -103,6 +105,10 @@
     <string name="run_checks">Start</string>
     <string name="run_again">Run again</string>
     <string name="checking">Checking connection…</string>
+    <string name="cancel_checks">Cancel checks</string>
+    <string name="checks_cancelling">Cancelling…</string>
+    <string name="checks_cancelled">Checks cancelled</string>
+    <string name="checks_cancelled_detail">Completed results are still available.</string>
     <string name="checks_intro">Test VPN DNS, TCP and HTTPS, plus application access.</string>
     <string name="checks_disconnected">Run application access checks without connecting. Tunnel checks are available after connecting. Logs remain available.</string>
     <string name="checks_passed">Connectivity checks passed</string>

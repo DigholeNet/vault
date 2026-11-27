@@ -9,6 +9,10 @@ struct IosConfigureView: View {
     @EnvironmentObject var config: VaultConfig
     @EnvironmentObject var languageManager: LanguageManager
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption) private var fieldLabelSize = 12.0
+    @ScaledMetric(relativeTo: .body) private var fieldTextSize = 16.0
+    @State private var pageWidth: CGFloat = .infinity
     @State private var isSecured = true
     @State private var draft = ConnectionDraft()
     @State private var originalName: String?
@@ -26,6 +30,7 @@ struct IosConfigureView: View {
         originalName = name
         draft = name.map { config.draft(for: $0) } ?? ConnectionDraft()
         feedback = nil
+        isSecured = true
         isEditing = true
     }
 
@@ -44,11 +49,24 @@ struct IosConfigureView: View {
     }
 
     var body: some View {
-        Group {
-            if isEditing { editor } else { profileList }
-        }
+        profileList
         .vaultScreenBackground()
-        .navigationBarHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { pageWidth = $0 }
+        .navigationDestination(isPresented: $isEditing) {
+            editor
+                .vaultScreenBackground()
+                .navigationTitle(languageManager.tr("Profile Details"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar(.visible, for: .navigationBar)
+                .toolbar(.hidden, for: .tabBar)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(languageManager.tr("Save"), action: save)
+                            .disabled(validationError != nil)
+                    }
+                }
+        }
         .onChange(of: opensNewProfile.wrappedValue, initial: true) { _, open in
             guard open else { return }
             opensNewProfile.wrappedValue = false
@@ -134,7 +152,11 @@ struct IosConfigureView: View {
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(VaultTheme.textPrimary)
                     HStack(spacing: 14) {
-                        VaultIconTile(systemName: "globe", size: 40)
+                        Image(systemName: "globe")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundStyle(VaultTheme.textSecondary)
+                            .frame(width: 40)
+                            .accessibilityHidden(true)
                         Text(languageManager.tr("Language"))
                             .font(.system(size: 15, weight: .medium))
                         Spacer()
@@ -154,23 +176,30 @@ struct IosConfigureView: View {
                     detail: languageManager.tr("Server, DNS and MTU changes apply the next time you connect.")
                 )
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, pageWidth <= 360 ? 16 : 20)
             .padding(.bottom, 20)
         }
     }
 
     private func profileRow(_ profile: VaultProfile) -> some View {
         let selected = config.selectedProfileName == profile.name
-        return HStack(spacing: 12) {
+        let layout = dynamicTypeSize.isAccessibilitySize || pageWidth <= 360
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             Button { edit(profile.name) } label: {
                 HStack(spacing: 12) {
-                    VaultIconTile(systemName: "server.rack")
+                    Image(systemName: "server.rack")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(VaultTheme.textSecondary)
+                        .frame(width: 36)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 5) {
                         Text(profile.name)
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(VaultTheme.textPrimary)
                         ProfileServerLabel(host: profile.host, port: profile.port)
-                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 0)
                 }
@@ -178,11 +207,10 @@ struct IosConfigureView: View {
             .buttonStyle(.plain)
             if selected {
                 VStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 24))
+                    VaultStatusIcon(kind: .passed, size: 24)
                         .foregroundStyle(VaultTheme.primary)
                     Text(languageManager.tr("In use"))
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(VaultTheme.primary)
                 }
                 .accessibilityElement(children: .combine)
@@ -196,10 +224,10 @@ struct IosConfigureView: View {
                     }
                 }
                 .buttonStyle(VaultSecondaryButtonStyle())
-                .frame(width: 62)
+                .fixedSize(horizontal: true, vertical: false)
             }
         }
-        .vaultCard(padding: 14)
+        .vaultCard(padding: 16)
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(selected ? VaultTheme.primary.opacity(0.45) : Color.clear, lineWidth: 1)
@@ -208,41 +236,18 @@ struct IosConfigureView: View {
 
     private var editor: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Button {
-                    IosKeyboardDismissal.dismiss()
-                    isEditing = false
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                }
-                .foregroundStyle(VaultTheme.textPrimary)
-                Text(languageManager.tr("Profile Details"))
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(VaultTheme.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer()
-                Button(languageManager.tr("Save"), action: save)
-                    .buttonStyle(VaultSecondaryButtonStyle())
-                    .frame(width: 72)
-                    .disabled(validationError != nil)
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
-
             ScrollView {
-                VStack(spacing: 12) {
+                VStack(spacing: 16) {
                     VaultSection(languageManager.tr("Basic information")) {
                         field(languageManager.tr("Profile Name")) {
                             TextField(languageManager.tr("Profile Name"), text: $draft.name)
                                 .autocorrectionDisabled()
                                 .disabled(isActiveProfile)
                         }
-                        field(languageManager.tr("Device ID")) {
-                            TextField("ID", text: $config.id).disabled(true)
-                                .font(.system(size: 13, design: .monospaced))
+                        field(languageManager.tr("Device ID"), readOnly: true) {
+                            Text(config.id)
+                                .monospaced()
+                                .textSelection(.enabled)
                         }
                     }
 
@@ -271,8 +276,11 @@ struct IosConfigureView: View {
                                 .textInputAutocapitalization(.never)
                                 Button { isSecured.toggle() } label: {
                                     Image(systemName: isSecured ? "eye.slash" : "eye")
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
                                 }
                                 .foregroundStyle(VaultTheme.textSecondary)
+                                .accessibilityLabel(Text(isSecured ? "Show password" : "Hide password"))
                             }
                         }
                     }
@@ -317,9 +325,11 @@ struct IosConfigureView: View {
                             IosKeyboardDismissal.dismiss()
                             confirmDelete = true
                         }
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 48)
                         .foregroundStyle(VaultTheme.danger)
+                        .background(VaultTheme.failureSurface, in: RoundedRectangle(cornerRadius: 14))
+                        .buttonStyle(.plain)
                         .disabled(isActiveProfile)
                     }
                     Text(languageManager.tr("Save changes before connecting."))
@@ -327,7 +337,7 @@ struct IosConfigureView: View {
                         .foregroundStyle(VaultTheme.textSecondary)
                         .frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, pageWidth <= 360 ? 16 : 20)
                 .padding(.bottom, 20)
             }
             .scrollDismissesKeyboard(.interactively)
@@ -335,21 +345,30 @@ struct IosConfigureView: View {
         }
     }
 
-    private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func field<Content: View>(
+        _ title: String,
+        readOnly: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 11))
+                .font(.system(size: fieldLabelSize))
                 .foregroundStyle(VaultTheme.textSecondary)
             content()
-                .font(.system(size: 14))
+                .font(.system(size: fieldTextSize))
                 .foregroundStyle(VaultTheme.textPrimary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(VaultTheme.surfaceSubtle, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        .background(
+            readOnly ? VaultTheme.surfaceMuted : VaultTheme.fieldSurface,
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(VaultTheme.outline)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(readOnly ? Color.clear : VaultTheme.fieldOutline)
+                .allowsHitTesting(false)
         }
     }
 

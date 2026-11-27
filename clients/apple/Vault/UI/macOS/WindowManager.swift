@@ -17,8 +17,8 @@ final class WindowManager {
             makeWindow(
                 id: "configure",
                 title: "Vault Settings",
-                size: NSSize(width: 720, height: 540),
-                minimum: NSSize(width: 600, height: 430),
+                size: NSSize(width: 800, height: 620),
+                minimum: NSSize(width: 680, height: 520),
                 content:
                 MacosConfigureView(config: config)
                     .environmentObject(appData).environmentObject(LanguageManager.shared)
@@ -60,10 +60,28 @@ final class WindowManager {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: style, backing: .buffered, defer: false)
         window.identifier = NSUserInterfaceItemIdentifier(id)
         window.title = LanguageManager.shared.tr(title)
-        window.minSize = minimum
         window.isReleasedWhenClosed = false
-        window.contentViewController = NSHostingController(rootView: content)
-        let frameName = "vault-\(id)-\(["status", "about"].contains(id) ? "v3" : "v2")"
+        if id == "configure" {
+            // The window owns the size across settings pages with different ideal sizes.
+            let container = NSView()
+            let hostingView = NSHostingView(rootView: content)
+            hostingView.sizingOptions = []
+            hostingView.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(hostingView)
+            NSLayoutConstraint.activate([
+                hostingView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                hostingView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                hostingView.topAnchor.constraint(equalTo: container.topAnchor),
+                hostingView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            window.contentView = container
+            window.minSize = minimum
+            window.setContentSize(size)
+        } else {
+            window.minSize = minimum
+            window.contentViewController = NSHostingController(rootView: content)
+        }
+        let frameName = "vault-\(id)-\(["configure", "status", "about"].contains(id) ? "v3" : "v2")"
         if !window.setFrameUsingName(frameName) { window.center() }
         window.setFrameAutosaveName(frameName)
         return NSWindowController(window: window)

@@ -160,16 +160,16 @@ struct ProbeDomainsEditor: View {
                             .foregroundStyle(VaultTheme.textSecondary)
                             .accessibilityHidden(true)
                         field
-                            .font(.caption)
+                            .font(.subheadline)
                             .accessibilityIdentifier("diagnostics.probeDomains")
                     }
                     .padding(.horizontal, 13)
                     .padding(.vertical, 6)
                     .frame(minHeight: 48)
-                    .background(Color(vaultLight: "FAFAFD", dark: "20253A"), in: RoundedRectangle(cornerRadius: 13))
+                    .background(VaultTheme.fieldSurface, in: RoundedRectangle(cornerRadius: 13))
                     .overlay {
                         RoundedRectangle(cornerRadius: 13)
-                            .strokeBorder(validationError == nil ? Color(vaultLight: "D6DBE8", dark: "30374E") : VaultTheme.danger)
+                            .strokeBorder(validationError == nil ? VaultTheme.fieldOutline : VaultTheme.danger)
                     }
                     guidance
                 }
@@ -180,10 +180,10 @@ struct ProbeDomainsEditor: View {
                         .font(.system(size: 13))
                         .padding(.horizontal, 12)
                         .frame(minHeight: 44)
-                        .background(VaultTheme.surfaceSubtle, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(VaultTheme.fieldSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(validationError == nil ? VaultTheme.outline : VaultTheme.danger)
+                                .strokeBorder(validationError == nil ? VaultTheme.fieldOutline : VaultTheme.danger)
                         }
                     saveButton.frame(width: 72)
                 }

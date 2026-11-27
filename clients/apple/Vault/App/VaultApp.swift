@@ -146,7 +146,7 @@ struct VaultApp: App {
             MacosMenuView(vpnManager: vpnManager)
                 .environmentObject(appData).environmentObject(config).environmentObject(LanguageManager.shared)
         } label: {
-            MacosMenuLabel(appData: appData).environmentObject(LanguageManager.shared)
+            MacosMenuLabel(appData: appData, config: config).environmentObject(LanguageManager.shared)
         }
         .menuBarExtraStyle(.window)
         .commands {

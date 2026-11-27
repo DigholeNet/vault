@@ -13,12 +13,12 @@ private enum IosTab: CaseIterable {
         }
     }
 
-    var symbol: String {
+    var icon: String {
         switch self {
-        case .status: "chart.bar.xaxis"
-        case .configure: "slider.horizontal.3"
-        case .diagnostics: "waveform.path.ecg"
-        case .about: "info.circle"
+        case .status: "VaultTabStatus"
+        case .configure: "VaultTabConfigure"
+        case .diagnostics: "VaultTabDiagnostics"
+        case .about: "VaultTabAbout"
         }
     }
 }
@@ -36,7 +36,7 @@ struct IosMainView: View {
                 NavigationStack {
                     tabContent(tab)
                 }
-                .tabItem { Label(languageManager.tr(tab.titleKey), systemImage: tab.symbol) }
+                .tabItem { Label(languageManager.tr(tab.titleKey), image: tab.icon) }
                 .tag(tab)
             }
         }

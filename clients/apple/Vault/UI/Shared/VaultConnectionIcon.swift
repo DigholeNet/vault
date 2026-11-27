@@ -19,13 +19,23 @@ enum VaultConnectionPhase: Hashable {
         self == .connecting || self == .disconnecting || self == .reconnecting
     }
 
+    func statusTitle(hasProfiles: Bool) -> String {
+        switch self {
+        case .disconnected: hasProfiles ? "Disconnected" : "No configuration"
+        case .connecting: "Connecting…"
+        case .connected: "VPN connected"
+        case .disconnecting: "Disconnecting…"
+        case .reconnecting: "Reconnecting"
+        case .failed: "Connection failed"
+        case .permissionRequired: "VPN permission required"
+        }
+    }
+
     var color: Color {
         switch self {
-        case .connected, .connecting: VaultTheme.primary
-        case .reconnecting: .orange
+        case .connected, .connecting, .reconnecting, .disconnected, .disconnecting: VaultTheme.primary
         case .failed: VaultTheme.danger
         case .permissionRequired: VaultTheme.connectionPermission
-        case .disconnected, .disconnecting: VaultTheme.textDisabled
         }
     }
 
@@ -67,10 +77,10 @@ struct VaultConnectionIcon: View {
                 Circle()
                     .trim(from: 0, to: 0.61)
                     .stroke(
-                        phase == .disconnecting ? VaultTheme.textDisabled : Color(vaultHex: "A5B4FC"),
+                        VaultTheme.primary,
                         style: StrokeStyle(lineWidth: 4, lineCap: .round)
                     )
-                    .frame(width: 50, height: 50)
+                    .frame(width: size * 0.66, height: size * 0.66)
                     .rotationEffect(.degrees(reduceMotion ? -90 : angle))
             }
             .accessibilityHidden(true)
@@ -80,10 +90,19 @@ struct VaultConnectionIcon: View {
                 .tint(phase.color)
                 .accessibilityHidden(true)
         } else {
-            let symbol = showsAddSymbol ? "plus" : (phase.isBusy ? "hourglass" : "power")
             Image(systemName: symbol)
                 .font(.system(size: symbolSize, weight: .medium))
                 .foregroundStyle(showsAddSymbol ? VaultTheme.primary : (glyphColor ?? phase.color))
+        }
+    }
+
+    private var symbol: String {
+        if showsAddSymbol { return "plus" }
+        return switch phase {
+        case .failed: "arrow.clockwise"
+        case .permissionRequired: "exclamationmark.shield"
+        case .connecting, .disconnecting, .reconnecting: "hourglass"
+        case .connected, .disconnected: "power"
         }
     }
 }

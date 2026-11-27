@@ -4,7 +4,7 @@
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:paddingHorizontal="20dp">
+        android:orientation="vertical" android:paddingHorizontal="@dimen/vault_page_inset">
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="@string/nav_diagnostics" android:textAppearance="@style/TextAppearance.Vault.PageTitle.Compact"/>
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -31,20 +31,20 @@
     <ScrollView android:id="@+id/checksPanel" android:layout_width="match_parent"
         android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="vertical" android:paddingHorizontal="20dp"
+            android:orientation="vertical" android:paddingHorizontal="@dimen/vault_page_inset"
             android:paddingTop="12dp" android:paddingBottom="20dp">
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:text="@string/checks_intro" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
             <com.google.android.material.card.MaterialCardView style="@style/Widget.Vault.Card"
                 android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="vertical" android:padding="12dp">
+                    android:orientation="vertical" android:padding="16dp">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:text="@string/test_targets" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
                     <LinearLayout android:id="@+id/probeDomainsField" android:layout_width="match_parent"
                         android:layout_height="wrap_content" android:layout_marginTop="8dp"
-                        android:orientation="vertical" android:gravity="center_vertical" android:minHeight="48dp"
-                        android:paddingHorizontal="10dp" android:paddingVertical="4dp"
+                        android:orientation="vertical" android:gravity="center_vertical" android:minHeight="52dp"
+                        android:paddingHorizontal="12dp" android:paddingVertical="4dp"
                         android:importantForAccessibility="no"
                         android:background="@drawable/vault_bg_diagnostic_field">
                         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -53,7 +53,7 @@
                         <EditText android:id="@id/edtDiagnosticDomains" android:layout_width="match_parent"
                             android:layout_height="wrap_content" android:inputType="textNoSuggestions"
                             android:singleLine="true" android:background="@null" android:padding="0dp"
-                            android:includeFontPadding="false" android:textSize="12sp" android:textColor="@color/vault_text"/>
+                            android:textSize="14sp" android:textColor="@color/vault_text"/>
                     </LinearLayout>
                     <TextView android:id="@+id/tvProbeHelp" android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:layout_marginTop="6dp" android:text="@string/probe_help" android:accessibilityLiveRegion="polite"
@@ -70,18 +70,27 @@
             </com.google.android.material.card.MaterialCardView>
             <com.google.android.material.card.MaterialCardView android:id="@+id/diagnosticSummaryCard"
                 style="@style/Widget.Vault.Card" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginTop="12dp" app:cardCornerRadius="18dp" app:strokeWidth="0dp">
+                android:layout_marginTop="16dp" app:cardCornerRadius="18dp">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal" android:gravity="center_vertical" android:minHeight="54dp"
-                    android:paddingHorizontal="12dp" android:paddingVertical="8dp">
-                    <ImageView android:id="@+id/diagnosticSummaryIcon" android:layout_width="24dp" android:layout_height="24dp"
-                        android:importantForAccessibility="no" android:padding="6dp" android:src="@drawable/ic_info"
-                        android:background="@drawable/vault_bg_status_dot"/>
+                    android:orientation="horizontal" android:gravity="center_vertical" android:minHeight="62dp"
+                    android:paddingHorizontal="16dp" android:paddingVertical="10dp">
+                    <FrameLayout android:layout_width="28dp" android:layout_height="28dp">
+                        <ImageView android:id="@+id/diagnosticSummaryIcon"
+                            android:layout_width="match_parent" android:layout_height="match_parent"
+                            android:importantForAccessibility="no" android:padding="2dp" android:src="@drawable/ic_info"/>
+                        <com.google.android.material.progressindicator.CircularProgressIndicator
+                            android:id="@+id/diagnosticSummarySpinner"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:layout_gravity="center" android:indeterminate="true"
+                            android:importantForAccessibility="no" android:visibility="gone"
+                            app:indicatorColor="@color/vault_blue" app:indicatorSize="22dp"
+                            app:trackThickness="2dp" app:indicatorInset="0dp"/>
+                    </FrameLayout>
                     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:layout_marginStart="10dp" android:orientation="vertical">
+                        android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
                         <TextView android:id="@+id/tvDiagnosticSummary" android:layout_width="match_parent"
                             android:layout_height="wrap_content" android:accessibilityLiveRegion="polite"
-                            android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
+                            android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Title" android:textStyle="bold"/>
                         <TextView android:id="@+id/tvDiagnosticElapsed" android:layout_width="match_parent"
                             android:layout_height="wrap_content" android:layout_marginTop="4dp"
                             android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"
@@ -94,7 +103,7 @@
             </com.google.android.material.card.MaterialCardView>
             <com.google.android.material.button.MaterialButton android:id="@+id/btnRunChecks"
                 style="@style/Widget.Vault.Diagnostics.Primary" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="@string/run_checks"
+                android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="@string/run_checks"
                 app:icon="@drawable/ic_diagnostics" app:iconTint="@color/vault_on_primary"
                 app:iconGravity="textStart" app:iconSize="18dp"/>
             <LinearLayout android:id="@+id/diagnosticRows" android:layout_width="match_parent"
@@ -110,7 +119,7 @@
     </ScrollView>
     <LinearLayout android:id="@+id/logsPanel" android:layout_width="match_parent"
         android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical"
-        android:visibility="gone" android:paddingHorizontal="20dp" android:paddingTop="12dp"
+        android:visibility="gone" android:paddingHorizontal="@dimen/vault_page_inset" android:paddingTop="12dp"
         android:paddingBottom="0dp">
         <FrameLayout android:layout_width="match_parent" android:layout_height="0dp"
             android:layout_weight="1" android:background="@drawable/vault_bg_log">
@@ -120,7 +129,7 @@
                     android:layout_height="wrap_content" android:breakStrategy="simple"
                     android:fontFamily="monospace" android:hyphenationFrequency="none"
                     android:paddingHorizontal="16dp" android:scrollHorizontally="false" android:textColor="@color/vault_log_text"
-                    android:textIsSelectable="true" android:textSize="11sp"/>
+                    android:textIsSelectable="true" android:textSize="12sp"/>
             </ScrollView>
             <LinearLayout android:id="@+id/logState" android:layout_width="wrap_content"
                 android:layout_height="wrap_content" android:layout_gravity="center" android:gravity="center_vertical"
@@ -134,6 +143,7 @@
         </FrameLayout>
         <TextView android:id="@+id/tvLogHint" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="10dp" android:text="@string/log_selection_hint" android:accessibilityLiveRegion="polite"
+            android:drawablePadding="6dp"
             android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="8dp" android:orientation="horizontal">
