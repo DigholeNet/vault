@@ -6,7 +6,6 @@
     <string name="configure_page_subtitle">Choose the server for your next connection.</string>
     <string name="diagnostics_page_subtitle">Check your connection and troubleshoot network issues.</string>
     <string name="about_page_subtitle">Private, secure, open source.</string>
-    <string name="tunnel_features">Encrypted tunnel · Auto reconnect</string>
     <string name="ready_to_connect">Ready to connect</string>
     <string name="ready_to_connect_detail">Review the server configuration, then tap the power button. Network details and live traffic appear after connecting.</string>
     <string name="network_details">Network details</string>
@@ -166,8 +165,6 @@
     <string name="status_connecting_detail">Establishing a secure tunnel</string>
     <string name="status_disconnecting">Disconnecting…</string>
     <string name="status_disconnecting_detail">Closing the secure tunnel</string>
-    <string name="status_reconnecting_detail">Keeping the last connection data</string>
     <string name="status_cancel_connection">Cancel connection</string>
-    <string name="status_recovery_rates">Uplink %1$s/s · Downlink %2$s/s</string>
     <string name="status_using_profile">Using profile: %1$s</string>
 </resources>

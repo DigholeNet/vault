@@ -6,6 +6,9 @@
         <item name="android:textColor">@color/vault_text</item>
         <item name="android:includeFontPadding">false</item>
     </style>
+    <style name="TextAppearance.Vault.PageTitle.Compact" parent="TextAppearance.Vault.PageTitle">
+        <item name="android:textSize">26sp</item>
+    </style>
     <style name="TextAppearance.Vault.Body" parent="TextAppearance.Material3.BodyMedium">
         <item name="android:textSize">14sp</item>
         <item name="android:fontFamily">sans-serif</item>
@@ -14,6 +17,9 @@
     <style name="TextAppearance.Vault.CardTitle" parent="TextAppearance.Vault.Body">
         <item name="android:textSize">13sp</item>
         <item name="android:textStyle">bold</item>
+    </style>
+    <style name="TextAppearance.Vault.InfoCalloutTitle" parent="TextAppearance.Vault.CardTitle">
+        <item name="android:textColor">@color/vault_blue_dark</item>
     </style>
     <style name="TextAppearance.Vault.Supporting" parent="TextAppearance.Material3.BodySmall">
         <item name="android:textSize">12sp</item>

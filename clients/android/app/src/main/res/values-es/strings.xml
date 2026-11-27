@@ -6,7 +6,6 @@
     <string name="configure_page_subtitle">Elige el servidor para tu próxima conexión.</string>
     <string name="diagnostics_page_subtitle">Comprueba la conexión y resuelve problemas de red.</string>
     <string name="about_page_subtitle">Privado, seguro y de código abierto.</string>
-    <string name="tunnel_features">Túnel cifrado · Reconexión automática</string>
     <string name="ready_to_connect">Listo para conectar</string>
     <string name="ready_to_connect_detail">Revisa el servidor y pulsa el botón de encendido. Los detalles y el tráfico aparecen al conectar.</string>
     <string name="network_details">Detalles de red</string>
@@ -165,8 +164,6 @@
     <string name="status_connecting_detail">Estableciendo un túnel seguro</string>
     <string name="status_disconnecting">Desconectando…</string>
     <string name="status_disconnecting_detail">Cerrando el túnel seguro</string>
-    <string name="status_reconnecting_detail">Conservando los últimos datos de conexión</string>
     <string name="status_cancel_connection">Cancelar conexión</string>
-    <string name="status_recovery_rates">Subida %1$s/s · Descarga %2$s/s</string>
     <string name="status_using_profile">Perfil en uso: %1$s</string>
 </resources>

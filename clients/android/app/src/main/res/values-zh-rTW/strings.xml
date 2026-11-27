@@ -6,7 +6,6 @@
     <string name="configure_page_subtitle">選擇下次連線使用的伺服器。</string>
     <string name="diagnostics_page_subtitle">診斷連線並排查網路問題。</string>
     <string name="about_page_subtitle">私密、安全、開源。</string>
-    <string name="tunnel_features">加密隧道 · 自動重連</string>
     <string name="ready_to_connect">準備連線</string>
     <string name="ready_to_connect_detail">確認伺服器設定後，點擊連線按鈕。連線後可查看網路詳情與即時流量。</string>
     <string name="network_details">網路詳情</string>
@@ -165,8 +164,6 @@
     <string name="status_connecting_detail">正在建立安全通道</string>
     <string name="status_disconnecting">斷線中</string>
     <string name="status_disconnecting_detail">正在關閉安全通道</string>
-    <string name="status_reconnecting_detail">保留上次連線資料</string>
     <string name="status_cancel_connection">取消連線</string>
-    <string name="status_recovery_rates">上行 %1$s/s · 下行 %2$s/s</string>
     <string name="status_using_profile">使用設定：%1$s</string>
 </resources>

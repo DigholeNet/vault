@@ -181,6 +181,9 @@ struct MacosConfigureView: View {
                     .accessibilityLabel(languageManager.tr("Delete Profile"))
                     .disabled(originalName == nil || isActiveProfile)
                 }
+                if let profile = config.profiles.first(where: { $0.name == originalName }) {
+                    ProfileServerLabel(host: profile.host, port: profile.port)
+                }
             }
             Section(languageManager.tr("Connection")) {
                 TextField(languageManager.tr("Profile Name"), text: $draft.name)

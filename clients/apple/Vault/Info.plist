@@ -7,5 +7,7 @@
 	     identifier for VaultCore's kAppGroupIdentifier. -->
 	<key>VaultAppGroupID</key>
 	<string>$(APP_GROUP_ID)</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Vault measures latency to the VPN servers you configure on your local network.</string>
 </dict>
 </plist>

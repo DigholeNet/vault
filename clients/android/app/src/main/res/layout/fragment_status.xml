@@ -97,14 +97,13 @@
             android:id="@+id/statusHero"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="356dp"
+            android:minHeight="224dp"
             android:layout_marginTop="16dp"
             android:background="@drawable/vault_bg_hero_neutral"
             android:gravity="center_horizontal"
             android:orientation="vertical"
             android:paddingHorizontal="20dp"
-            android:paddingTop="28dp"
-            android:paddingBottom="28dp">
+            android:paddingVertical="20dp">
             <TextView
                 android:id="@+id/tvStatus"
                 android:layout_width="wrap_content"
@@ -118,16 +117,16 @@
                 android:textStyle="bold"/>
             <FrameLayout
                 android:id="@+id/connectionControl"
-                android:layout_width="92dp"
-                android:layout_height="92dp"
-                android:layout_marginTop="36dp">
+                android:layout_width="76dp"
+                android:layout_height="76dp"
+                android:layout_marginTop="12dp">
                 <ImageButton
                     android:id="@+id/btnToggleVpn"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:background="@drawable/vault_bg_connection_button_neutral"
                     android:contentDescription="@string/toggle_vpn_description"
-                    android:padding="23dp"
+                    android:padding="19dp"
                     android:scaleType="fitCenter"
                     android:src="@drawable/ic_disconnected"/>
                 <com.google.android.material.progressindicator.CircularProgressIndicator
@@ -148,19 +147,19 @@
                 android:id="@+id/connectionDuration"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="17dp"
+                android:layout_marginTop="10dp"
                 android:includeFontPadding="false"
                 android:fontFeatureSettings="tnum"
                 android:gravity="center"
                 android:letterSpacing="0.08"
                 android:textColor="@color/vault_hero_text"
-                android:textSize="28sp"
+                android:textSize="26sp"
                 android:visibility="gone"/>
             <TextView
                 android:id="@+id/tvConnectionAction"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="21dp"
+                android:layout_marginTop="10dp"
                 android:includeFontPadding="false"
                 android:text="@string/status_tap_to_connect"
                 android:textColor="@color/vault_blue"
@@ -170,65 +169,33 @@
                 android:id="@+id/tvStatusDetail"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="8dp"
                 android:includeFontPadding="false"
                 android:gravity="center"
                 android:textColor="@color/vault_text_secondary"
                 android:textSize="12sp"
                 android:visibility="gone"/>
-            <TextView
-                android:id="@+id/tvTunnelFeature"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:minWidth="156dp"
-                android:minHeight="32dp"
-                android:includeFontPadding="false"
-                android:gravity="center"
-                android:background="@drawable/vault_bg_feature"
-                android:text="@string/tunnel_features"
-                android:textColor="@color/vault_text_secondary"
-                android:textSize="11sp"/>
-            <TextView
-                android:id="@+id/connectionRecovery"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:minWidth="284dp"
-                android:maxWidth="284dp"
-                android:minHeight="48dp"
-                android:gravity="center_vertical"
-                android:includeFontPadding="false"
-                android:paddingHorizontal="18dp"
-                android:paddingVertical="8dp"
-                android:background="@drawable/vault_bg_recovery"
-                android:textColor="@color/vault_hero_secondary"
-                android:textSize="11sp"
-                android:visibility="gone"/>
         </LinearLayout>
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/readyCard"
-            style="@style/Widget.Vault.Card"
+            style="@style/Widget.Vault.InfoCallout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:gravity="center_vertical" android:orientation="horizontal" android:padding="18dp">
-                <FrameLayout android:layout_width="28dp" android:layout_height="28dp"
-                    android:background="@drawable/vault_bg_icon_tile" android:padding="6dp">
-                    <ImageView android:layout_width="match_parent" android:layout_height="match_parent"
-                        android:importantForAccessibility="no" android:src="@drawable/ic_info"
-                        app:tint="@color/vault_blue"/>
-                </FrameLayout>
+                android:gravity="top" android:orientation="horizontal" android:padding="18dp">
+                <ImageView android:layout_width="30dp" android:layout_height="30dp"
+                    android:importantForAccessibility="no" android:padding="5dp"
+                    android:src="@drawable/ic_info" app:tint="@color/vault_blue"/>
                 <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
                     android:layout_marginStart="12dp" android:layout_weight="1" android:orientation="vertical">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="@string/ready_to_connect" android:textColor="@color/vault_text"
-                        android:textSize="12sp" android:textStyle="bold"/>
+                        android:text="@string/ready_to_connect"
+                        android:textAppearance="@style/TextAppearance.Vault.InfoCalloutTitle"/>
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:layout_marginTop="5dp" android:text="@string/ready_to_connect_detail"
-                        android:textAppearance="@style/TextAppearance.Vault.Supporting" android:textSize="10.5sp"/>
+                        android:layout_marginTop="6dp" android:text="@string/ready_to_connect_detail"
+                        android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
@@ -241,13 +208,13 @@
             android:layout_marginTop="16dp"
             android:visibility="gone">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="vertical" android:padding="18dp">
+                android:orientation="vertical" android:paddingHorizontal="18dp" android:paddingVertical="14dp">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:text="@string/network_details" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
                 <LinearLayout
                     android:id="@+id/publicIpSection"
                     android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp" android:gravity="center_vertical"
+                    android:layout_marginTop="10dp" android:gravity="center_vertical"
                     android:orientation="horizontal" android:visibility="gone">
                     <ImageView android:layout_width="18dp" android:layout_height="18dp"
                         android:importantForAccessibility="no" android:src="@drawable/ic_public_ip"
@@ -258,15 +225,15 @@
                     <TextView android:id="@+id/tvPublicIpAddress" android:layout_width="0dp"
                         android:layout_height="wrap_content" android:layout_marginStart="12dp"
                         android:layout_weight="1" android:fontFamily="monospace" android:gravity="end"
-                        android:textColor="@color/vault_text" android:textIsSelectable="true" android:textSize="13sp"/>
+                        android:textColor="@color/vault_text" android:textIsSelectable="true" android:includeFontPadding="false" android:textSize="12sp"/>
                 </LinearLayout>
                 <View android:id="@+id/networkDivider" android:layout_width="match_parent"
-                    android:layout_height="1dp" android:layout_marginVertical="14dp"
+                    android:layout_height="1dp" android:layout_marginVertical="7dp"
                     android:background="@color/vault_outline" android:visibility="gone"/>
                 <LinearLayout android:id="@+id/ipAddresses" android:layout_width="match_parent"
                     android:layout_height="wrap_content" android:orientation="vertical">
                     <LinearLayout android:id="@+id/rowIpv4" android:layout_width="match_parent"
-                        android:layout_height="wrap_content" android:layout_marginTop="14dp"
+                        android:layout_height="wrap_content" android:layout_marginTop="6dp"
                         android:gravity="center_vertical" android:orientation="horizontal" android:visibility="gone">
                         <ImageView android:layout_width="18dp" android:layout_height="18dp"
                             android:importantForAccessibility="no" android:src="@drawable/ic_server_rack"
@@ -277,10 +244,10 @@
                         <TextView android:id="@+id/tvIpv4Address" android:layout_width="0dp"
                             android:layout_height="wrap_content" android:layout_marginStart="12dp"
                             android:layout_weight="1" android:fontFamily="monospace" android:gravity="end"
-                            android:textColor="@color/vault_text" android:textIsSelectable="true" android:textSize="13sp"/>
+                            android:textColor="@color/vault_text" android:textIsSelectable="true" android:includeFontPadding="false" android:textSize="12sp"/>
                     </LinearLayout>
                     <LinearLayout android:id="@+id/rowIpv6" android:layout_width="match_parent"
-                        android:layout_height="wrap_content" android:layout_marginTop="12dp"
+                        android:layout_height="wrap_content" android:layout_marginTop="8dp"
                         android:gravity="center_vertical" android:orientation="horizontal" android:visibility="gone">
                         <ImageView android:layout_width="18dp" android:layout_height="18dp"
                             android:importantForAccessibility="no" android:src="@drawable/ic_server_rack"
@@ -291,7 +258,7 @@
                         <TextView android:id="@+id/tvIpv6Address" android:layout_width="0dp"
                             android:layout_height="wrap_content" android:layout_marginStart="12dp"
                             android:layout_weight="1" android:fontFamily="monospace" android:gravity="end"
-                            android:textColor="@color/vault_text" android:textIsSelectable="true" android:textSize="13sp"/>
+                            android:textColor="@color/vault_text" android:textIsSelectable="true" android:includeFontPadding="false" android:textSize="12sp"/>
                     </LinearLayout>
                 </LinearLayout>
             </LinearLayout>
@@ -305,7 +272,7 @@
             android:layout_marginTop="16dp"
             android:visibility="gone">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="vertical" android:padding="18dp">
+                android:orientation="vertical" android:paddingHorizontal="18dp" android:paddingVertical="14dp">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:text="@string/live_traffic" android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -321,17 +288,17 @@
                                 android:text="@string/uplink" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
                         </LinearLayout>
                         <TextView android:id="@+id/tvSentSpeed" android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" android:layout_marginTop="8dp"
+                            android:layout_height="wrap_content" android:layout_marginTop="5dp"
                             android:fontFamily="monospace" android:text="0.00 B/s"
-                            android:textColor="@color/status_uplink" android:textSize="17sp" android:textStyle="bold"/>
+                            android:textColor="@color/status_uplink" android:includeFontPadding="false" android:textSize="17sp" android:textStyle="bold"/>
                         <TextView android:id="@+id/tvSentBytes" android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" android:layout_marginTop="6dp"
+                            android:layout_height="wrap_content" android:layout_marginTop="4dp"
                             android:text="0.00 B" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
                         <TextView android:id="@+id/tvSentPackets" android:layout_width="wrap_content"
                             android:layout_height="wrap_content" android:layout_marginTop="4dp"
                             android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
                     </LinearLayout>
-                    <View android:layout_width="1dp" android:layout_height="92dp"
+                    <View android:layout_width="1dp" android:layout_height="80dp"
                         android:layout_gravity="center_vertical" android:background="@color/vault_outline"/>
                     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
                         android:layout_weight="1" android:gravity="center" android:orientation="vertical">
@@ -344,11 +311,11 @@
                                 android:text="@string/downlink" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
                         </LinearLayout>
                         <TextView android:id="@+id/tvReceivedSpeed" android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" android:layout_marginTop="8dp"
+                            android:layout_height="wrap_content" android:layout_marginTop="5dp"
                             android:fontFamily="monospace" android:text="0.00 B/s"
-                            android:textColor="@color/status_downlink" android:textSize="17sp" android:textStyle="bold"/>
+                            android:textColor="@color/status_downlink" android:includeFontPadding="false" android:textSize="17sp" android:textStyle="bold"/>
                         <TextView android:id="@+id/tvReceivedBytes" android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" android:layout_marginTop="6dp"
+                            android:layout_height="wrap_content" android:layout_marginTop="4dp"
                             android:text="0.00 B" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
                         <TextView android:id="@+id/tvReceivedPackets" android:layout_width="wrap_content"
                             android:layout_height="wrap_content" android:layout_marginTop="4dp"

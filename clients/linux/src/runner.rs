@@ -90,8 +90,10 @@ fn run_inner(signal: Arc<SysSignal>, config: SelectedEdgeConfig) -> anyhow::Resu
     let server_addr = format!("{}:{}", config.get_host(), config.get_port());
     info!(profile = config.get_profile(), "Selected Edge profile");
     info!("Resolving server address: {}", server_addr);
-    let hosts =
-        vault_core::client::resolve_server_candidates(config.get_host(), config.get_port())?;
+    let hosts = vault_core::client::resolve_server_candidates(config.get_host(), config.get_port())
+        .inspect_err(|error| {
+            warn!(host = config.get_host(), latency = "- ms", %error, "Server host latency");
+        })?;
     // Probe each address family's physical exit independently: IPv4 and
     // IPv6 default routes may live on different interfaces with different
     // gateways. A family without a default route contributes no exit; its
@@ -114,6 +116,19 @@ fn run_inner(signal: Arc<SysSignal>, config: SelectedEdgeConfig) -> anyhow::Resu
         assignments,
         peer_routes.socket_setup(),
     )?;
+    let host = config.get_host().to_owned();
+    let candidates = hosts.clone();
+    let latency_probe = std::thread::Builder::new()
+        .name("vault-host-latency".into())
+        .spawn(
+            move || match vault_core::diagnostics::transport::host_latency_ms(&candidates) {
+                Some(ms) => info!(host, latency = %format_args!("{ms} ms"), "Server host latency"),
+                None => warn!(host, latency = "- ms", "Server host latency"),
+            },
+        )
+        .inspect_err(|error| {
+            warn!(host = config.get_host(), latency = "- ms", %error, "Server host latency");
+        });
 
     // Wait for the quit signal; log traffic stats periodically. The
     // session reconnects itself with exponential backoff on failures.
@@ -289,6 +304,9 @@ fn run_inner(signal: Arc<SysSignal>, config: SelectedEdgeConfig) -> anyhow::Resu
     })();
 
     edge.shutdown();
+    if let Ok(probe) = latency_probe {
+        let _ = probe.join();
+    }
     let dns_result = dns.restore();
     drop(edge);
     drop(peer_routes);

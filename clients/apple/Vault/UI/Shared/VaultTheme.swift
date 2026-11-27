@@ -167,21 +167,25 @@ struct VaultIconTile: View {
 
 struct VaultSection<Content: View>: View {
     let title: String
+    let padding: CGFloat
+    let spacing: CGFloat
     @ViewBuilder let content: Content
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(_ title: String, padding: CGFloat = 16, spacing: CGFloat = 12, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.padding = padding
+        self.spacing = spacing
         self.content = content()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: spacing) {
             Text(title)
                 .font(.subheadline.bold())
                 .foregroundStyle(VaultTheme.textPrimary)
             content
         }
-        .vaultCard()
+        .vaultCard(padding: padding)
     }
 }
 
@@ -193,8 +197,10 @@ struct VaultInfoCallout: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "info.circle.fill")
+            Image(systemName: "info.circle")
+                .font(.system(size: 18))
                 .foregroundStyle(VaultTheme.primary)
+                .frame(width: 30, height: 30)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
                 Text(title).font(.system(size: titleSize, weight: .bold))
@@ -270,12 +276,13 @@ struct VaultTrafficColumn: View {
     let packets: UInt64
     let bytes: UInt64
     let rate: UInt64
+    var spacing: CGFloat = 7
     @EnvironmentObject var languageManager: LanguageManager
     @ScaledMetric(relativeTo: .body) private var rateSize = 17.0
     @ScaledMetric(relativeTo: .caption) private var detailSize = 12.0
 
     var body: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: spacing) {
             HStack(spacing: 6) {
                 Image(systemName: symbol).foregroundStyle(color)
                 Text(languageManager.tr(title))

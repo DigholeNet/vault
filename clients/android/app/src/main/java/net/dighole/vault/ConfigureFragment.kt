@@ -3,6 +3,10 @@ package net.dighole.vault
 
 import android.content.Intent
 import android.os.Bundle
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.LineBreakConfigSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -12,7 +16,10 @@ import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import net.dighole.vault.data.VaultConfig
 import net.dighole.vault.data.VaultProfiles
 import net.dighole.vault.data.deleteVaultProfile
@@ -20,6 +27,8 @@ import net.dighole.vault.data.deviceId
 import net.dighole.vault.data.readVaultProfiles
 import net.dighole.vault.data.selectVaultProfile
 import net.dighole.vault.data.writeVaultConfig
+import net.dighole.vaultcore.uniffi.probeHostLatencyMs
+import java.text.NumberFormat
 
 class ConfigureFragment : Fragment() {
     private var fields = emptyList<EditText>()
@@ -30,6 +39,7 @@ class ConfigureFragment : Fragment() {
     private var loading = false
     private var editing = false
     private var opensNewProfile = false
+    private var latencyJob: Job? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View =
         inflater.inflate(R.layout.fragment_configure, container, false)
@@ -97,11 +107,17 @@ class ConfigureFragment : Fragment() {
 
     private fun renderProfiles() {
         val container = view?.findViewById<ViewGroup>(R.id.profileRows) ?: return
+        latencyJob?.cancel()
+        val labelsByHost = mutableMapOf<String, MutableList<Pair<TextView, String>>>()
         container.removeAllViews()
         profiles.profiles.forEach { profile ->
             val row = layoutInflater.inflate(R.layout.item_profile, container, false)
             row.findViewById<TextView>(R.id.profileName).text = profile.name
-            row.findViewById<TextView>(R.id.profileServer).text = "${profile.host}:${profile.port}"
+            row.findViewById<TextView>(R.id.profileServer).also { label ->
+                val address = "${profile.host}:${profile.port}"
+                label.text = "$address · --"
+                labelsByHost.getOrPut(profile.host) { mutableListOf() }.add(label to address)
+            }
             val selected = profile.name == profiles.selectedProfileName
             row.findViewById<View>(R.id.profileSelectedGroup).visibility = if (selected) View.VISIBLE else View.GONE
             (row as com.google.android.material.card.MaterialCardView).strokeColor =
@@ -116,6 +132,25 @@ class ConfigureFragment : Fragment() {
         }
         view?.findViewById<TextView>(R.id.profileEmpty)?.visibility =
             if (profiles.profiles.isEmpty()) View.VISIBLE else View.GONE
+        latencyJob = viewLifecycleOwner.lifecycleScope.launch {
+            val numberFormat = NumberFormat.getIntegerInstance(resources.configuration.locales[0])
+            labelsByHost.forEach { (host, labels) ->
+                launch {
+                    val latency = withContext(latencyDispatcher) { probeHostLatencyMs(host) }
+                    val text = latency?.let { "${numberFormat.format(it.toLong())} ms" } ?: "- ms"
+                    val color = container.context.getColor(if (latency == null) R.color.vault_danger else R.color.vault_blue)
+                    labels.forEach { (label, address) ->
+                        label.text = SpannableStringBuilder("$address · ").apply {
+                            append(text, ForegroundColorSpan(color), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                            setSpan(
+                                LineBreakConfigSpan.createNoBreakSpan(),
+                                address.length + 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun openProfile(name: String) {
@@ -179,7 +214,12 @@ class ConfigureFragment : Fragment() {
         editing = value
         view?.findViewById<View>(R.id.profileList)?.visibility = if (value) View.GONE else View.VISIBLE
         view?.findViewById<View>(R.id.profileEditor)?.visibility = if (value) View.VISIBLE else View.GONE
-        if (value) updateValidation() else renderProfiles()
+        if (value) {
+            latencyJob?.cancel()
+            updateValidation()
+        } else {
+            renderProfiles()
+        }
     }
 
     fun navigateBack(): Boolean {
@@ -340,6 +380,7 @@ class ConfigureFragment : Fragment() {
     }
 
     companion object {
+        private val latencyDispatcher = Dispatchers.IO.limitedParallelism(4)
         const val NEW_PROFILE_REQUEST = "newProfile"
         fun newInstance() = ConfigureFragment()
     }

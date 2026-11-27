@@ -96,6 +96,36 @@ impl NetworkBinding for DefaultNetwork {
     }
 }
 
+/// Measure the configured host's ICMP round trip on an already resolved address.
+/// Try both address families early so a filtered IPv6 address cannot hide IPv4.
+pub fn host_latency_ms(candidates: &[SocketAddr]) -> Option<u64> {
+    let mut candidates = candidates.to_vec();
+    let first = *candidates.first()?;
+    if let Some(index) = candidates
+        .iter()
+        .position(|addr| addr.is_ipv4() != first.is_ipv4())
+    {
+        candidates[1..=index].rotate_right(1);
+    }
+    let cancellation = Cancellation::default();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    for mut address in candidates {
+        let now = Instant::now();
+        if now >= deadline {
+            break;
+        }
+        let context = Context {
+            deadline: deadline.min(now + Duration::from_secs(1)),
+            cancellation: &cancellation,
+        };
+        address.set_port(0);
+        if let Ok(Observation::Ping { rtt_ms }) = ping(address, 1, 64, &DefaultNetwork, &context) {
+            return Some(rtt_ms);
+        }
+    }
+    None
+}
+
 fn perform(
     operation: &Operation,
     domain: &str,
@@ -131,7 +161,13 @@ fn perform(
             address,
             sequence,
             packet_size,
-        } => ping(*address, *sequence, *packet_size, network, context),
+        } => ping(
+            SocketAddr::new(*address, 0),
+            *sequence,
+            *packet_size,
+            network,
+            context,
+        ),
     }
 }
 
@@ -405,7 +441,7 @@ fn https(
 }
 
 fn ping(
-    address: IpAddr,
+    address: SocketAddr,
     sequence: u16,
     packet_size: u16,
     network: &dyn NetworkBinding,
@@ -418,15 +454,27 @@ fn ping(
             "ICMP packet size too small",
         ));
     }
-    let socket = datagram(
-        address,
-        if address.is_ipv6() {
-            Protocol::ICMPV6
-        } else {
-            Protocol::ICMPV4
-        },
-        network,
-    )?;
+    let protocol = if address.is_ipv6() {
+        Protocol::ICMPV6
+    } else {
+        Protocol::ICMPV4
+    };
+    let socket = datagram(address.ip(), protocol, network);
+    #[cfg(target_os = "linux")]
+    let socket = socket.or_else(|failure| {
+        // Edge already has CAP_NET_RAW. Use it when ping_group_range
+        // disallows ICMP datagram sockets for its service account.
+        if failure.kind != ErrorKind::Permission {
+            return Err(failure);
+        }
+        let raw = Socket::new(Domain::for_address(address), Type::RAW, Some(protocol))
+            .map_err(|e| io_error(ErrorKind::Connect, e))?;
+        network
+            .bind(raw.as_raw_fd(), address.is_ipv6())
+            .map_err(|e| io_error(ErrorKind::Connect, e))?;
+        Ok(raw.into())
+    });
+    let socket = socket?;
     #[cfg(target_vendor = "apple")]
     if address.is_ipv4() {
         let one: i32 = 1;
@@ -446,16 +494,16 @@ fn ping(
     }
     let mut packet = vec![0; (packet_size - header) as usize];
     packet[0] = if address.is_ipv6() { 128 } else { 8 };
+    let random = ring::rand::SystemRandom::new();
+    ring::rand::SecureRandom::fill(&random, &mut packet[4..])
+        .map_err(|_| error(ErrorKind::Unavailable, "cannot generate ICMP probe ID"))?;
     packet[6..8].copy_from_slice(&sequence.to_be_bytes());
-    for (i, byte) in packet[8..].iter_mut().enumerate() {
-        *byte = (i % 251) as u8;
-    }
     if address.is_ipv4() {
         let checksum = wire::icmp_checksum(&packet);
         packet[2..4].copy_from_slice(&checksum.to_be_bytes());
     }
     socket
-        .connect(SocketAddr::new(address, 0))
+        .connect(address)
         .map_err(|e| io_error(ErrorKind::Connect, e))?;
     socket
         .set_write_timeout(Some(
@@ -472,7 +520,9 @@ fn ping(
     loop {
         let count =
             receive(&socket, &mut bytes, context).map_err(|e| io_error(ErrorKind::Connect, e))?;
-        if echo_reply(&bytes[..count], address.is_ipv6(), sequence) {
+        if echo_reply(&bytes[..count], address.is_ipv6(), sequence)
+            && bytes[..count].ends_with(&packet[8..])
+        {
             return Ok(Observation::Ping {
                 rtt_ms: start.elapsed().as_millis() as u64,
             });

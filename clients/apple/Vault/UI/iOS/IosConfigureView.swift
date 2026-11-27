@@ -169,9 +169,7 @@ struct IosConfigureView: View {
                         Text(profile.name)
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(VaultTheme.textPrimary)
-                        Text(verbatim: "\(profile.host):\(profile.port)")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(VaultTheme.textSecondary)
+                        ProfileServerLabel(host: profile.host, port: profile.port)
                             .lineLimit(2)
                     }
                     Spacer(minLength: 0)

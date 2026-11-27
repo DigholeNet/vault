@@ -3,25 +3,25 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     style="@style/Widget.Vault.Card"
     android:layout_width="match_parent" android:layout_height="wrap_content"
-    android:layout_marginTop="12dp" app:cardCornerRadius="18dp">
+    android:layout_marginTop="8dp" app:cardCornerRadius="16dp">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:paddingHorizontal="16dp">
+        android:orientation="vertical" android:paddingHorizontal="12dp">
         <LinearLayout android:id="@+id/checkHeader" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:gravity="center_vertical" android:orientation="horizontal" android:minHeight="68dp"
-            android:paddingVertical="10dp">
-            <FrameLayout android:id="@+id/checkStatusBadge" android:layout_width="26dp" android:layout_height="26dp"
-                android:background="@drawable/vault_bg_status_dot" android:padding="5dp">
+            android:gravity="center_vertical" android:orientation="horizontal" android:minHeight="56dp"
+            android:paddingVertical="8dp">
+            <FrameLayout android:id="@+id/checkStatusBadge" android:layout_width="22dp" android:layout_height="22dp"
+                android:background="@drawable/vault_bg_status_dot" android:padding="4dp">
                 <ImageView android:id="@+id/checkIcon" android:layout_width="match_parent"
                     android:layout_height="match_parent" android:importantForAccessibility="no"
                     android:src="@drawable/ic_check" app:tint="@color/vault_blue"/>
             </FrameLayout>
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_marginStart="12dp" android:layout_weight="1" android:orientation="vertical">
+                android:layout_marginStart="10dp" android:layout_weight="1" android:orientation="vertical">
                 <TextView android:id="@+id/checkTitle" android:layout_width="match_parent"
                     android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.Vault.CardTitle"
                     android:textSize="13sp"/>
                 <TextView android:id="@+id/checkSummary" android:layout_width="match_parent"
-                    android:layout_height="wrap_content" android:layout_marginTop="5dp"
+                    android:layout_height="wrap_content" android:layout_marginTop="4dp"
                     android:textAppearance="@style/TextAppearance.Vault.Diagnostics.Secondary"/>
             </LinearLayout>
             <ImageView android:id="@+id/checkChevron" android:layout_width="16dp"

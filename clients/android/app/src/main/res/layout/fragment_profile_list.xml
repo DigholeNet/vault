@@ -12,7 +12,7 @@
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:orientation="vertical">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="@string/nav_configure" android:textAppearance="@style/TextAppearance.Vault.PageTitle"/>
+                    android:text="@string/nav_configure" android:textAppearance="@style/TextAppearance.Vault.PageTitle.Compact"/>
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:layout_marginTop="6dp" android:text="@string/configure_page_subtitle"
                     android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
@@ -22,55 +22,57 @@
                 style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
                 android:layout_width="48dp" android:layout_height="48dp"
                 android:layout_marginStart="12dp" android:contentDescription="@string/add_profile"
-                app:icon="@drawable/ic_add" app:iconTint="@color/vault_blue"/>
+                android:insetLeft="4dp" android:insetRight="4dp" android:insetTop="4dp" android:insetBottom="4dp"
+                app:icon="@drawable/ic_add" app:iconSize="20dp" app:iconTint="@color/vault_blue"/>
         </LinearLayout>
         <TextView android:id="@+id/profileEmpty" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="20dp"
+            android:layout_height="wrap_content" android:layout_marginTop="16dp"
             android:background="@drawable/vault_bg_panel_muted" android:padding="24dp"
             android:text="@string/add_profile_empty" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
         <LinearLayout android:id="@+id/profileRows" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="20dp"
+            android:layout_height="wrap_content" android:layout_marginTop="16dp"
             android:orientation="vertical"/>
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_marginTop="24dp" android:text="@string/preferences"
+            android:layout_marginTop="16dp" android:text="@string/preferences"
             android:textAppearance="@style/TextAppearance.Vault.CardTitle"/>
         <com.google.android.material.card.MaterialCardView style="@style/Widget.Vault.Card"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="12dp">
+            android:layout_marginTop="8dp" app:cardCornerRadius="18dp">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:gravity="center_vertical" android:orientation="horizontal" android:padding="16dp">
-                <FrameLayout android:layout_width="40dp" android:layout_height="40dp"
-                    android:background="@drawable/vault_bg_icon_tile" android:padding="10dp">
+                android:gravity="center_vertical" android:orientation="horizontal" android:paddingHorizontal="12dp" android:paddingVertical="8dp">
+                <FrameLayout android:layout_width="32dp" android:layout_height="32dp"
+                    android:background="@drawable/vault_bg_icon_tile" android:padding="6dp">
                     <ImageView android:layout_width="match_parent" android:layout_height="match_parent"
                         android:importantForAccessibility="no" android:src="@drawable/ic_public_ip"
                         app:tint="@color/vault_blue"/>
                 </FrameLayout>
                 <TextView android:id="@+id/languageLabel" android:layout_width="0dp"
-                    android:layout_height="wrap_content" android:layout_marginStart="14dp"
+                    android:layout_height="wrap_content" android:layout_marginStart="12dp" android:textSize="13sp"
                     android:layout_weight="1" android:text="@string/language"
                     android:textAppearance="@style/TextAppearance.Vault.Body"/>
                 <Spinner android:id="@+id/languageSpinner" android:layout_width="wrap_content"
                     android:layout_height="48dp"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="16dp" android:background="@drawable/vault_bg_badge"
-            android:gravity="center_vertical" android:orientation="horizontal" android:padding="20dp">
-            <FrameLayout android:layout_width="30dp" android:layout_height="30dp"
-                android:background="@drawable/vault_bg_icon_tile" android:padding="6dp">
-                <ImageView android:layout_width="match_parent" android:layout_height="match_parent"
-                    android:importantForAccessibility="no" android:src="@drawable/ic_info"
-                    app:tint="@color/vault_blue"/>
-            </FrameLayout>
-            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_marginStart="12dp" android:layout_weight="1" android:orientation="vertical">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="@string/save_before_connecting_title" android:textColor="@color/vault_blue_dark"
-                    android:textSize="13sp" android:textStyle="bold"/>
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp" android:text="@string/save_before_connecting_detail"
-                    android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
+        <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.Vault.InfoCallout"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="16dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="top" android:orientation="horizontal" android:padding="18dp">
+                <ImageView android:layout_width="30dp" android:layout_height="30dp"
+                    android:importantForAccessibility="no" android:padding="5dp"
+                    android:src="@drawable/ic_info" app:tint="@color/vault_blue"/>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp" android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="@string/save_before_connecting_title"
+                        android:textAppearance="@style/TextAppearance.Vault.InfoCalloutTitle"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp" android:text="@string/save_before_connecting_detail"
+                        android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
+                </LinearLayout>
             </LinearLayout>
-        </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
 </ScrollView>

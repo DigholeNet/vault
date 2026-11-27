@@ -15,7 +15,6 @@
     <color name="vault_hero_text">#F8FAFF</color>
     <color name="vault_hero_secondary">#C7D2FE</color>
     <color name="vault_on_primary">#1E1B4B</color>
-    <color name="vault_feature_background">#2A3045</color>
     <color name="vault_segmented_background">#20253A</color>
     <color name="vault_log_text">#C7D2FE</color>
     <color name="vault_profile_selected_outline">#80A5B4FC</color>

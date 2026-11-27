@@ -5,6 +5,6 @@
     android:minHeight="48dp"
     android:gravity="center_vertical"
     android:paddingHorizontal="0dp"
-    android:textSize="14sp"
+    android:textSize="12sp"
     android:fontFamily="sans-serif"
     android:textColor="@color/configure_body" />

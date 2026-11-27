@@ -6,6 +6,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use vault_core::diagnostics as core;
 
+/// Blocking host resolution and ICMP probe. Call from a background thread.
+#[uniffi::export]
+pub fn probe_host_latency_ms(host: String) -> Option<u64> {
+    let addresses = vault_core::client::resolve_server_candidates(host.trim(), 0).ok()?;
+    core::transport::host_latency_ms(&addresses)
+}
+
 macro_rules! shared_enum {
     ($name:ident, $core:ident, $($variant:ident),+ $(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]

@@ -11,10 +11,9 @@ struct IosStatusView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .title2) private var statusTitleSize = 21.0
-    @ScaledMetric(relativeTo: .title) private var durationSize = 28.0
+    @ScaledMetric(relativeTo: .title) private var durationSize = 26.0
     @ScaledMetric(relativeTo: .body) private var actionSize = 15.0
     @ScaledMetric(relativeTo: .caption) private var detailSize = 12.0
-    @ScaledMetric(relativeTo: .caption) private var badgeSize = 11.0
     @State private var pendingProfileSwitch: String?
 
     private var parsedIPs: (ipv4: String?, ipv6: String?) {
@@ -126,9 +125,8 @@ struct IosStatusView: View {
         case .disconnected:
             noProfile ? languageManager.tr("No server configuration has been added.")
                 : config.selectedProfileName.map { languageManager.tr("Using profile: %@", $0) }
-        case .connecting: languageManager.tr("Establishing a secure tunnel")
+        case .connecting, .reconnecting: languageManager.tr("Establishing a secure tunnel")
         case .disconnecting: languageManager.tr("Closing the secure tunnel")
-        case .reconnecting: languageManager.tr("Keeping the last connection data")
         case .connected:
             (appData.runningProfileName ?? vpnManager.activeProfileName)
                 .map { "\($0) · \(languageManager.tr(connectionActionTitle))" }
@@ -155,7 +153,7 @@ struct IosStatusView: View {
             .disabled(phase == .disconnecting || !appData.canToggleConnection)
             .accessibilityLabel(languageManager.tr(phase == .connecting ? "Cancel Connection" : connectionActionTitle))
             .accessibilityIdentifier("vpn.connection")
-            .padding(.top, 36)
+            .padding(.top, 12)
 
             if phase == .connected {
                 ConnectionDurationView(
@@ -165,13 +163,13 @@ struct IosStatusView: View {
                     color: VaultTheme.heroText,
                     verticalPadding: 0
                 )
-                .padding(.top, 17)
+                .padding(.top, 10)
             } else {
                 Text(languageManager.tr(connectionActionTitle))
                     .font(.system(size: actionSize, weight: .semibold))
                     .foregroundStyle(usesIndigoCard ? VaultTheme.heroText : VaultTheme.primary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 21)
+                    .padding(.top, 10)
             }
 
             if let detail = connectionDetail {
@@ -179,30 +177,14 @@ struct IosStatusView: View {
                     .font(.system(size: detailSize))
                     .foregroundStyle(usesIndigoCard ? VaultTheme.heroSecondary : VaultTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, phase == .connected ? 17 : 16)
-            }
-
-            if phase == .connected || (phase == .disconnected && !noProfile) {
-                Text(languageManager.tr("Encrypted tunnel · Auto reconnect"))
-                    .font(.system(size: badgeSize))
-                    .foregroundStyle(usesIndigoCard ? VaultTheme.heroSecondary : VaultTheme.textSecondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(minWidth: 156, minHeight: 32)
-                    .background(usesIndigoCard ? Color.white.opacity(0.09) : VaultTheme.surfaceSubtle, in: Capsule())
-                    .padding(.top, phase == .connected ? 24 : 22)
-            }
-
-            if phase == .reconnecting {
-                recoveryDetails.padding(.top, 16)
+                    .padding(.top, 8)
             }
         }
         .multilineTextAlignment(.center)
         .padding(.horizontal, 20)
-        .padding(.top, 27)
-        .padding(.bottom, 28)
+        .padding(.vertical, 20)
         .frame(maxWidth: .infinity)
-        .frame(minHeight: 356, alignment: .top)
+        .frame(minHeight: 224, alignment: .top)
         .background {
             if phase == .connected { VaultHeroBackground(showsDecoration: false) }
             else if usesIndigoCard { Color(vaultHex: "312E81") }
@@ -218,8 +200,8 @@ struct IosStatusView: View {
     private var statusIcon: some View {
         VaultConnectionIcon(
             phase: phase,
-            size: 92,
-            symbolSize: 46,
+            size: 76,
+            symbolSize: 38,
             fill: usesIndigoCard ? VaultTheme.heroText
                 : (colorScheme == .dark ? Color(vaultHex: "2A3045") : VaultTheme.surface),
             glyphColor: phase == .connected ? VaultTheme.heroPower : nil,
@@ -228,29 +210,12 @@ struct IosStatusView: View {
         )
     }
 
-    private var recoveryDetails: some View {
-        let addresses = [parsedIPs.ipv4.map { "IPv4  \($0)" }, parsedIPs.ipv6.map { "IPv6  \($0)" }].compactMap { $0 }
-        let up = PacketStats.formatBytes(appData.bytesSentPerSecond) + "/s"
-        let down = PacketStats.formatBytes(appData.bytesReceivedPerSecond) + "/s"
-        return VStack(alignment: .leading, spacing: 4) {
-            if !addresses.isEmpty { Text(addresses.joined(separator: " · ")).monospaced() }
-            Text(languageManager.tr("Uplink") + " \(up) · " + languageManager.tr("Downlink") + " \(down)")
-        }
-        .font(.system(size: badgeSize))
-        .foregroundStyle(VaultTheme.heroSecondary)
-        .multilineTextAlignment(.leading)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 8)
-        .frame(idealWidth: 284, maxWidth: 284, minHeight: 48, alignment: .leading)
-        .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
-    }
-
     @ViewBuilder
     private var networkDetails: some View {
         let ips = parsedIPs
         if !appData.publicIp.isEmpty || ips.ipv4 != nil || ips.ipv6 != nil {
-            VaultSection(languageManager.tr("Network details")) {
-                VStack(spacing: 14) {
+            VaultSection(languageManager.tr("Network details"), padding: 14, spacing: 10) {
+                VStack(spacing: 8) {
                     if !appData.publicIp.isEmpty {
                         VaultAddressRow(title: "WAN", address: appData.publicIp, symbol: "globe")
                     }
@@ -269,22 +234,22 @@ struct IosStatusView: View {
     }
 
     private var traffic: some View {
-        VaultSection(languageManager.tr("Live traffic")) {
+        VaultSection(languageManager.tr("Live traffic"), padding: 14, spacing: 10) {
             let stacked = dynamicTypeSize.isAccessibilitySize
             let layout = stacked ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 0))
             layout {
                 VaultTrafficColumn(
                     title: "Uplink", symbol: "arrow.up", color: VaultTheme.primary,
                     packets: appData.packetsSent, bytes: appData.bytesSent,
-                    rate: appData.bytesSentPerSecond
+                    rate: appData.bytesSentPerSecond, spacing: 4
                 )
                 Rectangle()
                     .fill(VaultTheme.outline)
-                    .frame(width: stacked ? nil : 1, height: stacked ? 1 : 92)
+                    .frame(width: stacked ? nil : 1, height: stacked ? 1 : 80)
                 VaultTrafficColumn(
                     title: "Downlink", symbol: "arrow.down", color: VaultTheme.downlink,
                     packets: appData.packetsReceived, bytes: appData.bytesReceived,
-                    rate: appData.bytesReceivedPerSecond
+                    rate: appData.bytesReceivedPerSecond, spacing: 4
                 )
             }
         }

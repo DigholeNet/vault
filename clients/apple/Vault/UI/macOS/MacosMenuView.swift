@@ -210,8 +210,6 @@ struct MacosMenuView: View {
             } else {
                 inactiveConnectionDetails
             }
-
-            if !failed { featureBadge.padding(.top, active ? 8 : 12) }
         }
         .padding(.horizontal, active ? 10 : 20)
         .padding(.top, active ? 16 : 20)
@@ -230,18 +228,6 @@ struct MacosMenuView: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(active ? Color.clear : VaultTheme.outline)
         }
-    }
-
-    private var featureBadge: some View {
-        Text(languageManager.tr("Encrypted tunnel · Auto reconnect"))
-            .font(.system(size: 10))
-            .foregroundStyle(active ? VaultTheme.heroSecondary : VaultTheme.textSecondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(
-                active ? Color.white.opacity(0.09) : VaultTheme.surfaceSubtle,
-                in: Capsule()
-            )
     }
 
     @ViewBuilder

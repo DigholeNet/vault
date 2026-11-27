@@ -71,7 +71,7 @@ final class VaultUITests: XCTestCase {
         XCTAssertTrue(connection.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(connection.isEnabled)
         XCTAssertFalse(connection.frame.isEmpty)
-        XCTAssertEqual(connection.frame.width, 92, accuracy: 2)
+        XCTAssertEqual(connection.frame.width, 76, accuracy: 2)
         XCTAssertTrue(
             app.windows.firstMatch.frame.contains(connection.frame),
             "Connection control is outside the app window: \(connection.frame)"

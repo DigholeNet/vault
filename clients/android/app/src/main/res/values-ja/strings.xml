@@ -6,7 +6,6 @@
     <string name="configure_page_subtitle">次の接続に使用するサーバーを選択。</string>
     <string name="diagnostics_page_subtitle">接続を診断してネットワーク問題を解決。</string>
     <string name="about_page_subtitle">プライベート、安全、オープンソース。</string>
-    <string name="tunnel_features">暗号化トンネル · 自動再接続</string>
     <string name="ready_to_connect">接続の準備完了</string>
     <string name="ready_to_connect_detail">サーバー設定を確認して接続ボタンをタップ。接続後にネットワーク詳細と流量を表示します。</string>
     <string name="network_details">ネットワーク詳細</string>
@@ -165,8 +164,6 @@
     <string name="status_connecting_detail">安全なトンネルを確立しています</string>
     <string name="status_disconnecting">切断中…</string>
     <string name="status_disconnecting_detail">安全なトンネルを閉じています</string>
-    <string name="status_reconnecting_detail">前回の接続データを保持しています</string>
     <string name="status_cancel_connection">接続をキャンセル</string>
-    <string name="status_recovery_rates">上り %1$s/s · 下り %2$s/s</string>
     <string name="status_using_profile">使用中のプロファイル：%1$s</string>
 </resources>

@@ -3,34 +3,34 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     style="@style/Widget.Vault.Card"
     android:layout_width="match_parent" android:layout_height="wrap_content"
-    android:layout_marginBottom="12dp">
+    android:layout_marginBottom="10dp" app:cardCornerRadius="18dp">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:gravity="center_vertical" android:minHeight="92dp" android:orientation="horizontal"
-        android:padding="14dp">
+        android:gravity="center_vertical" android:minHeight="76dp" android:orientation="horizontal"
+        android:paddingHorizontal="12dp" android:paddingVertical="10dp">
         <LinearLayout android:id="@+id/profileEdit" android:layout_width="0dp"
             android:layout_height="match_parent" android:layout_weight="1"
             android:background="?attr/selectableItemBackground" android:clickable="true"
             android:focusable="true" android:gravity="center_vertical" android:orientation="horizontal">
-            <FrameLayout android:layout_width="44dp" android:layout_height="44dp"
-                android:background="@drawable/vault_bg_icon_tile" android:padding="10dp">
+            <FrameLayout android:layout_width="36dp" android:layout_height="36dp"
+                android:background="@drawable/vault_bg_icon_tile" android:padding="8dp">
                 <ImageView android:layout_width="match_parent" android:layout_height="match_parent"
                     android:importantForAccessibility="no" android:src="@drawable/ic_server_rack"
                     app:tint="@color/vault_blue"/>
             </FrameLayout>
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_marginStart="14dp" android:layout_weight="1" android:orientation="vertical">
+                android:layout_marginStart="10dp" android:layout_weight="1" android:orientation="vertical">
                 <TextView android:id="@+id/profileName" android:layout_width="match_parent"
                     android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.Vault.CardTitle"
-                    android:textSize="16sp"/>
+                    android:textSize="14sp" android:textStyle="normal" android:textFontWeight="600" android:includeFontPadding="false"/>
                 <TextView android:id="@+id/profileServer" android:layout_width="match_parent"
-                    android:layout_height="wrap_content" android:layout_marginTop="6dp"
+                    android:layout_height="wrap_content" android:layout_marginTop="4dp" android:includeFontPadding="false"
                     android:fontFamily="monospace" android:textAppearance="@style/TextAppearance.Vault.Supporting"/>
             </LinearLayout>
         </LinearLayout>
         <LinearLayout android:id="@+id/profileSelectedGroup" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:layout_marginHorizontal="8dp"
+            android:layout_height="wrap_content" android:layout_marginHorizontal="6dp"
             android:gravity="center_horizontal" android:orientation="vertical">
-            <ImageView android:layout_width="28dp" android:layout_height="28dp"
+            <ImageView android:layout_width="24dp" android:layout_height="24dp"
                 android:background="@drawable/vault_bg_icon_tile" android:contentDescription="@string/used_for_connection"
                 android:padding="5dp" app:srcCompat="@drawable/ic_check" app:tint="@color/vault_blue"/>
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
@@ -38,8 +38,8 @@
                 android:textColor="@color/vault_blue" android:textSize="9sp" android:textStyle="bold"/>
         </LinearLayout>
         <com.google.android.material.button.MaterialButton android:id="@+id/profileUse"
-            style="@style/Widget.Vault.Button.Tonal" android:layout_width="wrap_content"
-            android:layout_height="48dp" android:contentDescription="@string/used_for_connection"
+            style="@style/Widget.Vault.Configure.Action" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:contentDescription="@string/used_for_connection"
             android:text="@string/use_profile"/>
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

@@ -15,11 +15,9 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
-import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import androidx.core.view.updateLayoutParams
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
@@ -373,8 +371,7 @@ class StatusFragment : Fragment() {
     private fun statusDetailText(app: VaultApplication, state: CardState): String? = when (state) {
         CardState.NoProfile -> getString(R.string.status_no_profile_detail)
         CardState.Disconnected -> selectedProfileName?.let { getString(R.string.status_using_profile, it) }
-        CardState.Connecting -> getString(R.string.status_connecting_detail)
-        CardState.Reconnecting -> getString(R.string.status_reconnecting_detail)
+        CardState.Connecting, CardState.Reconnecting -> getString(R.string.status_connecting_detail)
         CardState.Disconnecting -> getString(R.string.status_disconnecting_detail)
         CardState.Permission -> getString(R.string.status_permission_detail)
         CardState.Connected -> (app.activeProfileName ?: app.requestedProfileName)?.let {
@@ -394,7 +391,7 @@ class StatusFragment : Fragment() {
         renderStatus(root, state)
         renderHero(root, state)
         renderConnectionControls(root, state)
-        renderStatusDetails(root, app, state)
+        renderStatusDetails(app, state)
         root.findViewById<View>(R.id.readyCard).visibility =
             if (state == CardState.Disconnected && hasProfiles == true) View.VISIBLE else View.GONE
         renderConnectionDuration(app, connected)
@@ -449,17 +446,11 @@ class StatusFragment : Fragment() {
         btnToggleVpn.setBackgroundResource(
             if (state.usesIndigo) R.drawable.vault_bg_connection_button_connected else R.drawable.vault_bg_connection_button_neutral
         )
-        btnToggleVpn.setPadding(dp(23), dp(23), dp(23), dp(23))
+        val buttonPadding = dp(19)
+        btnToggleVpn.setPadding(buttonPadding, buttonPadding, buttonPadding, buttonPadding)
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
-
-    private fun setTopMargin(view: View, value: Int) {
-        val margin = dp(value)
-        if ((view.layoutParams as LinearLayout.LayoutParams).topMargin != margin) {
-            view.updateLayoutParams<LinearLayout.LayoutParams> { topMargin = margin }
-        }
-    }
 
     private fun renderConnectionControls(root: View, state: CardState) {
         renderConnectionIcon(root, state)
@@ -530,37 +521,13 @@ class StatusFragment : Fragment() {
         }
     }
 
-    private fun renderStatusDetails(root: View, app: VaultApplication, state: CardState) {
+    private fun renderStatusDetails(app: VaultApplication, state: CardState) {
         val detail = statusDetailText(app, state)
         tvStatusDetail.text = detail.orEmpty()
         tvStatusDetail.visibility = if (detail == null) View.GONE else View.VISIBLE
-        setTopMargin(tvStatusDetail, if (state == CardState.Connected) 17 else 16)
         tvStatusDetail.setTextColor(ContextCompat.getColor(
             requireContext(), if (state.usesIndigo) R.color.vault_hero_secondary else R.color.vault_text_secondary
         ))
-        root.findViewById<TextView>(R.id.tvTunnelFeature).apply {
-            visibility = if (state == CardState.Connected || state == CardState.Disconnected) View.VISIBLE else View.GONE
-            setBackgroundResource(
-                if (state == CardState.Connected) R.drawable.vault_bg_feature_connected else R.drawable.vault_bg_feature
-            )
-            setTopMargin(this, if (state == CardState.Connected) 24 else 22)
-            setTextColor(ContextCompat.getColor(
-                requireContext(), if (state.usesIndigo) R.color.vault_hero_secondary else R.color.vault_text_secondary
-            ))
-        }
-        root.findViewById<TextView>(R.id.connectionRecovery).apply {
-            visibility = if (state == CardState.Reconnecting) View.VISIBLE else View.GONE
-            if (state == CardState.Reconnecting) {
-                val addresses = listOfNotNull(
-                    vpnState.ipv4.takeIf { it.isNotEmpty() }?.let { "IPv4  $it" },
-                    vpnState.ipv6.takeIf { it.isNotEmpty() }?.let { "IPv6  $it" }
-                )
-                val stats = app.latestTrafficStats
-                val rates = getString(R.string.status_recovery_rates,
-                    StatusPresentation.bytes(stats?.sendSpeed ?: 0), StatusPresentation.bytes(stats?.receiveSpeed ?: 0))
-                text = (addresses + rates).joinToString("\n")
-            }
-        }
     }
 
     private fun renderConnectionDuration(app: VaultApplication, connected: Boolean) {
