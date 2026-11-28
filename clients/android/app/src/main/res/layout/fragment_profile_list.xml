@@ -62,7 +62,7 @@
                 android:gravity="top" android:orientation="horizontal" android:padding="18dp">
                 <ImageView android:layout_width="30dp" android:layout_height="30dp"
                     android:importantForAccessibility="no" android:padding="5dp"
-                    android:src="@drawable/ic_info" app:tint="@color/vault_blue"/>
+                    android:src="@drawable/ic_info" app:tint="@color/vault_text_secondary"/>
                 <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
                     android:layout_marginStart="12dp" android:layout_weight="1" android:orientation="vertical">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"

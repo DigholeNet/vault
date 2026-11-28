@@ -216,12 +216,15 @@ struct IosConfigureView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(languageManager.tr("Used for connection"))
             } else {
-                Button(languageManager.tr("Use")) {
+                Button {
                     if appData.vpnStatus == .disconnected || profile.name == vpnManager.activeProfileName {
                         config.selectProfile(profile.name)
                     } else {
                         pendingProfileSwitch = profile.name
                     }
+                } label: {
+                    Text(languageManager.tr("Use"))
+                        .padding(.horizontal, 14)
                 }
                 .buttonStyle(VaultSecondaryButtonStyle())
                 .fixedSize(horizontal: true, vertical: false)

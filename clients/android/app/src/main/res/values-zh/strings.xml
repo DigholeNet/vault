@@ -5,7 +5,6 @@
     <string name="status_page_subtitle">私密网络，简单连接。</string>
     <string name="configure_page_subtitle">选择下次连接使用的服务器。</string>
     <string name="diagnostics_page_subtitle">诊断连接并排查网络问题。</string>
-    <string name="about_page_subtitle">私密、安全、开源。</string>
     <string name="ready_to_connect">准备连接</string>
     <string name="ready_to_connect_detail">确认服务器配置后，点击连接按钮。连接后可查看网络详情与实时流量。</string>
     <string name="network_details">网络详情</string>
@@ -30,9 +29,6 @@
     <string name="status_authorize">重新授权</string>
     <string name="status_permission_detail">需要系统授权才能连接。</string>
     <string name="error_connection_timeout">无法连接服务器。</string>
-    <string name="failure_retry_hint">检查配置后可重试</string>
-    <string name="failure_diagnostics_title">需要进一步排查？</string>
-    <string name="failure_diagnostics_detail">检查服务器地址与网络，或打开诊断。</string>
 
     <!-- Navigation -->
     <string name="nav_status">状态</string>
@@ -50,7 +46,6 @@
     <string name="status_tap_to_connect">点击连接</string>
     <string name="status_tap_to_disconnect">点击断开</string>
     <string name="status_configure_first">请先配置服务器</string>
-    <string name="status_error_prefix">错误：%1$s</string>
     <string name="toggle_vpn_description">切换 VPN</string>
 
     <!-- Configure Fragment -->
@@ -65,11 +60,9 @@
     <string name="error_password_required">密码不能为空</string>
 
     <!-- About Fragment -->
-    <string name="app_icon_description">应用图标</string>
     <string name="version_unknown">版本未知</string>
     <string name="website">https://github.com/DigholeNet/vault</string>
     <string name="about_description">一款用于跨区域连接的安全 VPN 客户端。</string>
-    <string name="about_path_discovery">加密连接，自动发现更优路径。</string>
     <string name="copyright">© 2026 Dighole Team</string>
     <string name="no_browser">未找到浏览器应用</string>
 
@@ -109,7 +102,6 @@
     <string name="checks_cancelled">检查已取消</string>
     <string name="checks_cancelled_detail">已完成的结果仍可查看。</string>
     <string name="checks_intro">检查 VPN DNS、TCP、HTTPS 以及应用访问。</string>
-    <string name="checks_disconnected">未连接时可检查应用直连网络；连接后可检查完整隧道。运行日志始终可用。</string>
     <string name="checks_passed">连接检查通过</string>
     <string name="checks_failed">发现连接问题</string>
     <string name="checks_incomplete">诊断未完成，部分检查未能完成。</string>

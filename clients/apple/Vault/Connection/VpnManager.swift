@@ -22,7 +22,8 @@ class VpnManager {
     var activeVPN: NETunnelProviderManager?
     private var observers: [NSObjectProtocol]
     private var observationGeneration: UInt64 = 0
-    private var connectionFailurePending = false
+    private var pendingConnectionFailure: String?
+    private var savingOnDemandAfterConnect = false
     private var connectionRequestedAt: TimeInterval?
     private var tunnelStartIssuedAt: TimeInterval?
     var logState = VpnLogState()
@@ -163,7 +164,7 @@ class VpnManager {
         // On-demand can connect and disconnect while preferences are saving.
         // Preparation owns the operation until its callback reads the current
         // session status; intermediate notifications must not complete it.
-        if connectInFlight { return }
+        if connectInFlight || savingOnDemandAfterConnect { return }
         var stopResult: Bool?
         if connectionLifecycle.isStopping {
             let down = manager.connection.status == .disconnected || manager.connection.status == .invalid
@@ -179,12 +180,23 @@ class VpnManager {
         let awaitingFirstConnection = connectionStartTimeoutWorkItem != nil
         if status == .connected { cancelConnectionStartTimeout() }
         let unexpectedDisconnect = connectionLifecycle.observe(status, updateIntent: stopResult == nil)
+        #if os(iOS)
+        if awaitingFirstConnection && unexpectedDisconnect {
+            stopFailedInitialConnection("Could not reach the server.")
+            return
+        }
+        #endif
         publishStatus(recovering: manager.connection.status == .reasserting)
 
         updateSessionDetails(manager, previousStatus: oldStatus)
 
         if self.vpnStatus == .connected {
             self.appData.connectionError = nil
+            #if os(iOS)
+            if awaitingFirstConnection, let provider = manager as? NETunnelProviderManager {
+                enableOnDemandAfterConnect(provider)
+            }
+            #endif
         } else if self.vpnStatus == .disconnected && unexpectedDisconnect {
             cancelConnectionStartTimeout()
             self.appData.connectionError = awaitingFirstConnection
@@ -298,43 +310,27 @@ class VpnManager {
         }
     }
 
-    private func createProviderManager(host: String) -> NETunnelProviderManager {
-        let manager = NETunnelProviderManager()
-        let configuration = NETunnelProviderProtocol()
-        configuration.serverAddress = host
-        #if os(macOS)
-        // On macOS the tunnel provider is a system extension with its own
-        // bundle ID; without this the system looks for an embedded appex.
-        configuration.providerBundleIdentifier = SystemExtensionManager.extensionBundleIdentifier
-        #endif
-        manager.protocolConfiguration = configuration
-        manager.localizedDescription = "Vault"
-        return manager
-    }
-
-    private func configureProviderManager(
-        _ manager: NETunnelProviderManager, launch: TunnelLaunchConfiguration
-    ) -> Bool {
-        guard let configuration = manager.protocolConfiguration as? NETunnelProviderProtocol else {
-            Logger.network.errorAndFile("Invalid protocol configuration type")
-            return false
-        }
-        #if os(macOS)
-        // Configs created by older app-extension builds lack this and
-        // keep launching the stale embedded appex.
-        configuration.providerBundleIdentifier = SystemExtensionManager.extensionBundleIdentifier
-        #endif
-        configuration.serverAddress = launch.host
-        configuration.providerConfiguration = launch.providerConfiguration
-        manager.protocolConfiguration = configuration
-        manager.isEnabled = true
-        // Keep the tunnel up across suspends, network switches and
-        // extension crashes: without an on-demand rule the system never
-        // restarts a tunnel that died on its own.
-        manager.onDemandRules = [NEOnDemandRuleConnect()]
+    #if os(iOS)
+    private func enableOnDemandAfterConnect(_ manager: NETunnelProviderManager) {
+        guard !manager.isOnDemandEnabled else { return }
+        savingOnDemandAfterConnect = true
         manager.isOnDemandEnabled = true
-        return true
+        manager.saveToPreferences { error in
+            DispatchQueue.main.async {
+                self.savingOnDemandAfterConnect = false
+                if let error {
+                    manager.isOnDemandEnabled = false
+                    Logger.network.errorAndFile("Failed to enable on-demand after connection: \(error)")
+                }
+                if self.connectionLifecycle.isStopping {
+                    self.advanceConnection()
+                } else {
+                    self.updateVPNStatus(manager)
+                }
+            }
+        }
     }
+    #endif
 
     /// Completes on main after the profile save and reload settle.
     func loadAndCreateProviderManager(
@@ -369,7 +365,7 @@ class VpnManager {
                 }
 
                 let saveStarted = ProcessInfo.processInfo.systemUptime
-                Logger.network.noticeAndFile("[operation:\(operation)] Saving VPN configuration onDemand=true")
+                Logger.network.noticeAndFile("[operation:\(operation)] Saving VPN configuration onDemand=\(manager.isOnDemandEnabled)")
                 manager.saveToPreferences { error in
                     DispatchQueue.main.async {
                         self.logStage("VPN configuration save completed", operation: operation, since: saveStarted, error: error)
@@ -504,14 +500,13 @@ extension VpnManager {
             }
             self.activeVPN = manager
             if !loaded {
-                self.connectionFailurePending = true
-                self.disconnect()
+                self.stopFailedInitialConnection()
                 return
             }
             self.observeVPNStatus(for: manager)
             guard self.connectionLifecycle.markStarted(token) else { return }
             do {
-                // Saving an on-demand profile may already have started it.
+                // The system may already be starting a previously enabled profile.
                 if manager.connection.status == .disconnected || manager.connection.status == .invalid {
                     let issued = ProcessInfo.processInfo.systemUptime
                     self.tunnelStartIssuedAt = issued
@@ -525,8 +520,7 @@ extension VpnManager {
                 }
             } catch {
                 Logger.network.errorAndFile("startVPNTunnel failed: \(error.localizedDescription)")
-                self.connectionFailurePending = true
-                self.disconnect()
+                self.stopFailedInitialConnection()
             }
         }
     }
@@ -548,11 +542,19 @@ extension VpnManager {
             config.selectProfile(name)
             return
         }
+        #if os(iOS)
+        // While stopping, replace the queued destination without starting another teardown.
+        if connectionLifecycle.isStopping && appData.switchingProfileName != nil {
+            appData.switchingProfileName = name
+            return
+        }
+        #else
         guard appData.switchingProfileName == nil else { return }
+        #endif
         appData.switchingProfileName = name
         disconnect { [weak self] succeeded in
             guard let self else { return }
-            guard succeeded else {
+            guard succeeded, let name = self.appData.switchingProfileName else {
                 self.appData.switchingProfileName = nil
                 return
             }
@@ -589,10 +591,9 @@ extension VpnManager {
     private func armConnectionStartTimeout(_ token: UInt64) {
         cancelConnectionStartTimeout()
         let timeout = DispatchWorkItem { [weak self] in
-            guard let self, self.connectionLifecycle.generation == token, self.vpnStatus == .connecting else { return }
+            guard let self, self.connectionLifecycle.generation == token, self.connectionStartTimeoutWorkItem != nil else { return }
             Logger.network.errorAndFile("[operation:\(token)] Initial connection timed out")
-            self.connectionFailurePending = true
-            self.disconnect()
+            self.stopFailedInitialConnection()
         }
         connectionStartTimeoutWorkItem = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + connectionStartTimeout, execute: timeout)
@@ -604,13 +605,18 @@ extension VpnManager {
     }
 
     private func failConnect(_ token: UInt64, message: String? = nil) {
-        cancelConnectionStartTimeout()
         guard connectionLifecycle.failConnect(token) else { return }
+        cancelConnectionStartTimeout()
         connectionRequestedAt = nil
         tunnelStartIssuedAt = nil
         publishIdle()
         appData.switchingProfileName = nil
         appData.connectionError = message ?? "Unable to connect. Check your network and server configuration."
+    }
+
+    private func stopFailedInitialConnection(_ message: String = "Unable to connect. Check your network and server configuration.") {
+        pendingConnectionFailure = message
+        disconnect()
     }
 
     private func publishIdle() {
@@ -632,10 +638,10 @@ extension VpnManager {
     private func finishDisconnect(succeeded: Bool) {
         tunnelStopTimeoutWorkItem?.cancel()
         tunnelStopTimeoutWorkItem = nil
-        if connectionFailurePending {
-            connectionFailurePending = false
-            appData.switchingProfileName = nil
-            appData.connectionError = "Unable to connect. Check your network and server configuration."
+        if let pendingConnectionFailure {
+            self.pendingConnectionFailure = nil
+            if vpnStatus == .disconnected { appData.requestedProfileName = nil }
+            appData.connectionError = pendingConnectionFailure
         }
         if !succeeded {
             appData.connectionError = "Unable to disconnect. Please try again."
@@ -654,7 +660,7 @@ extension VpnManager {
 
     /// The only handoff between preparation, teardown and a queued reconnect.
     private func advanceConnection() {
-        guard !connectionLifecycle.isPreparing else { return }
+        guard !connectionLifecycle.isPreparing, !savingOnDemandAfterConnect else { return }
         if connectionLifecycle.isStopping {
             performStop(connectionLifecycle.generation, manager: activeVPN)
         } else if connectionLifecycle.wantsConnection, vpnStatus == .disconnected {

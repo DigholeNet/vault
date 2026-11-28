@@ -11,7 +11,6 @@
     "Collapsed" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已折叠" } } } },
     "TLS handshake" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "TLS 握手" } } } },
     "Private networking, made simple." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "私密网络，简单连接。" } } } },
-    "Private, secure, open source." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "私密、安全、开源。" } } } },
     "Choose the server for your next connection." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择下次连接使用的服务器。" } } } },
     "Diagnose connections and troubleshoot network issues." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断连接并排查网络问题。" } } } },
     "Ready to connect" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "准备连接" } } } },
@@ -39,8 +38,6 @@
     "Basic information" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "基本信息" } } } },
     "Advanced settings" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "高级设置" } } } },
     "Test targets" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "测试目标" } } } },
-    "Your private network control center" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "你的私人网络控制台" } } } },
-    "Encrypted connections with automatic path discovery." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "加密连接，自动发现更优路径。" } } } },
     "Select log text to copy details for troubleshooting." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "日志用于连接排查，可选择文本后复制。" } } } },
     "Copied to clipboard." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制到剪贴板。" } } } },
     "Clear runtime logs?" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清空运行日志？" } } } },
@@ -50,10 +47,6 @@
     "Version %@ · BUILD %@" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "版本 %@ · BUILD %@" } } } },
     "In use" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用中" } } } },
     "Selected" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已选中" } } } },
-    "Establish an encrypted tunnel for secure access to your private network" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "建立加密隧道，安全访问私人网络" } } } },
-    "Check the configuration, then retry" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "检查配置后可重试" } } } },
-    "Need to investigate further?" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要进一步排查？" } } } },
-    "Check the server address and network, or open Diagnostics." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "检查服务器地址与网络，或打开诊断。" } } } },
     "IPv4 DNS" : {
       "localizations": {
         "zh-Hans": {
@@ -100,16 +93,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "请输入最多 4 个 IPv6 DNS 地址，以逗号分隔。"
-          }
-        }
-      }
-    },
-    "Version %@ (%@)" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "版本 %@ (%@)"
           }
         }
       }
@@ -364,16 +347,6 @@
         }
       }
     },
-    "Network changed. Reconnecting…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "网络已变化，正在重试…"
-          }
-        }
-      }
-    },
     "Disconnect" : {
       "localizations" : {
         "zh-Hans" : {
@@ -558,62 +531,12 @@
         }
       }
     },
-    "Leave empty for automatic MTU. Valid range: 1280–1427." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "留空则自动设置 MTU，有效范围为 1280–1427。"
-          }
-        }
-      }
-    },
     "Client Identifier" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "客户端标识"
-          }
-        }
-      }
-    },
-    "Identifies this client. Usually no changes are needed." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用于标识此客户端，通常无需修改。"
-          }
-        }
-      }
-    },
-    "Restore Defaults" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "恢复默认"
-          }
-        }
-      }
-    },
-    "Restore advanced defaults?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "恢复高级设置的默认值？"
-          }
-        }
-      }
-    },
-    "Defaults restored. Save to apply." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已恢复默认值，保存后生效。"
           }
         }
       }
@@ -1311,16 +1234,6 @@
         }
       }
     },
-    "IP Address or domain" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "IP 地址或域名"
-          }
-        }
-      }
-    },
     "Language" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1526,11 +1439,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换配置？" } }
       }
     },
-    "Switching to" : {
-      "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在切换到" } }
-      }
-    },
     "The current tunnel will disconnect before connecting to" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前隧道将断开，然后连接到" } }
@@ -1596,16 +1504,6 @@
         }
       }
     },
-    "Domains to probe" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "待探测的域名"
-          }
-        }
-      }
-    },
     "Diagnostic probe domains, separated by commas. Leave empty to use defaults." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1622,16 +1520,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行诊断"
-          }
-        }
-      }
-    },
-    "Running Diagnostics..." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在诊断…"
           }
         }
       }

@@ -1,17 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="TextAppearance.Vault.Diagnostics.Body" parent="TextAppearance.Vault.Body" />
     <style name="TextAppearance.Vault.Diagnostics.Title" parent="TextAppearance.Vault.Body" />
     <style name="TextAppearance.Vault.Diagnostics.Secondary" parent="TextAppearance.Vault.Supporting" />
     <style name="Widget.Vault.Diagnostics.Action" parent="Widget.Vault.Button.Tonal">
         <item name="backgroundTint">@color/vault_indigo_soft</item>
         <item name="android:textColor">@color/vault_diagnostic_action_text</item>
-        <item name="android:textSize">14sp</item>
+        <item name="android:textSize">12sp</item>
         <item name="android:minWidth">64dp</item>
         <item name="android:paddingStart">12dp</item>
         <item name="android:paddingEnd">12dp</item>
-        <item name="android:insetTop">0dp</item>
-        <item name="android:insetBottom">0dp</item>
+        <item name="android:paddingTop">4dp</item>
+        <item name="android:paddingBottom">4dp</item>
+        <item name="android:insetTop">6dp</item>
+        <item name="android:insetBottom">6dp</item>
         <item name="cornerRadius">12dp</item>
     </style>
     <style name="Widget.Vault.Diagnostics.Primary" parent="Widget.Vault.Button">

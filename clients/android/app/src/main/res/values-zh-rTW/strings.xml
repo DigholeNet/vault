@@ -5,7 +5,6 @@
     <string name="status_page_subtitle">私密網路，簡單連線。</string>
     <string name="configure_page_subtitle">選擇下次連線使用的伺服器。</string>
     <string name="diagnostics_page_subtitle">診斷連線並排查網路問題。</string>
-    <string name="about_page_subtitle">私密、安全、開源。</string>
     <string name="ready_to_connect">準備連線</string>
     <string name="ready_to_connect_detail">確認伺服器設定後，點擊連線按鈕。連線後可查看網路詳情與即時流量。</string>
     <string name="network_details">網路詳情</string>
@@ -30,9 +29,6 @@
     <string name="status_authorize">重新授權</string>
     <string name="status_permission_detail">需要系統授權才能連線。</string>
     <string name="error_connection_timeout">無法連線至伺服器。</string>
-    <string name="failure_retry_hint">檢查配置後可重試</string>
-    <string name="failure_diagnostics_title">需要進一步排查？</string>
-    <string name="failure_diagnostics_detail">檢查伺服器位址與網路，或開啟診斷。</string>
 
     <!-- Navigation -->
     <string name="nav_status">狀態</string>
@@ -50,7 +46,6 @@
     <string name="status_tap_to_connect">點擊連線</string>
     <string name="status_tap_to_disconnect">點擊斷線</string>
     <string name="status_configure_first">請先設定伺服器</string>
-    <string name="status_error_prefix">錯誤：%1$s</string>
     <string name="toggle_vpn_description">切換 VPN</string>
 
     <!-- Configure Fragment -->
@@ -65,11 +60,9 @@
     <string name="error_password_required">密碼不能為空</string>
 
     <!-- About Fragment -->
-    <string name="app_icon_description">應用程式圖示</string>
     <string name="version_unknown">版本未知</string>
     <string name="website">https://github.com/DigholeNet/vault</string>
     <string name="about_description">一款用於跨區域連線的安全 VPN 用戶端。</string>
-    <string name="about_path_discovery">加密連線，自動探索更佳路徑。</string>
     <string name="copyright">© 2026 Dighole Team</string>
     <string name="no_browser">找不到瀏覽器應用程式</string>
 
@@ -109,7 +102,6 @@
     <string name="checks_cancelled">檢查已取消</string>
     <string name="checks_cancelled_detail">已完成的結果仍可查看。</string>
     <string name="checks_intro">檢查 VPN DNS、TCP、HTTPS 以及應用程式存取。</string>
-    <string name="checks_disconnected">未連線時可檢查應用程式直連網路；連線後可檢查完整隧道。執行記錄隨時可用。</string>
     <string name="checks_passed">連線檢查通過</string>
     <string name="checks_failed">發現連線問題</string>
     <string name="checks_incomplete">診斷未完成，部分檢查未能完成。</string>

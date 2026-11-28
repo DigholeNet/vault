@@ -150,7 +150,7 @@
             <com.google.android.material.button.MaterialButton android:id="@+id/btnClearLogs"
                 style="@style/Widget.Vault.Diagnostics.Action" android:layout_width="0dp"
                 android:layout_height="wrap_content" android:layout_weight="1" android:enabled="false"
-                android:text="@string/clear" android:textColor="@color/vault_diagnostic_neutral_action_text"
+                android:text="@string/clear" android:textColor="@color/vault_diagnostic_clear_action_text"
                 app:backgroundTint="@color/vault_surface_subtle"/>
             <com.google.android.material.button.MaterialButton android:id="@+id/btnCopyLogs"
                 style="@style/Widget.Vault.Diagnostics.Action" android:layout_width="0dp"

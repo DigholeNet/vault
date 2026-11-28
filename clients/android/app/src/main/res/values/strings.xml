@@ -5,7 +5,6 @@
     <string name="status_page_subtitle">Private networking, made simple.</string>
     <string name="configure_page_subtitle">Choose the server for your next connection.</string>
     <string name="diagnostics_page_subtitle">Check your connection and troubleshoot network issues.</string>
-    <string name="about_page_subtitle">Private, secure, open source.</string>
     <string name="ready_to_connect">Ready to connect</string>
     <string name="ready_to_connect_detail">Review the server configuration, then tap the power button. Network details and live traffic appear after connecting.</string>
     <string name="network_details">Network details</string>
@@ -30,9 +29,6 @@
     <string name="status_authorize">Authorize VPN</string>
     <string name="status_permission_detail">System permission is required to connect.</string>
     <string name="error_connection_timeout">Could not reach the server.</string>
-    <string name="failure_retry_hint">Check the configuration, then retry</string>
-    <string name="failure_diagnostics_title">Need to investigate further?</string>
-    <string name="failure_diagnostics_detail">Check the server address and network, or open Diagnostics.</string>
 
     <!-- Navigation -->
     <string name="nav_status">Status</string>
@@ -50,7 +46,6 @@
     <string name="status_tap_to_connect">Tap to connect</string>
     <string name="status_tap_to_disconnect">Tap to disconnect</string>
     <string name="status_configure_first">Please configure server first</string>
-    <string name="status_error_prefix">Error: %1$s</string>
     <string name="toggle_vpn_description">Toggle VPN</string>
     <string name="status_wan" translatable="false">WAN</string>
 
@@ -66,11 +61,9 @@
     <string name="error_password_required">Password is required</string>
 
     <!-- About Fragment -->
-    <string name="app_icon_description">App Icon</string>
     <string name="version_unknown">Version unknown</string>
     <string name="website">https://github.com/DigholeNet/vault</string>
     <string name="about_description">A secure VPN client for cross-regional connectivity.</string>
-    <string name="about_path_discovery">Encrypted connections with automatic path discovery.</string>
     <string name="copyright">© 2026 Dighole Team</string>
     <string name="no_browser">No browser app found</string>
 
@@ -110,7 +103,6 @@
     <string name="checks_cancelled">Checks cancelled</string>
     <string name="checks_cancelled_detail">Completed results are still available.</string>
     <string name="checks_intro">Test VPN DNS, TCP and HTTPS, plus application access.</string>
-    <string name="checks_disconnected">Run application access checks without connecting. Tunnel checks are available after connecting. Logs remain available.</string>
     <string name="checks_passed">Connectivity checks passed</string>
     <string name="checks_failed">Connectivity issues found</string>
     <string name="checks_incomplete">Diagnostics incomplete. Some checks were not completed.</string>

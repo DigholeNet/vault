@@ -19,7 +19,6 @@
     <color name="vault_log_text">#C7D2FE</color>
     <color name="vault_profile_selected_outline">#80A5B4FC</color>
     <color name="vault_failure_surface">#3B1D2A</color>
-    <color name="vault_failure_outline">#6B2D3F</color>
     <color name="connection_connected">#A5B4FC</color>
     <color name="connection_disconnected">#8A96A8</color>
     <color name="status_uplink">@color/vault_text_secondary</color>
