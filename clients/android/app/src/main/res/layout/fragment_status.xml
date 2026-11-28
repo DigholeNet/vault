@@ -82,7 +82,8 @@
                     android:textSize="14sp"
                     android:textStyle="bold"/>
             </LinearLayout>
-            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+            <LinearLayout android:id="@+id/profileSwitchAction"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:gravity="center_vertical" android:orientation="horizontal">
                 <TextView
                     android:layout_width="wrap_content"
@@ -235,6 +236,7 @@
                     <TextView android:id="@+id/tvPublicIpAddress" android:layout_width="0dp"
                         android:layout_height="wrap_content" android:layout_marginStart="12dp"
                         android:layout_weight="1" android:fontFamily="monospace" android:gravity="end"
+                        android:maxLines="1" android:ellipsize="middle"
                         android:textColor="@color/vault_text" android:textIsSelectable="true" android:includeFontPadding="false" android:textSize="12sp"/>
                 </LinearLayout>
                 <View android:id="@+id/networkDivider" android:layout_width="match_parent"

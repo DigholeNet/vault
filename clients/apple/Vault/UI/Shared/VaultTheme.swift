@@ -280,22 +280,63 @@ struct VaultAddressRow: View {
     let symbol: String
     var color: Color = VaultTheme.textSecondary
     var stacked = false
+    var truncatesMiddle = false
+    @EnvironmentObject private var languageManager: LanguageManager
     @ScaledMetric(relativeTo: .caption) private var textSize = 12.0
+    @State private var showsFullAddress = false
 
     var body: some View {
-        if stacked {
-            VStack(alignment: .leading, spacing: 6) {
-                label
-                value
+        if truncatesMiddle {
+            ViewThatFits(in: .horizontal) {
+                inlineRow
+                HStack(spacing: 10) {
+                    label.fixedSize()
+                    Button { showsFullAddress = true } label: {
+                        addressText
+                            .foregroundStyle(VaultTheme.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .alert(Text(verbatim: title), isPresented: $showsFullAddress) {
+                Button(languageManager.tr("Copy"), action: copyAddress)
+                Button(languageManager.tr("Cancel"), role: .cancel) {}
+            } message: {
+                Text(verbatim: address)
+            }
+        } else if stacked {
+            stackedRow
         } else {
-            HStack(alignment: .top, spacing: 10) {
-                label
-                Spacer(minLength: 8)
-                value.multilineTextAlignment(.trailing)
+            ViewThatFits(in: .horizontal) {
+                inlineRow
+                stackedRow
             }
         }
+    }
+
+    private var inlineRow: some View {
+        HStack(spacing: 10) {
+            label
+            Spacer(minLength: 0)
+            addressText
+                .foregroundStyle(VaultTheme.textPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private var stackedRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            label
+            addressText
+                .foregroundStyle(VaultTheme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var label: some View {
@@ -307,11 +348,18 @@ struct VaultAddressRow: View {
         }
     }
 
-    private var value: some View {
+    private var addressText: Text {
         Text(verbatim: address)
             .font(.system(size: textSize, design: .monospaced))
-            .foregroundStyle(VaultTheme.textPrimary)
-            .textSelection(.enabled)
+    }
+
+    private func copyAddress() {
+        #if os(iOS)
+        UIPasteboard.general.string = address
+        #else
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(address, forType: .string)
+        #endif
     }
 }
 

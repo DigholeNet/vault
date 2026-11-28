@@ -353,7 +353,7 @@ private struct MacosConnectionDiagnostics: View {
         let addresses = appData.assignedIp.parsedIPv4AndIPv6()
         return VStack(alignment: .leading, spacing: 12) {
             if active, !appData.publicIp.isEmpty {
-                VaultAddressRow(title: "WAN", address: appData.publicIp, symbol: "globe")
+                VaultAddressRow(title: "WAN", address: appData.publicIp, symbol: "globe", truncatesMiddle: true)
                 Divider().overlay(VaultTheme.outline)
             }
             if let ipv4 = addresses.ipv4, active {

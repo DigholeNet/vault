@@ -22,6 +22,10 @@ struct IosConfigureView: View {
     @State private var pendingProfileSwitch: String?
 
     private var validationError: String? { draft.validationError() }
+    private var canSwitchProfile: Bool {
+        appData.vpnStatus == .disconnected || appData.vpnStatus == .connected
+    }
+
     private var isActiveProfile: Bool {
         originalName.map { vpnManager.isProfileActive($0) } ?? false
     }
@@ -89,6 +93,9 @@ struct IosConfigureView: View {
             }
             Button(languageManager.tr("Cancel"), role: .cancel) {}
         }
+        .onChange(of: canSwitchProfile) { _, available in
+            if !available { pendingProfileSwitch = nil }
+        }
         .confirmationDialog(
             languageManager.tr("Switch Profile?"),
             isPresented: Binding(
@@ -100,6 +107,7 @@ struct IosConfigureView: View {
             if let name = pendingProfileSwitch {
                 Button(languageManager.tr("Disconnect and Connect")) {
                     pendingProfileSwitch = nil
+                    guard canSwitchProfile else { return }
                     vpnManager.requestProfileSelection(name)
                 }
             }
@@ -217,8 +225,9 @@ struct IosConfigureView: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(languageManager.tr("Used for connection"))
-            } else {
+            } else if canSwitchProfile {
                 Button {
+                    guard canSwitchProfile else { return }
                     if appData.vpnStatus == .disconnected || profile.name == vpnManager.activeProfileName {
                         config.selectProfile(profile.name)
                     } else {

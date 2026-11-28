@@ -21,3 +21,7 @@ sealed class VpnStatusEvent {
         val packetsReceived: Long = 0
     ) : VpnStatusEvent()
 }
+
+internal val VpnStatusEvent?.blocksProfileSwitch: Boolean
+    get() = this == VpnStatusEvent.Connecting ||
+        this == VpnStatusEvent.Reconnecting || this == VpnStatusEvent.Disconnecting

@@ -29,7 +29,6 @@ struct IosStatusView: View {
         )
     }
 
-    private var active: Bool { appData.vpnStatus != .disconnected }
     private var noProfile: Bool { phase == .disconnected && config.profiles.isEmpty }
     private var showsStatusBadge: Bool { phase != .failed && phase != .permissionRequired }
     private var isConnected: Bool { phase == .connected }
@@ -59,7 +58,11 @@ struct IosStatusView: View {
                     }
                 }
 
-                if !active && !noProfile {
+                if phase.isBusy {
+                    if let name = vpnManager.activeProfileName ?? config.selectedProfileName {
+                        profileLabel(name, allowsSwitching: false)
+                    }
+                } else if !noProfile {
                     profileSelector
                 }
                 connectionHero
@@ -83,6 +86,9 @@ struct IosStatusView: View {
         .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { availableWidth = $0 }
         .vaultScreenBackground()
         .navigationBarHidden(true)
+        .onChange(of: phase.isBusy) { _, busy in
+            if busy { pendingProfileSwitch = nil }
+        }
         .confirmationDialog(
             languageManager.tr("Switch Profile?"),
             isPresented: Binding(
@@ -94,6 +100,7 @@ struct IosStatusView: View {
             if let name = pendingProfileSwitch {
                 Button(languageManager.tr("Disconnect and Connect")) {
                     pendingProfileSwitch = nil
+                    guard !phase.isBusy else { return }
                     vpnManager.requestProfileSelection(name)
                 }
             }
@@ -215,7 +222,7 @@ struct IosStatusView: View {
             VaultSection(languageManager.tr("Network details"), padding: 14, spacing: 10) {
                 VStack(spacing: 8) {
                     if !appData.publicIp.isEmpty {
-                        VaultAddressRow(title: "WAN", address: appData.publicIp, symbol: "globe", stacked: stacked)
+                        VaultAddressRow(title: "WAN", address: appData.publicIp, symbol: "globe", truncatesMiddle: true)
                     }
                     if !appData.publicIp.isEmpty, ips.ipv4 != nil || ips.ipv6 != nil {
                         Divider().overlay(VaultTheme.outline)
@@ -252,6 +259,10 @@ struct IosStatusView: View {
         }
     }
 
+    private var displayedProfileName: String? {
+        (phase == .connected ? vpnManager.activeProfileName : nil) ?? config.selectedProfileName
+    }
+
     @ViewBuilder
     private var profileSelector: some View {
         if config.profiles.isEmpty {
@@ -271,13 +282,14 @@ struct IosStatusView: View {
             Menu {
                 ForEach(config.profiles, id: \.name) { profile in
                     Button {
+                        guard !phase.isBusy else { return }
                         if appData.vpnStatus == .disconnected {
                             vpnManager.requestProfileSelection(profile.name)
                         } else if profile.name != vpnManager.activeProfileName {
                             pendingProfileSwitch = profile.name
                         }
                     } label: {
-                        if config.selectedProfileName == profile.name {
+                        if displayedProfileName == profile.name {
                             Label(profile.name, systemImage: "checkmark")
                         } else {
                             Text(profile.name)
@@ -285,32 +297,41 @@ struct IosStatusView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "server.rack")
-                        .foregroundStyle(VaultTheme.primary)
-                        .frame(width: 24)
-                    Text(config.selectedProfileName ?? languageManager.tr("Add Profile"))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(VaultTheme.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                    Text(languageManager.tr("Switch Profile"))
-                        .font(.caption)
-                        .foregroundStyle(VaultTheme.textSecondary)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11))
-                        .foregroundStyle(VaultTheme.textDisabled)
-                }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 56)
-                .background(VaultTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(VaultTheme.outline)
-                }
+                profileLabel(displayedProfileName ?? languageManager.tr("Add Profile"), allowsSwitching: true)
             }
             .buttonStyle(.plain)
-            .disabled(appData.switchingProfileName != nil || appData.vpnStatus == .disconnecting)
+            .disabled(appData.switchingProfileName != nil)
+        }
+    }
+
+    private func profileLabel(_ name: String, allowsSwitching: Bool) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "server.rack")
+                .foregroundStyle(VaultTheme.textSecondary)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+            Text(name)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(VaultTheme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if allowsSwitching {
+                Text(languageManager.tr("Switch Profile"))
+                    .font(.caption)
+                    .foregroundStyle(VaultTheme.textSecondary)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11))
+                    .foregroundStyle(VaultTheme.textDisabled)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .frame(minHeight: 56)
+        .contentShape(Rectangle())
+        .background(VaultTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(VaultTheme.outline)
         }
     }
 }

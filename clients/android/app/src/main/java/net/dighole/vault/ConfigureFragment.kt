@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 package net.dighole.vault
 
+import android.app.Dialog
 import android.content.Intent
 import android.os.Bundle
 import android.text.SpannableStringBuilder
@@ -17,6 +18,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import net.dighole.vault.data.VaultConfig
@@ -38,6 +40,7 @@ class ConfigureFragment : Fragment() {
     private var loading = false
     private var editing = false
     private var opensNewProfile = false
+    private var profileSwitchDialog: Dialog? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View =
         inflater.inflate(R.layout.fragment_configure, container, false)
@@ -67,6 +70,15 @@ class ConfigureFragment : Fragment() {
             if (loaded) editNewProfile() else opensNewProfile = true
         }
         loadConfiguration(state)
+        val app = requireContext().applicationContext as VaultApplication
+        viewLifecycleOwner.lifecycleScope.launch {
+            app.vpnStatusEvents.map { app.currentVpnStatus.blocksProfileSwitch }
+                .distinctUntilChanged()
+                .collect { blocked ->
+                    if (blocked) profileSwitchDialog?.dismiss()
+                    if (loaded) renderProfiles()
+                }
+        }
     }
 
     private fun loadConfiguration(state: Bundle?) {
@@ -106,6 +118,8 @@ class ConfigureFragment : Fragment() {
 
     private fun renderProfiles() {
         val container = view?.findViewById<ViewGroup>(R.id.profileRows) ?: return
+        val app = requireContext().applicationContext as VaultApplication
+        val canSwitch = !app.currentVpnStatus.blocksProfileSwitch
         val numberFormat = NumberFormat.getIntegerInstance(resources.configuration.locales[0])
         container.removeAllViews()
         profiles.profiles.forEach { profile ->
@@ -137,7 +151,8 @@ class ConfigureFragment : Fragment() {
                     requireContext(),
                     if (selected) R.color.vault_profile_selected_outline else R.color.vault_outline
                 )
-            row.findViewById<View>(R.id.profileUse).visibility = if (selected) View.GONE else View.VISIBLE
+            row.findViewById<View>(R.id.profileUse).visibility =
+                if (canSwitch && !selected) View.VISIBLE else View.GONE
             row.findViewById<View>(R.id.profileEdit).setOnClickListener { openProfile(profile.name) }
             row.findViewById<View>(R.id.profileUse).setOnClickListener { useProfile(profile.name) }
             container.addView(row)
@@ -154,9 +169,10 @@ class ConfigureFragment : Fragment() {
 
     private fun useProfile(name: String) {
         val app = requireContext().applicationContext as VaultApplication
+        if (app.currentVpnStatus.blocksProfileSwitch) return
         val running = app.activeProfileName ?: app.requestedProfileName
         if (running != null && running != name) {
-            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            profileSwitchDialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.switch_profile)
                 .setMessage(getString(R.string.switch_profile_confirmation, name))
                 .setPositiveButton(R.string.disconnect_and_connect) { _, _ -> selectProfileForConnection(name, true) }
@@ -169,6 +185,8 @@ class ConfigureFragment : Fragment() {
 
     private fun selectProfileForConnection(name: String, connect: Boolean) {
         viewLifecycleOwner.lifecycleScope.launch {
+            val app = requireContext().applicationContext as VaultApplication
+            if (app.currentVpnStatus.blocksProfileSwitch) return@launch
             try {
                 requireContext().selectVaultProfile(name)
                 profiles = requireContext().readVaultProfiles()
@@ -382,6 +400,8 @@ class ConfigureFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        profileSwitchDialog?.dismiss()
+        profileSwitchDialog = null
         fields = emptyList()
         loaded = false
         editing = false

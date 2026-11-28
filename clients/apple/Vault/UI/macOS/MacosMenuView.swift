@@ -45,9 +45,6 @@ struct MacosMenuView: View {
         }
         return languageManager.tr(key)
     }
-    private var showsProfileSelector: Bool {
-        !config.profiles.isEmpty && (phase == .disconnected || phase == .failed || phase == .permissionRequired)
-    }
     private var emphasizesBadge: Bool { phase == .connected || phase == .connecting || phase == .reconnecting }
     private var connectionControlEnabled: Bool {
         phase != .connecting && phase != .disconnecting && appData.canToggleConnection
@@ -67,7 +64,11 @@ struct MacosMenuView: View {
             }
             Divider().overlay(VaultTheme.outline)
 
-            if showsProfileSelector {
+            if phase.isBusy {
+                if let name = vpnManager.activeProfileName ?? config.selectedProfileName {
+                    profileLabel(name, allowsSwitching: false)
+                }
+            } else if !config.profiles.isEmpty {
                 profileSelector
             }
 
@@ -153,6 +154,9 @@ struct MacosMenuView: View {
                 open("configure")
             }
         }
+        .onChange(of: phase.isBusy) { _, busy in
+            if busy { pendingProfileSwitch = nil }
+        }
         .confirmationDialog(
             languageManager.tr("Switch Profile?"),
             isPresented: Binding(
@@ -164,6 +168,7 @@ struct MacosMenuView: View {
             if let name = pendingProfileSwitch {
                 Button(languageManager.tr("Disconnect and Connect")) {
                     pendingProfileSwitch = nil
+                    guard !phase.isBusy else { return }
                     vpnManager.requestProfileSelection(name)
                 }
             }
@@ -175,17 +180,22 @@ struct MacosMenuView: View {
         }
     }
 
+    private var displayedProfileName: String? {
+        (phase == .connected ? vpnManager.activeProfileName : nil) ?? config.selectedProfileName
+    }
+
     private var profileSelector: some View {
         Menu {
             ForEach(config.profiles, id: \.name) { profile in
                 Button {
+                    guard !phase.isBusy else { return }
                     if appData.vpnStatus == .disconnected {
                         vpnManager.requestProfileSelection(profile.name)
                     } else if profile.name != vpnManager.activeProfileName {
                         pendingProfileSwitch = profile.name
                     }
                 } label: {
-                    if config.selectedProfileName == profile.name {
+                    if displayedProfileName == profile.name {
                         Label(profile.name, systemImage: "checkmark")
                     } else {
                         Text(profile.name)
@@ -193,29 +203,41 @@ struct MacosMenuView: View {
                 }
             }
         } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "server.rack").foregroundStyle(VaultTheme.primary)
-                Text(config.selectedProfileName ?? "")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(VaultTheme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(languageManager.tr("Switch Profile"))
-                    .font(.system(size: 10))
-                    .foregroundStyle(VaultTheme.textDisabled)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10))
-                    .foregroundStyle(VaultTheme.textDisabled)
-            }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 52)
-            .contentShape(Rectangle())
-            .background(VaultTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(VaultTheme.outline)
-            }
+            profileLabel(displayedProfileName ?? "", allowsSwitching: true)
         }
         .menuStyle(.borderlessButton)
-        .disabled(appData.switchingProfileName != nil || appData.vpnStatus == .disconnecting)
+        .disabled(appData.switchingProfileName != nil)
+    }
+
+    private func profileLabel(_ name: String, allowsSwitching: Bool) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "server.rack")
+                .foregroundStyle(VaultTheme.textSecondary)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+            Text(name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(VaultTheme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if allowsSwitching {
+                Text(languageManager.tr("Switch Profile"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(VaultTheme.textSecondary)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11))
+                    .foregroundStyle(VaultTheme.textDisabled)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+        .background(VaultTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(VaultTheme.outline)
+        }
     }
 
     private var connectionHero: some View {
@@ -328,7 +350,7 @@ struct MacosMenuView: View {
         if !appData.publicIp.isEmpty || addresses.ipv4 != nil || addresses.ipv6 != nil {
             VStack(spacing: 12) {
                 if !appData.publicIp.isEmpty {
-                    VaultAddressRow(title: "WAN", address: appData.publicIp, symbol: "globe")
+                    VaultAddressRow(title: "WAN", address: appData.publicIp, symbol: "globe", truncatesMiddle: true)
                 }
                 if !appData.publicIp.isEmpty, addresses.ipv4 != nil || addresses.ipv6 != nil {
                     Divider().overlay(VaultTheme.outline)

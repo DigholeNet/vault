@@ -2,6 +2,9 @@
 package net.dighole.vault
 
 import android.animation.ValueAnimator
+import android.app.Dialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
@@ -59,6 +62,8 @@ class StatusFragment : Fragment() {
     private var permissionRequired = false
     private var hasProfiles: Boolean? = null
     private var selectedProfileName: String? = null
+    private var profileLoadFailed = false
+    private var profileDialog: Dialog? = null
     private var pendingConnectProfileName: String? = null
 
     private val vpnLauncher = registerForActivityResult(
@@ -130,6 +135,9 @@ class StatusFragment : Fragment() {
         }
         view.findViewById<View>(R.id.tvConnectionAction).setOnClickListener { btnToggleVpn.performClick() }
         view.findViewById<View>(R.id.btnProfile).setOnClickListener { showProfileDialog() }
+        tvPublicIpAddress.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+            if (right - left != oldRight - oldLeft) updateWanAddressAction()
+        }
         adaptStatusLayout(view)
 
         restoreStateFromPrefs()
@@ -262,29 +270,35 @@ class StatusFragment : Fragment() {
                 val store = requireContext().readVaultProfiles()
                 hasProfiles = store.profiles.isNotEmpty()
                 selectedProfileName = store.selectedProfileName
-                view?.findViewById<TextView>(R.id.btnProfileText)?.text =
-                    store.selectedProfileName ?: getString(R.string.add_profile)
+                profileLoadFailed = false
                 updateUI()
             } catch (_: Exception) {
-                view?.findViewById<TextView>(R.id.btnProfileText)?.setText(R.string.config_load_failed)
+                profileLoadFailed = true
+                updateUI()
             }
         }
     }
 
+    private fun canSwitchProfile(app: VaultApplication): Boolean =
+        !app.currentVpnStatus.blocksProfileSwitch && !cardState(app).busy
+
     private fun showProfileDialog() {
+        val app = requireContext().applicationContext as VaultApplication
+        if (!canSwitchProfile(app)) return
         viewLifecycleOwner.lifecycleScope.launch {
             val store = try {
                 requireContext().readVaultProfiles()
             } catch (_: Exception) {
                 return@launch
             }
+            if (!canSwitchProfile(app)) return@launch
             if (store.profiles.isEmpty()) {
                 (activity as? MainActivity)?.navigateTo(R.id.nav_configure)
                 return@launch
             }
             val names = store.profiles.map { it.name }.toTypedArray()
             val selected = names.indexOf(store.selectedProfileName)
-            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            profileDialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.select_profile)
                 .setSingleChoiceItems(names, selected) { dialog, which ->
                     dialog.dismiss()
@@ -297,9 +311,10 @@ class StatusFragment : Fragment() {
 
     private fun chooseProfile(name: String) {
         val app = requireContext().applicationContext as VaultApplication
+        if (!canSwitchProfile(app)) return
         val running = app.activeProfileName ?: app.requestedProfileName
         if ((vpnState.isConnected || vpnState.isConnecting || running != null) && running != name) {
-            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            profileDialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.switch_profile)
                 .setMessage(getString(R.string.switch_profile_confirmation, name))
                 .setPositiveButton(R.string.disconnect_and_connect) { _, _ -> selectProfile(name, true) }
@@ -312,14 +327,15 @@ class StatusFragment : Fragment() {
 
     private fun selectProfile(name: String, connect: Boolean) {
         viewLifecycleOwner.lifecycleScope.launch {
+            val app = requireContext().applicationContext as VaultApplication
+            if (!canSwitchProfile(app)) return@launch
             try {
                 requireContext().selectVaultProfile(name)
                 pendingConnectProfileName = name
                 refreshProfiles()
                 if (connect) startVpnService(name)
             } catch (_: Exception) {
-                (requireContext().applicationContext as VaultApplication)
-                    .emitVpnStatusEvent(VpnStatusEvent.Error(getString(R.string.config_save_failed)))
+                app.emitVpnStatusEvent(VpnStatusEvent.Error(getString(R.string.config_save_failed)))
             }
         }
     }
@@ -391,7 +407,7 @@ class StatusFragment : Fragment() {
         val app = requireContext().applicationContext as VaultApplication
         val state = cardState(app)
         val connected = state == CardState.Connected
-        renderStatus(root, state)
+        renderStatus(root, app, state)
         renderHero(root, state)
         renderConnectionControls(root, state)
         renderStatusDetails(app, state)
@@ -402,15 +418,38 @@ class StatusFragment : Fragment() {
         renderTrafficStats(app.latestTrafficStats)
     }
 
-    private fun renderStatus(root: View, state: CardState) {
-        root.findViewById<View>(R.id.btnProfile).visibility = when (state) {
-            CardState.Disconnected, CardState.Failure, CardState.Permission -> View.VISIBLE
-            else -> View.GONE
+    private fun renderStatus(root: View, app: VaultApplication, state: CardState) {
+        val canSwitch = canSwitchProfile(app)
+        val currentProfile = app.activeProfileName ?: app.requestedProfileName
+        val profileName = when {
+            !canSwitch || state == CardState.Connected -> currentProfile ?: selectedProfileName
+            else -> selectedProfileName
+        }
+        val profile = root.findViewById<View>(R.id.btnProfile)
+        if (!canSwitch) dismissProfileDialog()
+        profile.visibility =
+            if (state != CardState.NoProfile && (canSwitch || profileName != null)) View.VISIBLE else View.GONE
+        profile.isClickable = canSwitch
+        profile.isFocusable = canSwitch
+        root.findViewById<View>(R.id.profileSwitchAction).visibility = if (canSwitch) View.VISIBLE else View.GONE
+        root.findViewById<TextView>(R.id.btnProfileText).text = when {
+            canSwitch && profileLoadFailed -> getString(R.string.config_load_failed)
+            else -> profileName ?: getString(R.string.add_profile)
         }
         tvStatus.setText(state.title)
         val showsBadge = state != CardState.Failure && state != CardState.Permission
         root.findViewById<View>(R.id.headerStatusBadge).visibility = if (showsBadge) View.VISIBLE else View.GONE
         if (showsBadge) renderStatusBadge(root, state.usesIndigo)
+    }
+
+    private fun dismissProfileDialog() {
+        profileDialog?.dismiss()
+        profileDialog = null
+    }
+
+    override fun onDestroyView() {
+        dismissProfileDialog()
+        super.onDestroyView()
     }
 
     private fun renderStatusBadge(root: View, emphasized: Boolean) {
@@ -438,7 +477,9 @@ class StatusFragment : Fragment() {
     }
 
     private fun adaptStatusLayout(root: View) {
-        if (resources.configuration.screenWidthDp > 360 && resources.configuration.fontScale < 1.3f) return
+        val configuration = resources.configuration
+        val stacked = configuration.screenWidthDp <= 360 || configuration.fontScale >= 1.3f
+        if (!stacked) return
 
         val header = root.findViewById<LinearLayout>(R.id.statusHeader)
         header.orientation = LinearLayout.VERTICAL
@@ -448,20 +489,17 @@ class StatusFragment : Fragment() {
 
         val profile = root.findViewById<LinearLayout>(R.id.btnProfile)
         profile.orientation = LinearLayout.VERTICAL
-        profile.gravity = android.view.Gravity.START
+        profile.gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
         profile.getChildAt(0).layoutParams = LinearLayout.LayoutParams(-1, -2)
         val profileAction = profile.getChildAt(1)
         (profileAction.layoutParams as LinearLayout.LayoutParams).topMargin = dp(4)
 
-        val rows = listOf(R.id.publicIpSection, R.id.rowIpv4, R.id.rowIpv6)
-        rows.forEach { id ->
+        listOf(R.id.rowIpv4, R.id.rowIpv6).forEach { id ->
             val row = root.findViewById<LinearLayout>(id)
             row.orientation = LinearLayout.VERTICAL
             row.gravity = android.view.Gravity.START
             val address = row.getChildAt(1) as TextView
-            address.layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
-                topMargin = dp(4)
-            }
+            address.layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) }
             address.gravity = android.view.Gravity.START
         }
 
@@ -474,6 +512,32 @@ class StatusFragment : Fragment() {
             topMargin = dp(12)
             bottomMargin = dp(12)
         }
+    }
+
+    private fun updateWanAddressAction() {
+        val value = tvPublicIpAddress
+        if (value.width == 0) return
+        val shortened = value.paint.measureText(value.text.toString()) > value.width
+        val selectable = !shortened
+        if (value.isTextSelectable == selectable) return
+        value.setTextIsSelectable(selectable)
+        value.setTextColor(value.context.getColor(if (shortened) R.color.vault_blue else R.color.vault_text))
+        value.setOnClickListener(if (shortened) View.OnClickListener { showWanAddress() } else null)
+        value.isFocusable = true
+    }
+
+    private fun showWanAddress() {
+        val context = tvPublicIpAddress.context
+        val address = tvPublicIpAddress.text.toString()
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(context)
+            .setTitle(R.string.status_wan)
+            .setMessage(address)
+            .setNegativeButton(R.string.cancel_description, null)
+            .setPositiveButton(R.string.copy) { _, _ ->
+                context.getSystemService(ClipboardManager::class.java)
+                    .setPrimaryClip(ClipData.newPlainText(getString(R.string.status_wan), address))
+            }
+            .show()
     }
 
     private fun renderHero(root: View, state: CardState) {
@@ -597,7 +661,8 @@ class StatusFragment : Fragment() {
         root.findViewById<View>(R.id.rowIpv6).visibility = if (vpnState.ipv6.isNotEmpty()) View.VISIBLE else View.GONE
         tvIpv4Address.text = vpnState.ipv4
         tvIpv6Address.text = vpnState.ipv6
-        tvPublicIpAddress.text = vpnState.publicIp
+        tvPublicIpAddress.setIfChanged(vpnState.publicIp)
+        updateWanAddressAction()
     }
 
     private fun renderTrafficStats(stats: VpnStatusEvent.TrafficStats?) {

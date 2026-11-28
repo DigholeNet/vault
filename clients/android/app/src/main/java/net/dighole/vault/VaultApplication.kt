@@ -95,7 +95,7 @@ class VaultApplication : Application() {
     fun emitVpnStatusEvent(event: VpnStatusEvent) {
         when (event) {
             is VpnStatusEvent.Connected -> ensureConnectionStarted()
-            is VpnStatusEvent.Disconnected, is VpnStatusEvent.Error -> {
+            is VpnStatusEvent.Disconnecting, is VpnStatusEvent.Disconnected, is VpnStatusEvent.Error -> {
                 connectionClock.disconnected()
                 latestTrafficStats = null
             }

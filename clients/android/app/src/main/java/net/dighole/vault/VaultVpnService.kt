@@ -32,6 +32,7 @@ import net.dighole.vaultcore.EdgeConfig
 import net.dighole.vaultcore.PeerId
 import net.dighole.vaultcore.uniffi.ConnectionStatus
 import net.dighole.vaultcore.uniffi.EdgeSettings
+import net.dighole.vaultcore.uniffi.InternalException
 import net.dighole.vaultcore.uniffi.MobileRoutes
 import net.dighole.vaultcore.uniffi.MobileTransport
 import net.dighole.vaultcore.uniffi.RustTunnelSetup
@@ -470,11 +471,16 @@ class VaultVpnService : VpnService() {
         serviceRunning.set(false)
         connectJob = null
         stopTrafficStats()
-        try {
-            edge?.getConnectionStatus()?.let(::submitHostLatency)
-        } catch (e: Exception) {
+        val finalStatus = try {
+            edge?.getConnectionStatus()
+        } catch (e: InternalException) {
             Log.w(TAG, "Could not read final host latency", e)
+            null
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Could not read final host latency", e)
+            null
         }
+        finalStatus?.let(::submitHostLatency)
         connectedEvent = null
         lastCoreConnected = null
         (application as VaultApplication).activeProfileName = null
@@ -512,7 +518,10 @@ class VaultVpnService : VpnService() {
         } catch (_: Exception) {
         }
 
-        if (!preserveError) emitVpnEvent(VpnStatusEvent.Disconnected)
+        when {
+            onClosed != null -> emitVpnEvent(VpnStatusEvent.Disconnecting)
+            !preserveError -> emitVpnEvent(VpnStatusEvent.Disconnected)
+        }
         if (edgeToClose == null && onClosed != null) mainExecutor.execute(onClosed)
     }
 

@@ -112,7 +112,13 @@ final class VaultUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Cancel"].exists)
         XCTAssertFalse(app.buttons["Copy"].exists)
 
+        XCTAssertTrue(logs.wait(for: \.isHittable, toEqual: true, timeout: 10), app.debugDescription)
         logs.tap()
+        if !logs.wait(for: \.isSelected, toEqual: true, timeout: 3) {
+            // Retry only the tab tap so missing log controls still fail the test.
+            logs.tap()
+        }
+        XCTAssertTrue(logs.wait(for: \.isSelected, toEqual: true, timeout: 10), app.debugDescription)
         let copy = app.buttons["Copy"]
         XCTAssertTrue(copy.waitForExistence(timeout: 10), app.debugDescription)
         let clear = app.buttons["Clear"]
@@ -120,10 +126,6 @@ final class VaultUITests: XCTestCase {
         let tabBar = app.tabBars.firstMatch
         XCTAssertLessThanOrEqual(copy.frame.maxY, tabBar.frame.minY, app.debugDescription)
         XCTAssertLessThanOrEqual(clear.frame.maxY, tabBar.frame.minY, app.debugDescription)
-        let selected = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in logs.exists && logs.isSelected }, object: nil
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
         XCTAssertFalse(start.exists)
         XCTAssertFalse(app.switches["Auto-scroll"].exists)
         XCTAssertFalse(app.textFields["Search logs"].exists)
