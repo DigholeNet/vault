@@ -485,7 +485,11 @@ class StatusFragment : Fragment() {
             requireContext(), if (state == CardState.Connected) R.color.vault_hero_text else R.color.vault_text
         ))
         btnToggleVpn.setBackgroundResource(
-            if (state == CardState.Connected) R.drawable.vault_bg_connection_button_connected else R.drawable.vault_bg_connection_button_neutral
+            if (state == CardState.Connected) {
+                R.drawable.vault_bg_connection_button_connected
+            } else {
+                R.drawable.vault_bg_connection_button_neutral
+            }
         )
         val buttonPadding = dp(19)
         btnToggleVpn.setPadding(buttonPadding, buttonPadding, buttonPadding, buttonPadding)

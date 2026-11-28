@@ -255,6 +255,12 @@ class DiagnosticsFragment : Fragment() {
             })
             setTextColor(context.getColor(if (passed) R.color.vault_text else tint))
         }
+        bindSummaryIcon(root, state, idle, passed, hasIssue, tint)
+        bindSummaryProgress(root, state, idle, tint.takeIf { hasIssue })
+        renderRunButton(root, state, idle, connected)
+    }
+
+    private fun bindSummaryIcon(root: View, state: DiagnosticsState, idle: Boolean, passed: Boolean, hasIssue: Boolean, tint: Int) {
         root.findViewById<View>(R.id.diagnosticSummarySpinner).visibility =
             if (state.running) View.VISIBLE else View.GONE
         root.findViewById<ImageView>(R.id.diagnosticSummaryIcon).apply {
@@ -271,8 +277,6 @@ class DiagnosticsFragment : Fragment() {
             }
             imageTintList = ColorStateList.valueOf(context.getColor(iconTint))
         }
-        bindSummaryProgress(root, state, idle, tint.takeIf { hasIssue })
-        renderRunButton(root, state, idle, connected)
     }
 
     private fun renderRunButton(root: View, state: DiagnosticsState, idle: Boolean, connected: Boolean) {
