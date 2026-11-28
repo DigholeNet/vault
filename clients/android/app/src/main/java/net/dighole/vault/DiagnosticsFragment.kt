@@ -95,10 +95,7 @@ class DiagnosticsFragment : Fragment() {
         view.findViewById<MaterialButton>(R.id.btnCopyLogs).setOnClickListener { copyLogs() }
         viewLifecycleOwner.lifecycleScope.launch {
             (requireContext().applicationContext as VaultApplication).vpnStatusEvents.collect {
-                if (it !is VpnStatusEvent.TrafficStats) {
-                    if (!connected()) model.cancel()
-                    render()
-                }
+                if (it !is VpnStatusEvent.TrafficStats) render()
             }
         }
         viewLifecycleOwner.lifecycleScope.launch { model.state.collect { render() } }

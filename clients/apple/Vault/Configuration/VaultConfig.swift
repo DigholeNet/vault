@@ -299,16 +299,27 @@ class VaultConfig: ObservableObject {
         }
     }
 
-    func retryPasswordStorage() {
-        do {
-            for index in profiles.indices {
-                profiles[index].password = try passwordStore(profiles[index].name).load()
+    func canRetryPassword(for profileName: String?) -> Bool {
+        passwordStorageError != nil || profileName.flatMap { profile(named: $0) }?.password.isEmpty == true
+    }
+
+    @discardableResult
+    func retryPasswordStorage(for profileName: String? = nil) -> String? {
+        var recoveredPassword: String?
+        var failed = false
+        for index in profiles.indices {
+            let name = profiles[index].name
+            do {
+                let password = try passwordStore(name).load()
+                profiles[index].password = password
+                if name == profileName { recoveredPassword = password }
+            } catch {
+                failed = true
+                Logger.network.error("Password retry failed: \(error.localizedDescription)")
             }
-            passwordStorageError = nil
-        } catch {
-            passwordStorageError = "Password could not be saved or loaded. Please try again."
-            Logger.network.error("Password retry failed: \(error.localizedDescription)")
         }
+        passwordStorageError = failed ? "Password could not be saved or loaded. Please try again." : nil
+        return recoveredPassword
     }
 
     func saveProbeDomains(_ value: String) -> String? {

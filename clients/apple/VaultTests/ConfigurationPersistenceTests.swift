@@ -170,6 +170,44 @@ extension VaultTests {
         XCTAssertNil(config.selectedProfileName)
     }
 
+    func testPasswordRetry() throws {
+        let (config, defaults) = try makeConfig()
+        XCTAssertTrue(saveTestProfile(config, name: "Home"))
+        XCTAssertTrue(saveTestProfile(config, name: "Work"))
+        XCTAssertTrue(saveTestProfile(config, name: "Travel"))
+
+        var unreadable = Set(["Home", "Work", "Travel"])
+        let reopened = VaultConfig(defaults: defaults, passwordStore: { name in
+            PasswordPersistence(
+                read: {
+                    if unreadable.contains(name) { throw NSError(domain: "Keychain", code: 1) }
+                    return name.lowercased()
+                },
+                write: { _ in },
+                readLegacy: { nil },
+                clearLegacy: {}
+            )
+        })
+        unreadable = ["Work"]
+        XCTAssertEqual(reopened.retryPasswordStorage(for: "Home"), "home")
+        XCTAssertEqual(reopened.profile(named: "Travel")?.password, "travel")
+        XCTAssertNotNil(reopened.passwordStorageError)
+
+        var home = reopened.draft(for: "Home")
+        home.host = "home.invalid"
+        XCTAssertNil(reopened.saveProfile(home, originalName: "Home"))
+        XCTAssertNil(reopened.passwordStorageError)
+        XCTAssertFalse(reopened.canRetryPassword(for: "Home"))
+        XCTAssertFalse(reopened.canRetryPassword(for: nil))
+        XCTAssertTrue(reopened.canRetryPassword(for: "Work"))
+        XCTAssertNil(reopened.retryPasswordStorage(for: "Work"))
+
+        unreadable = []
+        XCTAssertEqual(reopened.retryPasswordStorage(for: "Work"), "work")
+        XCTAssertNil(reopened.passwordStorageError)
+        XCTAssertFalse(reopened.canRetryPassword(for: "Work"))
+    }
+
     func testLegacyIgnored() throws {
         let (config, defaults) = try makeConfig()
         defaults.set("legacy.invalid", forKey: "host")

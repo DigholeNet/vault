@@ -25,7 +25,7 @@ import net.dighole.vault.data.VaultConfig
 import net.dighole.vault.data.VaultProfiles
 import net.dighole.vault.data.deleteVaultProfile
 import net.dighole.vault.data.deviceId
-import net.dighole.vault.data.observeVaultHostLatencies
+import net.dighole.vault.data.observeVaultProfiles
 import net.dighole.vault.data.readVaultProfiles
 import net.dighole.vault.data.selectVaultProfile
 import net.dighole.vault.data.writeVaultConfig
@@ -97,7 +97,7 @@ class ConfigureFragment : Fragment() {
                 if (draft != null) fields.zip(draft).forEach { (field, value) -> field.setText(value) }
                 else showProfile(originalName)
                 loaded = true
-                observeHostLatencies()
+                observeProfileList()
                 if (opensNewProfile) {
                     opensNewProfile = false
                     editNewProfile()
@@ -368,12 +368,11 @@ class ConfigureFragment : Fragment() {
         if (!hidden && fields.isNotEmpty()) updateValidation()
     }
 
-    private fun observeHostLatencies() {
+    private fun observeProfileList() {
         val context = requireContext()
         viewLifecycleOwner.lifecycleScope.launch {
-            context.observeVaultHostLatencies()
-                .map { context.readVaultProfiles() }
-                .catch { android.util.Log.w("ConfigureFragment", "Could not refresh host latency", it) }
+            context.observeVaultProfiles()
+                .catch { android.util.Log.w("ConfigureFragment", "Could not refresh profiles", it) }
                 .collect { updated ->
                     if (updated != profiles) {
                         profiles = updated

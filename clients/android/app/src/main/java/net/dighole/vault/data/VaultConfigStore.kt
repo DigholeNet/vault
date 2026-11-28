@@ -11,9 +11,12 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.withContext
 
 internal object ConfigKeys {
     val SELECTED_PROFILE = stringPreferencesKey("selected_profile")
@@ -92,11 +95,26 @@ internal class VaultConfigStore(
         clearLegacyPassword()
     }
 
-    fun observeHostLatencies() = dataStore.data.map { prefs ->
-        prefs[ConfigKeys.PROFILE_NAMES].orEmpty().mapNotNull { name ->
+    private data class ProfileListState(val selectedProfileName: String?, val hostLatencies: Map<String, Long>)
+
+    private fun observeProfileList() = dataStore.data.map { prefs ->
+        val hostLatencies = prefs[ConfigKeys.PROFILE_NAMES].orEmpty().mapNotNull { name ->
             prefs[latencyKey(name)]?.let { name to it }
         }.toMap()
+        ProfileListState(prefs[ConfigKeys.SELECTED_PROFILE], hostLatencies)
     }.distinctUntilChanged()
+
+    @Suppress("TooGenericExceptionCaught") // A failed read must not stop later profile updates.
+    fun observeProfiles(onReadError: (Exception) -> Unit) = observeProfileList().mapNotNull {
+        try {
+            withContext(Dispatchers.IO) { read() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            onReadError(error)
+            null
+        }
+    }
 
     suspend fun recordHostLatency(name: String, host: String, port: Int, milliseconds: Long) {
         dataStore.edit { prefs ->

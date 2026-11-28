@@ -95,10 +95,10 @@ struct MacosConfigureView: View {
                         .scrollContentBackground(.hidden)
                     }
                 }
-                if page == .profiles, let feedback {
-                    Text(languageManager.tr(feedback))
+                if page == .profiles, let message = validationError ?? feedback {
+                    Text(languageManager.tr(message))
                         .font(.system(size: 12))
-                        .foregroundStyle(isError ? VaultTheme.danger : VaultTheme.textSecondary)
+                        .foregroundStyle(isError || validationError != nil ? VaultTheme.danger : VaultTheme.textSecondary)
                         .textSelection(.enabled)
                         .padding(.horizontal, 28)
                         .padding(.bottom, 10)
@@ -233,14 +233,16 @@ struct MacosConfigureView: View {
                 Text(languageManager.tr("Leave empty for defaults. Only assigned tunnel families are used."))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if let error = config.passwordStorageError {
+            if config.canRetryPassword(for: originalName) {
+                let error = config.passwordStorageError
                 Section {
-                    Text(languageManager.tr(error)).foregroundStyle(.red)
+                    if let error { Text(languageManager.tr(error)).foregroundStyle(.red) }
                     Button(languageManager.tr("Retry")) {
-                        config.retryPasswordStorage()
-                        if let originalName, config.passwordStorageError == nil {
-                            draft = config.draft(for: originalName)
-                            savedDraft = draft
+                        let password = config.retryPasswordStorage(for: originalName)
+                        if let error, config.passwordStorageError == nil, feedback == error { feedback = nil }
+                        if let password {
+                            if draft.password == savedDraft.password { draft.password = password }
+                            savedDraft.password = password
                         }
                     }
                 }

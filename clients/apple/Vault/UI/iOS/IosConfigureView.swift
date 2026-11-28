@@ -15,6 +15,7 @@ struct IosConfigureView: View {
     @State private var pageWidth: CGFloat = .infinity
     @State private var isSecured = true
     @State private var draft = ConnectionDraft()
+    @State private var loadedPassword = ""
     @State private var originalName: String?
     @State private var isEditing = false
     @State private var feedback: String?
@@ -33,6 +34,7 @@ struct IosConfigureView: View {
     private func edit(_ name: String?) {
         originalName = name
         draft = name.map { config.draft(for: $0) } ?? ConnectionDraft()
+        loadedPassword = draft.password
         feedback = nil
         isSecured = true
         isEditing = true
@@ -324,12 +326,17 @@ struct IosConfigureView: View {
                     } else if let validationError {
                         message(languageManager.tr(validationError), error: true)
                     }
-                    if let error = config.passwordStorageError {
+                    if config.canRetryPassword(for: originalName) {
+                        let error = config.passwordStorageError
                         VStack(alignment: .leading, spacing: 12) {
-                            message(languageManager.tr(error), error: true)
+                            if let error { message(languageManager.tr(error), error: true) }
                             Button(languageManager.tr("Retry")) {
-                                config.retryPasswordStorage()
-                                draft = config.draft(for: originalName)
+                                let password = config.retryPasswordStorage(for: originalName)
+                                if let error, config.passwordStorageError == nil, feedback == error { feedback = nil }
+                                if let password {
+                                    if draft.password == loadedPassword { draft.password = password }
+                                    loadedPassword = password
+                                }
                             }
                             .buttonStyle(VaultSecondaryButtonStyle())
                         }

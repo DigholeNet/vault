@@ -50,7 +50,9 @@ suspend fun Context.writeVaultConfig(config: VaultConfig, originalName: String? 
         configStore().write(config, originalName)
     }
 
-internal fun Context.observeVaultHostLatencies() = configStore().observeHostLatencies()
+internal fun Context.observeVaultProfiles() = configStore().observeProfiles { error ->
+    Log.w(TAG, "Could not refresh profiles", error)
+}
 
 internal suspend fun Context.recordVaultHostLatency(name: String, host: String, port: Int, milliseconds: Long) {
     configStore().recordHostLatency(name, host, port, milliseconds)

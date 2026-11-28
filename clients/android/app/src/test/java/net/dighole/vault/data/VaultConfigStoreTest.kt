@@ -17,6 +17,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -106,16 +109,54 @@ class VaultConfigStoreTest {
     }
 
     @Test(timeout = 10000)
+    fun selectionUpdates() = runBlocking {
+        val f = Fixture()
+        try {
+            f.store.write(first)
+            f.store.write(second)
+            val initial = CompletableDeferred<Unit>()
+            val updates = async {
+                f.store.observeProfiles { throw it }.onEach { initial.complete(Unit) }.take(2).toList()
+            }
+            initial.await()
+            f.store.select(second.name)
+            assertEquals(listOf(first.name, second.name), updates.await().map { it.selectedProfileName })
+        } finally {
+            f.close()
+        }
+    }
+
+    @Test(timeout = 10000)
+    fun refreshAfterError() = runBlocking {
+        val f = Fixture()
+        try {
+            f.store.write(first)
+            f.store.write(second)
+            f.failDecrypt = true
+            val failed = CompletableDeferred<Exception>()
+            val update = async { f.store.observeProfiles { failed.complete(it) }.first() }
+            assertTrue(failed.await() is IOException)
+            f.failDecrypt = false
+            f.store.select(second.name)
+            assertEquals(second, update.await().selected)
+        } finally {
+            f.close()
+        }
+    }
+
+    @Test(timeout = 10000)
     fun hostLatency() = runBlocking {
         val f = Fixture()
         try {
             f.store.write(first)
             f.store.write(second)
             val update = async {
-                f.store.observeHostLatencies().first { it[second.name] == 0L }
+                f.store.observeProfiles { throw it }.first { snapshot ->
+                    snapshot.profiles.any { it.name == second.name && it.hostLatencyMs == 0L }
+                }
             }
             f.store.recordHostLatency(second.name, second.host, second.port, 0)
-            assertEquals(mapOf(second.name to 0L), update.await())
+            assertEquals(second.copy(hostLatencyMs = 0), update.await().profiles.single { it.name == second.name })
             assertNull(f.store.read().selected?.hostLatencyMs)
             assertEquals(0L, f.store.read().profiles.first { it.name == second.name }.hostLatencyMs)
 
