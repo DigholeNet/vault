@@ -24,17 +24,15 @@ private const val GCM_TAG_LENGTH_BITS = 128
  * Typically caused by Android Keystore unavailability (e.g. device restore,
  * security update, or corrupted key material).
  */
-class SecureStorageException(message: String, cause: Throwable? = null) :
-    Exception(message, cause)
+class SecureStorageException(message: String) : Exception(message)
 
 /**
  * Encrypted storage for sensitive configuration values.
  *
  * Encrypts values with an AES-256-GCM key held in the Android Keystore;
  * returns IV-prefixed Base64 ciphertext for the atomic DataStore config.
- * SharedPreferences are read only to migrate older installations.
- * All operations are synchronous; callers
- * that need suspend semantics should wrap in [withContext].
+ * SharedPreferences are used only to remove the legacy credential.
+ * All operations are synchronous.
  */
 class SecureStorage(context: Context) {
 
@@ -86,21 +84,6 @@ class SecureStorage(context: Context) {
     fun clearLegacyPassword() {
         if (prefs.contains(KEY_PASSWORD) && !prefs.edit().remove(KEY_PASSWORD).commit()) {
             throw SecureStorageException("Failed to remove legacy password")
-        }
-    }
-
-    /**
-     * Reads the legacy SharedPreferences password, or null if not set.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    fun getPassword(): String? {
-        val encoded = prefs.getString(KEY_PASSWORD, null) ?: return null
-        return try {
-            decryptPassword(encoded)
-        } catch (e: SecureStorageException) {
-            throw e
-        } catch (e: Exception) {
-            throw SecureStorageException("Failed to decrypt stored password", e)
         }
     }
 }

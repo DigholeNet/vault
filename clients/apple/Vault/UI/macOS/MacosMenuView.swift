@@ -392,17 +392,6 @@ struct MacosMenuView: View {
     }
 }
 
-struct MacosStatusAddressRow: View {
-    let title: String
-    let address: String
-    let symbol: String
-    let color: Color
-
-    var body: some View {
-        VaultAddressRow(title: title, address: address, symbol: symbol, color: color)
-    }
-}
-
 extension AppData {
     var macConnectionPhase: VaultConnectionPhase {
         VaultConnectionPhase(

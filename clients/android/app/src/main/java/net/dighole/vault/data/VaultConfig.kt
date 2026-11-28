@@ -12,12 +12,5 @@ data class VaultConfig(
     val hostLatencyMs: Long? = null
 )
 
-/** Preserve legacy DNS entries and their order within each address family. */
-internal fun splitLegacyDns(value: String): Pair<String, String> {
-    val entries = parseConfigList(value)
-    return entries.filter { ':' !in it }.joinToString(",") to
-        entries.filter { ':' in it }.joinToString(",")
-}
-
 internal fun parseConfigList(value: String): List<String> =
     value.split(',').map { it.trim() }.filter { it.isNotEmpty() }

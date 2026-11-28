@@ -2,21 +2,6 @@
 import Foundation
 import VaultCore
 
-enum VpnStatusUtil {
-    static func titleKey(for status: VpnStatus) -> String {
-        switch status {
-        case .disconnected: return "Disconnected"
-        case .connecting: return "Connecting"
-        case .connected: return "Connected"
-        case .disconnecting: return "Disconnecting…"
-        }
-    }
-
-    static func getStatus(_ status: VpnStatus) -> String {
-        LanguageManager.shared.tr(titleKey(for: status))
-    }
-}
-
 #if os(macOS)
 enum ConnectionAction {
     case connect, disconnect, configure

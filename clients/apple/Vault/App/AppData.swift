@@ -10,7 +10,6 @@ class AppData: ObservableObject {
     }
 
     var canToggleConnection: Bool { vpnStatus != .disconnecting || connectionError != nil }
-    var vpnOn: Bool { vpnStatus == .connected || vpnStatus == .connecting }
     @Published var vpnStatus: VpnStatus = VpnStatus.disconnected
     /// Set when the user tries to connect without server configuration;
     /// the UI should guide them to the configure page.

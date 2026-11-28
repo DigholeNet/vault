@@ -4,7 +4,6 @@ package net.dighole.vault
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Rect
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.GestureDetector
@@ -189,8 +188,6 @@ class MainActivity : BaseActivity() {
      * The permission is already declared in AndroidManifest.xml.
      */
     private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-
         val granted = ContextCompat.checkSelfPermission(
             this,
             Manifest.permission.POST_NOTIFICATIONS

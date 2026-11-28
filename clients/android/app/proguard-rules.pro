@@ -2,7 +2,6 @@
 
 # Keep UniFFI generated bindings and public wrapper classes (called from Rust/JNA)
 -keep class net.dighole.vaultcore.uniffi.** { *; }
--keepclassmembers class net.dighole.vaultcore.uniffi.** { *; }
 -keep class net.dighole.vaultcore.Edge { *; }
 -keep class net.dighole.vaultcore.EdgeConfig { *; }
 -keep class net.dighole.vaultcore.EdgeException { *; }
@@ -24,7 +23,6 @@
 
 # Keep DataStore & preferences
 -keep class androidx.datastore.** { *; }
--keepclassmembers class androidx.datastore.** { *; }
 -dontwarn androidx.datastore.**
 
 # Keep app configuration classes (used by DataStore / preferences)

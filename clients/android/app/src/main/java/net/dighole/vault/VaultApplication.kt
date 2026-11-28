@@ -83,7 +83,6 @@ class VaultApplication : Application() {
     @Volatile var requestedProfileName: String? = null
 
     private val connectionClock = ConnectionClock()
-    val connectedAt: Long? get() = connectionClock.startedAt
 
     @Volatile var latestTrafficStats: VpnStatusEvent.TrafficStats? = null
         private set

@@ -34,7 +34,6 @@ enum VaultTheme {
     static let diagnosticWarning = Color(vaultLight: "92400E", dark: "FCD34D")
     static let danger = Color(vaultLight: "BE123C", dark: "FDA4AF")
     static let failureSurface = Color(vaultLight: "FFF1F2", dark: "3B1D2A")
-    static let failureOutline = Color(vaultLight: "FECDD3", dark: "6B2D3F")
     static let heroText = Color(vaultHex: "F1F5F9")
     static let heroSecondary = Color(vaultHex: "D7DFEF")
     static let heroPower = Color(vaultHex: "4F46E5")
@@ -138,23 +137,22 @@ struct VaultPageHeader: View {
 struct VaultStatusBadge: View {
     let title: String
     var active = false
-    var failure = false
     @ScaledMetric(relativeTo: .caption) private var titleSize = 12.0
 
     var body: some View {
         HStack(spacing: 7) {
             Circle()
-                .fill(failure ? VaultTheme.danger : (active ? VaultTheme.primary : VaultTheme.textDisabled))
+                .fill(active ? VaultTheme.primary : VaultTheme.textDisabled)
                 .frame(width: 6, height: 6)
             Text(title)
                 .font(.system(size: titleSize, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .foregroundStyle(failure ? VaultTheme.danger : (active ? VaultTheme.primaryDark : VaultTheme.textSecondary))
+        .foregroundStyle(active ? VaultTheme.primaryDark : VaultTheme.textSecondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(
-            failure ? VaultTheme.failureSurface : (active ? VaultTheme.indigoSoft : VaultTheme.surfaceSubtle),
+            active ? VaultTheme.indigoSoft : VaultTheme.surfaceSubtle,
             in: Capsule()
         )
         .accessibilityElement(children: .combine)

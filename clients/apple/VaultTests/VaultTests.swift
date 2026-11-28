@@ -51,19 +51,22 @@ final class VaultTests: XCTestCase {
         XCTAssertNil(config.passwordStorageError)
     }
 
-    func testStatusKeys() {
-        XCTAssertEqual(VpnStatusUtil.titleKey(for: .disconnected), "Disconnected")
-        XCTAssertEqual(VpnStatusUtil.titleKey(for: .connecting), "Connecting")
-        XCTAssertEqual(VpnStatusUtil.titleKey(for: .connected), "Connected")
-        XCTAssertEqual(VpnStatusUtil.titleKey(for: .disconnecting), "Disconnecting…")
+    func testStatusTitles() {
+        XCTAssertEqual(VaultConnectionPhase.disconnected.statusTitle(hasProfiles: true), "Disconnected")
+        XCTAssertEqual(VaultConnectionPhase.disconnected.statusTitle(hasProfiles: false), "No configuration")
+        XCTAssertEqual(VaultConnectionPhase.connecting.statusTitle(hasProfiles: true), "Connecting…")
+        XCTAssertEqual(VaultConnectionPhase.connected.statusTitle(hasProfiles: true), "VPN connected")
+        XCTAssertEqual(VaultConnectionPhase.disconnecting.statusTitle(hasProfiles: true), "Disconnecting…")
     }
 
     func testConnectionToggle() {
         let data = AppData()
-        for (status, enabled) in [(VpnStatus.disconnected, false), (.connecting, true), (.connected, true), (.disconnecting, false)] {
+        for (status, enabled) in [(VpnStatus.disconnected, true), (.connecting, true), (.connected, true), (.disconnecting, false)] {
             data.vpnStatus = status
-            XCTAssertEqual(data.vpnOn, enabled)
+            XCTAssertEqual(data.canToggleConnection, enabled)
         }
+        data.connectionError = "Unable to disconnect"
+        XCTAssertTrue(data.canToggleConnection)
     }
 
     #if os(macOS)
