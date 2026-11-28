@@ -387,9 +387,11 @@ pub fn build_heartbeat_pong(
     core: &CryptoCore,
     id: &PeerId,
     ts: Time,
+    ping_ts: Option<Time>,
 ) -> anyhow::Result<()> {
     let pong = pb::Pong {
         ts,
+        ping_ts,
         id: id.0.to_vec(),
     };
     build_control_message(buffer, core, HEARTBEAT, pong)
@@ -431,7 +433,10 @@ pub fn parse_ping(buffer: &mut Buffer, core: &CryptoCore) -> anyhow::Result<Ping
 pub fn parse_pong(buffer: &mut Buffer, core: &CryptoCore) -> anyhow::Result<Pong> {
     core.decrypt(buffer, HEARTBEAT)?;
     let data = pb::Pong::decode(buffer.as_ref())?;
-    Ok(Pong { ts: data.ts })
+    Ok(Pong {
+        ts: data.ts,
+        ping_ts: data.ping_ts,
+    })
 }
 
 pub fn parse_close(buffer: &mut Buffer, core: &CryptoCore) -> anyhow::Result<PeerId> {
@@ -513,10 +518,12 @@ mod tests {
         // pong goes the other direction: the responder encrypts, the
         // initiator decrypts.
         let mut buf = Buffer::new(128);
-        build_heartbeat_pong(&mut buf, &receiver, &id, 43).unwrap();
+        build_heartbeat_pong(&mut buf, &receiver, &id, 43, Some(42)).unwrap();
         let mut pong_buf = Buffer::new(0);
         pong_buf.write_all(&buf.as_ref()[1..]).unwrap();
-        assert_eq!(parse_pong(&mut pong_buf, &sender).unwrap().ts, 43);
+        let pong = parse_pong(&mut pong_buf, &sender).unwrap();
+        assert_eq!(pong.ts, 43);
+        assert_eq!(pong.ping_ts, Some(42));
     }
 
     #[test]

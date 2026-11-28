@@ -110,6 +110,9 @@ struct VaultApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     #endif
+    #if os(iOS)
+    @Environment(\.scenePhase) private var scenePhase
+    #endif
     let appData = AppData()
     let config = VaultConfig()
     let vpnManager: VpnManager
@@ -157,6 +160,10 @@ struct VaultApp: App {
         WindowGroup {
             IosMainView(vpnManager: vpnManager).environmentObject(appData)
                 .environmentObject(config).environmentObject(LanguageManager.shared)
+                .onAppear { config.importHostLatency() }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { config.importHostLatency() }
+                }
         }
         #endif
     }

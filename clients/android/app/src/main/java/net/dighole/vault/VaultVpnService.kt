@@ -30,6 +30,7 @@ import net.dighole.vault.data.readVaultConfig
 import net.dighole.vaultcore.Edge
 import net.dighole.vaultcore.EdgeConfig
 import net.dighole.vaultcore.PeerId
+import net.dighole.vaultcore.uniffi.ConnectionStatus
 import net.dighole.vaultcore.uniffi.EdgeSettings
 import net.dighole.vaultcore.uniffi.MobileRoutes
 import net.dighole.vaultcore.uniffi.MobileTransport
@@ -80,6 +81,8 @@ class VaultVpnService : VpnService() {
     private var serviceJob = SupervisorJob()
     private var scope = CoroutineScope(Dispatchers.IO + serviceJob)
     private var serverHost: String = ""
+    private var serverPort: Int = 0
+    private var submittedLatencyGeneration: ULong? = null // Protected by sessionGate.
     private var dnsIpv4List: List<String> = emptyList()
     private var dnsIpv6List: List<String> = emptyList()
 
@@ -255,6 +258,8 @@ class VaultVpnService : VpnService() {
                 if (!sessionGate.update(sessionToken) {
                     mtuCap = validated.mtuCap?.toInt()
                     serverHost = validated.host
+                    serverPort = validated.port.toInt()
+                    submittedLatencyGeneration = null
                     dnsIpv4List = validated.dnsIpv4
                     dnsIpv6List = validated.dnsIpv6
                 }) return@launch
@@ -465,6 +470,11 @@ class VaultVpnService : VpnService() {
         serviceRunning.set(false)
         connectJob = null
         stopTrafficStats()
+        try {
+            edge?.getConnectionStatus()?.let(::submitHostLatency)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read final host latency", e)
+        }
         connectedEvent = null
         lastCoreConnected = null
         (application as VaultApplication).activeProfileName = null
@@ -640,6 +650,16 @@ class VaultVpnService : VpnService() {
         }
     }
 
+    /** Called under sessionGate before any session metadata is cleared. */
+    private fun submitHostLatency(status: ConnectionStatus) {
+        val name = requestedProfileName ?: return
+        val rtt = status.networkRttMs ?: return
+        val generation = status.networkRttGeneration ?: return
+        if (submittedLatencyGeneration == generation) return
+        submittedLatencyGeneration = generation
+        (application as VaultApplication).saveHostLatency(name, serverHost, serverPort, rtt.toLong())
+    }
+
     @Synchronized
     private fun stopTrafficStats() {
         trafficStatsJob?.cancel()
@@ -664,6 +684,7 @@ class VaultVpnService : VpnService() {
                             // Read status alongside the addresses committed by this session.
                             val status = e.getConnectionStatus()
                             val connected = status.connected
+                            submitHostLatency(status)
                             val publicIpChanged = connected && connectedEvent?.publicIp != status.publicIp
                             if (lastCoreConnected != connected || publicIpChanged) {
                                 lastCoreConnected = connected

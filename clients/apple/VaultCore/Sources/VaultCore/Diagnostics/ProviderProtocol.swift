@@ -11,6 +11,11 @@ public struct ProviderStatus: Codable, Sendable {
     public var publicIp: String?
     public var profileName: String?
     public var stats: PacketStats.Stats
+    #if os(iOS)
+    public var hostLatencyID: UUID?
+    #else
+    public var networkRttMs: UInt64?
+    #endif
 
     public init(
         ip: String, stats: PacketStats.Stats, session: String? = nil,
@@ -23,6 +28,37 @@ public struct ProviderStatus: Codable, Sendable {
         self.stats = stats
     }
 }
+
+#if os(iOS)
+/// The packet tunnel can connect while the app is suspended.
+public struct SavedHostLatency: Codable, Sendable {
+    public let id: UUID
+    public let profileName: String
+    public let host: String
+    public let port: Int
+    public let milliseconds: UInt64
+
+    public init(profileName: String, host: String, port: Int, milliseconds: UInt64) {
+        self.id = UUID()
+        self.profileName = profileName
+        self.host = host
+        self.port = port
+        self.milliseconds = milliseconds
+    }
+
+    public static let sharedURL = FileManager.default
+        .containerURL(forSecurityApplicationGroupIdentifier: kAppGroupIdentifier)?
+        .appendingPathComponent("latest-network-latency.json")
+
+    public func write(to url: URL) throws {
+        try JSONEncoder().encode(self).write(to: url, options: .atomic)
+    }
+
+    public static func read(from url: URL) throws -> Self {
+        try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
+    }
+}
+#endif
 
 public enum ProviderCommand: String, Codable, Sendable {
     case status, logs, startupStatus, diagnosticContext, diagnosticProbe, cancelDiagnostics, clearLogs

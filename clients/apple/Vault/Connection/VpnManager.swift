@@ -83,7 +83,22 @@ class VpnManager {
             }
             self.sendProviderCommand(request, timeout: timeout, completion: completion)
         },
-        apply: { [weak self] status in self?.appData.applyStatus(status) },
+        apply: { [weak self] status in
+            guard let self else { return }
+            self.appData.applyStatus(status)
+            #if os(iOS)
+            if let id = status.hostLatencyID, id != self.config.lastImportedHostLatency {
+                self.config.importHostLatency()
+            }
+            #else
+            if let milliseconds = status.networkRttMs, let name = status.profileName,
+               let tunnel = self.activeVPN?.protocolConfiguration as? NETunnelProviderProtocol,
+               let values = tunnel.providerConfiguration,
+               let host = values["host"] as? String, let port = values["port"] as? NSNumber {
+                self.config.recordHostLatency(milliseconds, for: name, host: host, port: port.intValue)
+            }
+            #endif
+        },
         reset: { [weak self] in self?.appData.resetStats() }
     )
     /// Lifecycle owns the phase; AppData is its published UI projection.
@@ -250,6 +265,9 @@ class VpnManager {
                 self.startStatsMonitoring()
             } else if self.vpnStatus == .disconnected {
                 self.stopStatsMonitoring()
+                #if os(iOS)
+                config.importHostLatency()
+                #endif
             }
         }
 

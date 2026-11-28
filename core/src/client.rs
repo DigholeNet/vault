@@ -248,6 +248,10 @@ pub struct ConnectionStatus {
     pub generation: u64,
     /// Server-observed outer source IP from the current authenticated handshake.
     pub public_ip: String,
+    /// First measured heartbeat after peer confirmation, retained until replaced.
+    pub network_rtt_ms: Option<u64>,
+    /// The transport responsible for this sample, even while reconnecting.
+    pub network_rtt_generation: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -395,6 +399,7 @@ struct ClientState {
     assigned_addresses: Option<crate::settings::TunnelAssignment>,
     transport_routes: Option<TransportRoutes>,
     public_ip: String,
+    network_rtt: Option<(u64, u64)>,
     is_closing: bool,
     pausing: bool,
     last_pong: Instant,
@@ -598,6 +603,8 @@ impl ClientSession {
             connected: state.is_active,
             generation: state.connection_generation,
             public_ip: state.public_ip.clone(),
+            network_rtt_ms: state.network_rtt.map(|(_, milliseconds)| milliseconds),
+            network_rtt_generation: state.network_rtt.map(|(generation, _)| generation),
         }
     }
 
@@ -780,6 +787,7 @@ impl ClientState {
             assigned_addresses: None,
             transport_routes: None,
             public_ip: String::new(),
+            network_rtt: None,
             is_closing: false,
             pausing: false,
             last_pong: Instant::now(),
@@ -1826,7 +1834,8 @@ impl ClientInner {
     ) {
         info!("Data loop started for {remote_addr}");
         let (packet_tx, mut packet_rx) =
-            mpsc::channel::<(SocketAddr, Vec<u8>)>(DOWNLINK_QUEUE_CAPACITY);
+            mpsc::channel::<(SocketAddr, Vec<u8>, Option<Instant>)>(DOWNLINK_QUEUE_CAPACITY);
+        let heartbeat_sample = Arc::new(Mutex::new(HeartbeatSampling::default()));
         let receive_metrics = Arc::new(ReceiveMetrics::new(&packet_tx));
 
         {
@@ -1843,10 +1852,12 @@ impl ClientInner {
                     match receive_socket.recv_from(&mut buf).await {
                         Ok((len, from)) => {
                             if from == remote_addr {
+                                let received_at =
+                                    (len > 0 && buf[0] == protocol::HEARTBEAT).then(Instant::now);
                                 if !enqueue_downlink(
                                     &packet_tx,
                                     &metrics,
-                                    (from, buf[..len].to_vec()),
+                                    (from, buf[..len].to_vec(), received_at),
                                 )
                                 .await
                                 {
@@ -1858,7 +1869,7 @@ impl ClientInner {
                                     .unwrap_or_else(|e| e.into_inner())
                                     .admit(from, &buf[..len])
                             }) && !try_enqueue_peer(&packet_tx, &metrics, || {
-                                (from, buf[..len].to_vec())
+                                (from, buf[..len].to_vec(), None)
                             }) {
                                 break;
                             }
@@ -1875,21 +1886,30 @@ impl ClientInner {
             let heartbeat_socket = socket.clone();
             let heartbeat_crypto = crypto.clone();
             let heartbeat_id = self.config.id;
+            let sample = heartbeat_sample.clone();
             let heartbeat_handle = tokio::spawn(async move {
                 let mut ticker = interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
                 info!("Heartbeat loop started (interval={HEARTBEAT_INTERVAL_SECS}s)");
                 loop {
                     ticker.tick().await;
+                    let ping_ts = sample
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .next_timestamp();
                     let mut buf = Buffer::new(EXTRA_LEN + 1);
                     if let Err(e) = protocol::build_heartbeat_ping(
                         &mut buf,
                         &heartbeat_crypto,
                         &heartbeat_id,
-                        current_ts(),
+                        ping_ts,
                     ) {
                         warn!("Failed to build ping: {e}");
                         continue;
                     }
+                    sample
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .sent_regular_ping(ping_ts, Instant::now());
                     match heartbeat_socket.send_to(buf.as_ref(), remote_addr).await {
                         Ok(bytes) => {
                             debug!("Heartbeat ping sent ({bytes} bytes to {remote_addr})")
@@ -1953,7 +1973,7 @@ impl ClientInner {
                     batch.clear();
                     let mut direct = [None; DATA_BATCH_CAPACITY];
                     let pending_packets = pending.len();
-                    for (from, mut packet) in pending.drain(..) {
+                    for (from, mut packet, received_at) in pending.drain(..) {
                         if from != remote_addr {
                             if let (Some(discovery), Some(buffer)) = (&discovery, &mut discovery_buf) {
                                 let authorization = discovery.lock().unwrap_or_else(|e| e.into_inner())
@@ -1978,7 +1998,7 @@ impl ClientInner {
                                 heartbeat_buf.clear();
                                 if heartbeat_buf.write_all(&packet[1..]).is_ok() {
                                     match protocol::parse_pong(&mut heartbeat_buf, &crypto) {
-                                        Ok(_pong) => {
+                                        Ok(pong) => {
                                             if let Some(discovery) = &discovery {
                                                 discovery.lock().unwrap_or_else(|e| e.into_inner()).confirm();
                                             }
@@ -1987,6 +2007,13 @@ impl ClientInner {
                                             rejected_since = None;
                                             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                                             state.last_pong = last_pong;
+                                            if let Some(rtt) = received_at.and_then(|at| {
+                                                heartbeat_sample.lock().unwrap_or_else(|e| e.into_inner())
+                                                    .received_pong(pong.ping_ts, at)
+                                            }) && state.connection_generation == generation
+                                            {
+                                                state.network_rtt = Some((generation, rtt.as_millis() as u64));
+                                            }
                                         }
                                         Err(e) => {
                                             warn!("Pong parse failed: {e}");
@@ -2055,6 +2082,11 @@ impl ClientInner {
                                 // before reconnecting.
                                 if rejected_since.is_none() {
                                     rejected_since = Some(Instant::now());
+                                    let ping_ts = {
+                                        let mut sample = heartbeat_sample.lock().unwrap_or_else(|e| e.into_inner());
+                                        sample.sent_liveness_ping();
+                                        sample.next_timestamp()
+                                    };
                                     warn!(
                                         "REJECTED received from {remote_addr}, probing session liveness"
                                     );
@@ -2063,7 +2095,7 @@ impl ClientInner {
                                         &mut buf,
                                         &crypto,
                                         &self.config.id,
-                                        current_ts(),
+                                        ping_ts,
                                     ) {
                                         Ok(()) => {
                                             if let Err(e) =
@@ -2137,6 +2169,90 @@ impl ClientInner {
         }
 
         info!("Data loop ended for {remote_addr}");
+    }
+}
+
+#[derive(Default)]
+struct HeartbeatSampling {
+    state: HeartbeatSample,
+    last_ping_ts: i64,
+}
+
+#[derive(Clone, Copy)]
+enum HeartbeatSample {
+    Confirming(u8),
+    Ready {
+        echo: bool,
+    },
+    Sent {
+        ping_ts: i64,
+        at: Instant,
+        echo: bool,
+    },
+    Done,
+}
+
+impl Default for HeartbeatSample {
+    fn default() -> Self {
+        Self::Confirming(0)
+    }
+}
+
+impl HeartbeatSampling {
+    fn next_timestamp(&mut self) -> i64 {
+        self.last_ping_ts = current_ts().max(self.last_ping_ts.saturating_add(1));
+        self.last_ping_ts
+    }
+
+    fn sent_regular_ping(&mut self, ping_ts: i64, at: Instant) {
+        self.state = match self.state {
+            HeartbeatSample::Confirming(sent) => {
+                HeartbeatSample::Confirming(sent.saturating_add(1))
+            }
+            HeartbeatSample::Ready { echo } => HeartbeatSample::Sent { ping_ts, at, echo },
+            HeartbeatSample::Sent { echo: true, .. } => HeartbeatSample::Sent {
+                ping_ts,
+                at,
+                echo: true,
+            },
+            HeartbeatSample::Sent { echo: false, .. } | HeartbeatSample::Done => {
+                HeartbeatSample::Done
+            }
+        };
+    }
+
+    fn sent_liveness_ping(&mut self) {
+        self.state = match self.state {
+            // Old servers cannot distinguish an extra ping from the initial or
+            // measured regular ping. Servers that echo can still match it.
+            HeartbeatSample::Confirming(_) => HeartbeatSample::Confirming(u8::MAX),
+            HeartbeatSample::Ready { echo: false } | HeartbeatSample::Sent { echo: false, .. } => {
+                HeartbeatSample::Done
+            }
+            state => state,
+        };
+    }
+
+    fn received_pong(&mut self, echoed_ts: Option<i64>, received_at: Instant) -> Option<Duration> {
+        match self.state {
+            HeartbeatSample::Confirming(sent) => {
+                self.state = match echoed_ts {
+                    Some(_) => HeartbeatSample::Ready { echo: true },
+                    None if sent == 1 => HeartbeatSample::Ready { echo: false },
+                    None => HeartbeatSample::Done,
+                };
+                None
+            }
+            HeartbeatSample::Sent { ping_ts, at, echo } if echoed_ts == echo.then_some(ping_ts) => {
+                let rtt = received_at.checked_duration_since(at)?;
+                if rtt >= Duration::from_secs(HEARTBEAT_INTERVAL_SECS) {
+                    return None;
+                }
+                self.state = HeartbeatSample::Done;
+                Some(rtt)
+            }
+            _ => None,
+        }
     }
 }
 

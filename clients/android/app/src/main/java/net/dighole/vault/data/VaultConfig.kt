@@ -8,7 +8,8 @@ data class VaultConfig(
     val password: String = "",
     val dnsIpv4: String = "",
     val dnsIpv6: String = "",
-    val mtu: String = ""
+    val mtu: String = "",
+    val hostLatencyMs: Long? = null
 )
 
 /** Preserve legacy DNS entries and their order within each address family. */

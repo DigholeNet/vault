@@ -180,6 +180,7 @@ pub struct Ping {
 
 pub struct Pong {
     pub ts: i64,
+    pub ping_ts: Option<i64>,
 }
 
 impl TryFrom<pb::HandshakeRequest> for HandshakeRequest {

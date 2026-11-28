@@ -50,6 +50,12 @@ suspend fun Context.writeVaultConfig(config: VaultConfig, originalName: String? 
         configStore().write(config, originalName)
     }
 
+internal fun Context.observeVaultHostLatencies() = configStore().observeHostLatencies()
+
+internal suspend fun Context.recordVaultHostLatency(name: String, host: String, port: Int, milliseconds: Long) {
+    configStore().recordHostLatency(name, host, port, milliseconds)
+}
+
 suspend fun Context.selectVaultProfile(name: String): Unit = withContext(Dispatchers.IO) {
     configStore().select(name)
 }

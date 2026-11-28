@@ -152,6 +152,7 @@ message Ping {
 message Pong {
     bytes id = 1;
     int64 ts = 2;
+    optional int64 ping_ts = 3;
 }
 
 message Close {

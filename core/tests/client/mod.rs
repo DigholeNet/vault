@@ -38,6 +38,61 @@ fn idle_session() -> ClientSession {
 }
 
 #[test]
+fn heartbeat_rtt() {
+    let mut sampling = HeartbeatSampling::default();
+    let start = Instant::now();
+    let interval = Duration::from_secs(HEARTBEAT_INTERVAL_SECS);
+    let rtt = Duration::from_millis(42);
+
+    sampling.sent_regular_ping(1, start);
+    assert_eq!(sampling.received_pong(Some(1), start + rtt), None);
+
+    sampling.sent_regular_ping(2, start + interval);
+    sampling.sent_liveness_ping();
+    sampling.sent_regular_ping(3, start + 2 * interval);
+    assert_eq!(
+        sampling.received_pong(Some(2), start + 2 * interval + rtt),
+        None
+    );
+    assert_eq!(
+        sampling.received_pong(Some(4), start + 2 * interval + rtt),
+        None
+    );
+    assert_eq!(
+        sampling.received_pong(Some(3), start + 2 * interval + rtt),
+        Some(rtt)
+    );
+    assert_eq!(
+        sampling.received_pong(Some(3), start + 2 * interval + rtt),
+        None
+    );
+}
+
+#[test]
+fn legacy_rtt() {
+    let start = Instant::now();
+    let interval = Duration::from_secs(HEARTBEAT_INTERVAL_SECS);
+    let rtt = Duration::from_millis(42);
+
+    for lost in [false, true] {
+        let mut sampling = HeartbeatSampling::default();
+        sampling.sent_regular_ping(1, start);
+        assert_eq!(sampling.received_pong(None, start + rtt), None);
+        sampling.sent_regular_ping(2, start + interval);
+        let received_at = if lost {
+            sampling.sent_regular_ping(3, start + 2 * interval);
+            start + 2 * interval + rtt
+        } else {
+            start + interval + rtt
+        };
+        assert_eq!(
+            sampling.received_pong(None, received_at),
+            (!lost).then_some(rtt)
+        );
+    }
+}
+
+#[test]
 fn resolve_literals() {
     let ipv4 = resolve_server_candidates("127.0.0.1", 9527).unwrap();
     assert_eq!(ipv4, vec!["127.0.0.1:9527".parse().unwrap()]);

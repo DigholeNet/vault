@@ -51,6 +51,51 @@ extension VaultTests {
         XCTAssertEqual(config.profiles.count, 1)
     }
 
+    func testHostLatency() throws {
+        let (config, defaults) = try makeConfig()
+        XCTAssertTrue(saveTestProfile(config, name: "Home"))
+        XCTAssertTrue(saveTestProfile(config, name: "Work"))
+        config.recordHostLatency(0, for: "Work", host: "test.invalid", port: 9527)
+        XCTAssertNil(config.selectedProfile?.hostLatencyMs)
+        let reloaded = VaultConfig(defaults: defaults, passwordStore: { _ in
+            PasswordPersistence(read: { "" }, write: { _ in }, readLegacy: { nil }, clearLegacy: {})
+        })
+        XCTAssertEqual(reloaded.profile(named: "Work")?.hostLatencyMs, 0)
+
+        var work = config.draft(for: "Work")
+        work.dnsIpv4 = "1.1.1.1"
+        XCTAssertNil(config.saveProfile(work, originalName: "Work"))
+        XCTAssertEqual(config.profile(named: "Work")?.hostLatencyMs, 0)
+
+        work.port = "443"
+        XCTAssertNil(config.saveProfile(work, originalName: "Work"))
+        config.recordHostLatency(13, for: "Work", host: "test.invalid", port: 9527)
+        XCTAssertNil(config.profile(named: "Work")?.hostLatencyMs)
+    }
+
+    #if os(iOS)
+    func testBackgroundLatency() throws {
+        let (config, defaults) = try makeConfig()
+        XCTAssertTrue(saveTestProfile(config))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        try SavedHostLatency(profileName: "Test", host: "test.invalid", port: 9527, milliseconds: 11).write(to: url)
+        config.importHostLatency(from: url)
+        XCTAssertEqual(config.selectedProfile?.hostLatencyMs, 11)
+
+        var draft = config.connectionDraft
+        draft.port = "443"
+        XCTAssertNil(config.saveProfile(draft, originalName: "Test"))
+        draft.port = "9527"
+        XCTAssertNil(config.saveProfile(draft, originalName: "Test"))
+        let reloaded = VaultConfig(defaults: defaults, passwordStore: { _ in
+            PasswordPersistence(read: { "" }, write: { _ in }, readLegacy: { nil }, clearLegacy: {})
+        })
+        reloaded.importHostLatency(from: url)
+        XCTAssertNil(reloaded.selectedProfile?.hostLatencyMs)
+    }
+    #endif
+
     func testNewProfileSection() throws {
         let config = try makeConfig().config
         var draft = ConnectionDraft()

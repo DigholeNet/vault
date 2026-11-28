@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use tokio::net::UdpSocket;
+use tokio::sync::oneshot;
 use tokio::time::{sleep, timeout};
 
 use crate::{
@@ -26,6 +27,14 @@ pub async fn run_mock_server(password: &str) -> (SocketAddr, tokio::task::JoinHa
     run_mock_server_sessions(password, 1).await
 }
 
+/// Hold the first PONG until the test has observed transport readiness.
+pub async fn run_mock_server_with_pong_gate(
+    password: &str,
+    gate: oneshot::Receiver<()>,
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    run_mock_server_inner(password, vec!["10.0.0.2".into()], Some(gate)).await
+}
+
 /// Accept repeated handshakes on one endpoint to exercise explicit recovery.
 pub async fn run_mock_server_sessions(
     password: &str,
@@ -38,6 +47,14 @@ pub async fn run_mock_server_sessions(
 pub async fn run_mock_server_leases(
     password: &str,
     leases: Vec<String>,
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    run_mock_server_inner(password, leases, None).await
+}
+
+async fn run_mock_server_inner(
+    password: &str,
+    leases: Vec<String>,
+    mut pong_gate: Option<oneshot::Receiver<()>>,
 ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let server_socket = UdpSocket::bind("127.0.0.1:0")
         .await
@@ -117,9 +134,9 @@ pub async fn run_mock_server_leases(
             )
             .expect("crypto");
 
-            // Wait for a heartbeat ping (ignore data packets if they arrive first).
-            let mut got_ping = false;
-            while !got_ping {
+            // The gated fixture answers a second heartbeat to exercise RTT.
+            let mut pongs_remaining = if pong_gate.is_some() { 2 } else { 1 };
+            while pongs_remaining > 0 {
                 let (len, from) =
                     timeout(Duration::from_secs(15), server_socket.recv_from(&mut buf))
                         .await
@@ -138,14 +155,24 @@ pub async fn run_mock_server_leases(
                         let ping =
                             protocol::parse_ping(&mut hb_buf, &crypto).expect("decrypt ping");
 
+                        if let Some(gate) = pong_gate.take() {
+                            gate.await.expect("test released first pong");
+                        }
                         let mut pong_buf = Buffer::new(9);
-                        protocol::build_heartbeat_pong(&mut pong_buf, &crypto, &server_id, ping.ts)
-                            .expect("build pong");
+                        // The production server returns its own timestamp.
+                        protocol::build_heartbeat_pong(
+                            &mut pong_buf,
+                            &crypto,
+                            &server_id,
+                            now_secs(),
+                            Some(ping.ts),
+                        )
+                        .expect("build pong");
                         server_socket
                             .send_to(pong_buf.as_ref(), from)
                             .await
                             .expect("send pong");
-                        got_ping = true;
+                        pongs_remaining -= 1;
                     }
                     protocol::DATA_INTERFACE => {
                         // Data packets are accepted but not validated in this test.

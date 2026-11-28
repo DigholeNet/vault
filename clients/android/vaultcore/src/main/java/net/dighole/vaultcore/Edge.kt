@@ -154,7 +154,9 @@ class Edge(
     @Synchronized
     fun getConnectionStatus(): ConnectionStatus {
         return rustEdge?.getConnectionStatus()
-            ?: ConnectionStatus(connected = false, generation = 0u, publicIp = "")
+            ?: ConnectionStatus(
+                connected = false, generation = 0u, publicIp = "", networkRttMs = null, networkRttGeneration = null
+            )
     }
 
     @Synchronized

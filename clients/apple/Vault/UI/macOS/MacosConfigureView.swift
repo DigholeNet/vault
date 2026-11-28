@@ -187,7 +187,9 @@ struct MacosConfigureView: View {
                 }
                 if let profile = config.profiles.first(where: { $0.name == originalName }) {
                     HStack {
-                        ProfileServerLabel(host: profile.host, port: profile.port)
+                        ProfileServerLabel(
+                            host: profile.host, port: profile.port, milliseconds: profile.hostLatencyMs
+                        )
                         Spacer()
                         if profile.name == config.selectedProfileName {
                             HStack(spacing: 4) {

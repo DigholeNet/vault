@@ -32,6 +32,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Polls Rust counters and publishes an in-memory status snapshot over IPC.
     private var statsTimer: DispatchSourceTimer?
     private var statsSession = PacketStats.Session()
+    #if os(iOS)
+    private var savedHostLatency: (generation: UInt64, sample: SavedHostLatency)?
+    #endif
     /// Replaced for each start; callbacks retain their own session's object.
     private var tunWriteMetrics = TunnelWriteMetrics()
     /// Logs an "alive" marker with the memory footprint every 30s. When the
@@ -153,6 +156,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         // Each provider session owns fresh counters; the app carries forward
         // the last observed totals when an on-demand restart replaces it.
         statsSession.begin()
+        #if os(iOS)
+        savedHostLatency = nil
+        #endif
         tunWriteMetrics = TunnelWriteMetrics()
         guard let launch = readLaunchConfiguration() else { return }
         launchConfiguration = launch
@@ -380,6 +386,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     /// One cleanup path for startup failure, stop and provider replacement.
     private func cleanupSession() {
+        #if os(iOS)
+        saveHostLatency(edge?.connectionStatus)
+        #endif
         stopRequested = true
         statsSession.end()
         sessionToken = UUID()
@@ -621,11 +630,21 @@ extension PacketTunnelProvider {
 
     var providerStatus: ProviderStatus? {
         guard startFinished, !stopRequested, Self.activeProvider === self else { return nil }
-        return statsSession.status(
+        let connection = edge?.connectionStatus
+        #if os(iOS)
+        saveHostLatency(connection)
+        #endif
+        var status = statsSession.status(
             ip: assignedIp,
-            publicIp: edge?.connectionStatus.publicIp,
+            publicIp: connection?.publicIp,
             profileName: launchConfiguration?.profileName
         )
+        #if os(iOS)
+        status?.hostLatencyID = savedHostLatency?.sample.id
+        #else
+        status?.networkRttMs = connection?.networkRttMs
+        #endif
+        return status
     }
 
     var providerStarted: Bool { !stopRequested && (pendingStart != nil || startFinished) }
@@ -673,13 +692,35 @@ extension PacketTunnelProvider {
         timer.setEventHandler { [weak self] in
             guard let self = self, let edge = self.edge else { return }
             self.updatePhysicalPath(self.pathMonitor?.currentPath, refreshMTUOnUnchangedPath: false)
-            self.reasserting = self.tunnelSettings.isApplying || !edge.isConnected
+            let connection = edge.connectionStatus
+            self.reasserting = self.tunnelSettings.isApplying || !connection.connected
+            #if os(iOS)
+            self.saveHostLatency(connection)
+            #endif
             self.statsSession.update(PacketStats.Stats(edge.getTrafficStats()))
             self.reportTunWriteMetrics()
         }
         timer.resume()
         statsTimer = timer
     }
+
+    #if os(iOS)
+    private func saveHostLatency(_ connection: ConnectionStatus?) {
+        guard let connection, let milliseconds = connection.networkRttMs,
+              let generation = connection.networkRttGeneration, savedHostLatency?.generation != generation,
+              let launch = launchConfiguration, !launch.profileName.isEmpty,
+              let url = SavedHostLatency.sharedURL else { return }
+        do {
+            let sample = SavedHostLatency(
+                profileName: launch.profileName, host: launch.host, port: Int(launch.port), milliseconds: milliseconds
+            )
+            try sample.write(to: url)
+            savedHostLatency = (generation, sample)
+        } catch {
+            Logger.network.errorAndFile("Saving host RTT failed: \(error.localizedDescription)")
+        }
+    }
+    #endif
 
     private func reportTunWriteMetrics(force: Bool = false) {
         guard let report = tunWriteMetrics.takeReport(force: force) else { return }

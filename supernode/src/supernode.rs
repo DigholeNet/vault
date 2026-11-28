@@ -511,7 +511,13 @@ impl<TS: TimeSource> SuperNode<TS> {
                 if let Some(metrics) = self.metrics.peer(peer.id()) {
                     metrics.heartbeat();
                 }
-                protocol::build_heartbeat_pong(buffer, peer.crypto(), &self.id, TS::now())?;
+                protocol::build_heartbeat_pong(
+                    buffer,
+                    peer.crypto(),
+                    &self.id,
+                    TS::now(),
+                    Some(ping.ts),
+                )?;
                 self.socket.send_to(buffer.as_ref(), addr)?;
                 if let Err(e) = self.ip_manager.update(peer.id()) {
                     error!("Update ip error: {:?}", e)

@@ -16,18 +16,17 @@ import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import net.dighole.vault.data.VaultConfig
 import net.dighole.vault.data.VaultProfiles
 import net.dighole.vault.data.deleteVaultProfile
 import net.dighole.vault.data.deviceId
+import net.dighole.vault.data.observeVaultHostLatencies
 import net.dighole.vault.data.readVaultProfiles
 import net.dighole.vault.data.selectVaultProfile
 import net.dighole.vault.data.writeVaultConfig
-import net.dighole.vaultcore.uniffi.probeHostLatencyMs
 import java.text.NumberFormat
 
 class ConfigureFragment : Fragment() {
@@ -39,7 +38,6 @@ class ConfigureFragment : Fragment() {
     private var loading = false
     private var editing = false
     private var opensNewProfile = false
-    private var latencyJob: Job? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View =
         inflater.inflate(R.layout.fragment_configure, container, false)
@@ -87,6 +85,7 @@ class ConfigureFragment : Fragment() {
                 if (draft != null) fields.zip(draft).forEach { (field, value) -> field.setText(value) }
                 else showProfile(originalName)
                 loaded = true
+                observeHostLatencies()
                 if (opensNewProfile) {
                     opensNewProfile = false
                     editNewProfile()
@@ -107,16 +106,29 @@ class ConfigureFragment : Fragment() {
 
     private fun renderProfiles() {
         val container = view?.findViewById<ViewGroup>(R.id.profileRows) ?: return
-        latencyJob?.cancel()
-        val labelsByHost = mutableMapOf<String, MutableList<Pair<TextView, String>>>()
+        val numberFormat = NumberFormat.getIntegerInstance(resources.configuration.locales[0])
         container.removeAllViews()
         profiles.profiles.forEach { profile ->
             val row = layoutInflater.inflate(R.layout.item_profile, container, false)
             row.findViewById<TextView>(R.id.profileName).text = profile.name
             row.findViewById<TextView>(R.id.profileServer).also { label ->
                 val address = "${profile.host}:${profile.port}"
-                label.text = "$address · --"
-                labelsByHost.getOrPut(profile.host) { mutableListOf() }.add(label to address)
+                val latency = profile.hostLatencyMs
+                label.text = if (latency == null) {
+                    "$address · --"
+                } else {
+                    SpannableStringBuilder("$address · ").apply {
+                        append(
+                            "${numberFormat.format(latency)} ms",
+                            ForegroundColorSpan(container.context.getColor(R.color.vault_blue)),
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                        )
+                        setSpan(
+                            LineBreakConfigSpan.createNoBreakSpan(),
+                            address.length + 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                        )
+                    }
+                }
             }
             val selected = profile.name == profiles.selectedProfileName
             row.findViewById<View>(R.id.profileSelectedGroup).visibility = if (selected) View.VISIBLE else View.GONE
@@ -132,25 +144,6 @@ class ConfigureFragment : Fragment() {
         }
         view?.findViewById<TextView>(R.id.profileEmpty)?.visibility =
             if (profiles.profiles.isEmpty()) View.VISIBLE else View.GONE
-        latencyJob = viewLifecycleOwner.lifecycleScope.launch {
-            val numberFormat = NumberFormat.getIntegerInstance(resources.configuration.locales[0])
-            labelsByHost.forEach { (host, labels) ->
-                launch {
-                    val latency = withContext(latencyDispatcher) { probeHostLatencyMs(host) }
-                    val text = latency?.let { "${numberFormat.format(it.toLong())} ms" } ?: "- ms"
-                    val color = container.context.getColor(if (latency == null) R.color.vault_danger else R.color.vault_blue)
-                    labels.forEach { (label, address) ->
-                        label.text = SpannableStringBuilder("$address · ").apply {
-                            append(text, ForegroundColorSpan(color), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                            setSpan(
-                                LineBreakConfigSpan.createNoBreakSpan(),
-                                address.length + 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                            )
-                        }
-                    }
-                }
-            }
-        }
     }
 
     private fun openProfile(name: String) {
@@ -216,7 +209,6 @@ class ConfigureFragment : Fragment() {
         view?.findViewById<View>(R.id.profileList)?.visibility = if (value) View.GONE else View.VISIBLE
         view?.findViewById<View>(R.id.profileEditor)?.visibility = if (value) View.VISIBLE else View.GONE
         if (value) {
-            latencyJob?.cancel()
             updateValidation()
         } else {
             renderProfiles()
@@ -358,6 +350,21 @@ class ConfigureFragment : Fragment() {
         if (!hidden && fields.isNotEmpty()) updateValidation()
     }
 
+    private fun observeHostLatencies() {
+        val context = requireContext()
+        viewLifecycleOwner.lifecycleScope.launch {
+            context.observeVaultHostLatencies()
+                .map { context.readVaultProfiles() }
+                .catch { android.util.Log.w("ConfigureFragment", "Could not refresh host latency", it) }
+                .collect { updated ->
+                    if (updated != profiles) {
+                        profiles = updated
+                        if (!editing) renderProfiles()
+                    }
+                }
+        }
+    }
+
     private fun showMessage(message: String) {
         com.google.android.material.snackbar.Snackbar.make(
             requireView(), message, com.google.android.material.snackbar.Snackbar.LENGTH_LONG
@@ -382,7 +389,6 @@ class ConfigureFragment : Fragment() {
     }
 
     companion object {
-        private val latencyDispatcher = Dispatchers.IO.limitedParallelism(4)
         const val NEW_PROFILE_REQUEST = "newProfile"
         fun newInstance() = ConfigureFragment()
     }

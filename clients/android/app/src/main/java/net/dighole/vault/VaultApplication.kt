@@ -3,10 +3,14 @@ package net.dighole.vault
 
 import android.app.Application
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.launch
+import net.dighole.vault.data.recordVaultHostLatency
 import net.dighole.vaultcore.uniffi.setLogFilePath
 
 /**
@@ -37,6 +41,25 @@ class VaultApplication : Application() {
      */
     val applicationScope: CoroutineScope by lazy {
         CoroutineScope(Dispatchers.IO + SupervisorJob())
+    }
+
+    private var latencyWrite: Job? = null
+
+    @Synchronized
+    @Suppress("TooGenericExceptionCaught")
+    internal fun saveHostLatency(name: String, host: String, port: Int, milliseconds: Long) {
+        val previous = latencyWrite
+        latencyWrite = applicationScope.launch {
+            // Preserve submission order across quick disconnects and service restarts.
+            previous?.join()
+            try {
+                recordVaultHostLatency(name, host, port, milliseconds)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not save host latency", error)
+            }
+        }
     }
 
     /**

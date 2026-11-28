@@ -7,10 +7,13 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 internal object ConfigKeys {
     val SELECTED_PROFILE = stringPreferencesKey("selected_profile")
@@ -70,11 +73,15 @@ internal class VaultConfigStore(
             require(names.none { it.equals(config.name, ignoreCase = true) && it != originalName }) {
                 "A profile with this name already exists"
             }
+            val hostLatency = if (originalName != null && matchesEndpoint(prefs, originalName, config.host, config.port)) {
+                prefs[latencyKey(originalName)]
+            } else null
             if (originalName != null) {
                 require(originalName in names) { "Profile does not exist" }
                 removeProfile(prefs, originalName)
             }
             writeProfile(prefs, config)
+            hostLatency?.let { prefs[latencyKey(config.name)] = it }
             prefs[ConfigKeys.PROFILE_NAMES] = names.filter { it != originalName }.toSet() + config.name
             val selected = prefs[ConfigKeys.SELECTED_PROFILE]
             if (selected == null || selected == originalName) {
@@ -84,6 +91,26 @@ internal class VaultConfigStore(
         }
         clearLegacyPassword()
     }
+
+    fun observeHostLatencies() = dataStore.data.map { prefs ->
+        prefs[ConfigKeys.PROFILE_NAMES].orEmpty().mapNotNull { name ->
+            prefs[latencyKey(name)]?.let { name to it }
+        }.toMap()
+    }.distinctUntilChanged()
+
+    suspend fun recordHostLatency(name: String, host: String, port: Int, milliseconds: Long) {
+        dataStore.edit { prefs ->
+            if (name in prefs[ConfigKeys.PROFILE_NAMES].orEmpty() && matchesEndpoint(prefs, name, host, port)) {
+                prefs[latencyKey(name)] = milliseconds
+            }
+        }
+    }
+
+    private fun matchesEndpoint(prefs: Preferences, name: String, host: String, port: Int): Boolean =
+        prefs[stringPreferencesKey(key(name, "host"))] == host &&
+            (prefs[intPreferencesKey(key(name, "port"))] ?: VaultConfig().port) == port
+
+    private fun latencyKey(name: String) = longPreferencesKey(key(name, "network_latency_ms"))
 
     suspend fun select(name: String) {
         dataStore.edit { prefs ->
@@ -128,7 +155,8 @@ internal class VaultConfigStore(
             dnsIpv4 = prefs[stringPreferencesKey(key(name, "dns_ipv4"))].orEmpty(),
             dnsIpv6 = prefs[stringPreferencesKey(key(name, "dns_ipv6"))].orEmpty(),
             mtu = prefs[stringPreferencesKey(key(name, "mtu"))].orEmpty(),
-            password = password
+            password = password,
+            hostLatencyMs = prefs[latencyKey(name)]
         )
     }
 
@@ -142,6 +170,7 @@ internal class VaultConfigStore(
     }
 
     private fun removeProfile(prefs: MutablePreferences, name: String) {
+        prefs.remove(latencyKey(name))
         for (field in listOf(
             "host", "port", "dns_ipv4", "dns_ipv6", "mtu", "probe_domains",
             "password_encrypted", "password", "password_fallback"

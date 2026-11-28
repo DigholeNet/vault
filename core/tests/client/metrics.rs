@@ -383,6 +383,7 @@ async fn mixed_delivery() {
         &data_loop.sender_crypto,
         &PeerId([3; 16]),
         current_ts(),
+        None,
     )
     .unwrap();
     data_loop.send_raw(pong.as_ref()).await;

@@ -53,7 +53,9 @@ impl ClientCallbacks for TestCallbacks {
 #[tokio::test]
 async fn handshake_heartbeat_data() {
     let password = "test-password";
-    let (server_addr, server_handle) = run_mock_server(password).await;
+    let (release_pong, pong_gate) = tokio::sync::oneshot::channel();
+    let (server_addr, server_handle) =
+        vault_core::test_utils::run_mock_server_with_pong_gate(password, pong_gate).await;
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let callbacks: Arc<dyn ClientCallbacks> = Arc::new(TestCallbacks { events: tx });
@@ -98,7 +100,10 @@ async fn handshake_heartbeat_data() {
     })
     .await
     .expect("session becomes active after platform setup");
-    assert_eq!(session.connection_status().public_ip, "127.0.0.1");
+    let status = session.connection_status();
+    assert_eq!(status.public_ip, "127.0.0.1");
+    assert_eq!(status.network_rtt_ms, None);
+    release_pong.send(()).unwrap();
 
     // Send an encrypted data packet through the tunnel.
     session
@@ -110,6 +115,9 @@ async fn handshake_heartbeat_data() {
         .await
         .expect("server timeout")
         .expect("server task panicked");
+    let status = session.connection_status();
+    assert!(status.network_rtt_ms.is_some());
+    assert_eq!(status.network_rtt_generation, Some(status.generation));
 
     session.shutdown().expect("shutdown");
     assert!(!session.is_active());
@@ -213,6 +221,7 @@ async fn failed_config_never_activates() {
         "{error}"
     );
     assert!(!session.is_active());
+    assert_eq!(session.connection_status().network_rtt_ms, None);
     assert!(session.write_packet(vec![1; 20]).is_err());
     tokio::task::spawn_blocking(move || session.shutdown().unwrap())
         .await

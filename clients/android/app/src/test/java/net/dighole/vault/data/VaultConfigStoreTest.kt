@@ -105,6 +105,32 @@ class VaultConfigStoreTest {
         }
     }
 
+    @Test(timeout = 10000)
+    fun hostLatency() = runBlocking {
+        val f = Fixture()
+        try {
+            f.store.write(first)
+            f.store.write(second)
+            val update = async {
+                f.store.observeHostLatencies().first { it[second.name] == 0L }
+            }
+            f.store.recordHostLatency(second.name, second.host, second.port, 0)
+            assertEquals(mapOf(second.name to 0L), update.await())
+            assertNull(f.store.read().selected?.hostLatencyMs)
+            assertEquals(0L, f.store.read().profiles.first { it.name == second.name }.hostLatencyMs)
+
+            val renamed = second.copy(name = "Work")
+            f.store.write(renamed, originalName = second.name)
+            assertEquals(0L, f.store.read().profiles.first { it.name == renamed.name }.hostLatencyMs)
+
+            f.store.write(renamed.copy(port = 443), originalName = renamed.name)
+            f.store.recordHostLatency(renamed.name, renamed.host, renamed.port, 13)
+            assertNull(f.store.read().profiles.first { it.name == renamed.name }.hostLatencyMs)
+        } finally {
+            f.close()
+        }
+    }
+
     @Test
     fun probeSettings() = runBlocking {
         val f = Fixture()

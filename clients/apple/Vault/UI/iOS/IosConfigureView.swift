@@ -198,7 +198,9 @@ struct IosConfigureView: View {
                         Text(profile.name)
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(VaultTheme.textPrimary)
-                        ProfileServerLabel(host: profile.host, port: profile.port)
+                        ProfileServerLabel(
+                            host: profile.host, port: profile.port, milliseconds: profile.hostLatencyMs
+                        )
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 0)

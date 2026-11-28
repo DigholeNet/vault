@@ -12,9 +12,11 @@ struct VaultProfile: Codable, Equatable {
     var dnsIpv6 = ""
     var mtu = ""
     var password = ""
+    var hostLatencyMs: UInt64?
 
     enum CodingKeys: String, CodingKey {
         case name, host, port, dnsIpv4, dnsIpv6, mtu
+        case hostLatencyMs = "networkLatencyMs"
     }
 }
 
@@ -22,6 +24,7 @@ private struct VaultProfileStore: Codable {
     var version = 1
     var selectedProfileName: String?
     var profiles: [VaultProfile]
+    var lastImportedHostLatency: UUID?
 }
 
 class VaultConfig: ObservableObject {
@@ -43,6 +46,7 @@ class VaultConfig: ObservableObject {
     @Published private(set) var selectedProfileName: String?
     @Published private(set) var passwordStorageError: String?
 
+    private(set) var lastImportedHostLatency: UUID?
     private let defaults: UserDefaults
     private let passwordStore: (String) -> PasswordPersistence
 
@@ -90,6 +94,7 @@ class VaultConfig: ObservableObject {
         }
         do {
             let store = try JSONDecoder().decode(VaultProfileStore.self, from: data)
+            lastImportedHostLatency = store.lastImportedHostLatency
             profiles = store.profiles.map { profile in
                 var loaded = profile
                 do {
@@ -112,7 +117,10 @@ class VaultConfig: ObservableObject {
 
     private func persist() {
         do {
-            let store = VaultProfileStore(selectedProfileName: selectedProfileName, profiles: profiles)
+            let store = VaultProfileStore(
+                selectedProfileName: selectedProfileName, profiles: profiles,
+                lastImportedHostLatency: lastImportedHostLatency
+            )
             defaults.set(try JSONEncoder().encode(store), forKey: Self.profileStoreKey)
         } catch {
             passwordStorageError = "Configuration could not be loaded. Please try again."
@@ -123,6 +131,28 @@ class VaultConfig: ObservableObject {
     func profile(named name: String) -> VaultProfile? {
         profiles.first { $0.name == name }
     }
+
+    func recordHostLatency(_ milliseconds: UInt64, for name: String, host: String, port: Int) {
+        guard let index = profiles.firstIndex(where: {
+            $0.name == name && $0.host == host && $0.port == port
+        }), profiles[index].hostLatencyMs != milliseconds else { return }
+        profiles[index].hostLatencyMs = milliseconds
+        persist()
+    }
+
+    #if os(iOS)
+    func importHostLatency(from url: URL? = SavedHostLatency.sharedURL) {
+        guard let url, let sample = try? SavedHostLatency.read(from: url),
+              lastImportedHostLatency != sample.id else { return }
+        lastImportedHostLatency = sample.id
+        if let index = profiles.firstIndex(where: {
+            $0.name == sample.profileName && $0.host == sample.host && $0.port == sample.port
+        }) {
+            profiles[index].hostLatencyMs = sample.milliseconds
+        }
+        persist()
+    }
+    #endif
 
     func selectProfile(_ name: String) {
         guard profiles.contains(where: { $0.name == name }) else { return }
@@ -183,6 +213,9 @@ class VaultConfig: ObservableObject {
         }
         var profile = existingIndex.map { profiles[$0] } ?? VaultProfile()
         if section == .all || section == .connection {
+            if profile.host != draft.host || profile.port != port {
+                profile.hostLatencyMs = nil
+            }
             profile.name = draft.name
             profile.host = draft.host
             profile.port = port

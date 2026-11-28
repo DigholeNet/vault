@@ -447,6 +447,8 @@ pub struct ConnectionStatus {
     pub connected: bool,
     pub generation: u64,
     pub public_ip: String,
+    pub network_rtt_ms: Option<u64>,
+    pub network_rtt_generation: Option<u64>,
 }
 
 #[derive(uniffi::Record, Clone, Default)]
@@ -580,7 +582,7 @@ impl RustEdge {
         Ok(())
     }
 
-    /// Read readiness, transport generation and observed public IP in one core snapshot.
+    /// Read transport readiness and latency in one core snapshot.
     pub fn get_connection_status(&self) -> ConnectionStatus {
         self.session
             .lock()
@@ -592,6 +594,8 @@ impl RustEdge {
                         connected: status.connected,
                         generation: status.generation,
                         public_ip: status.public_ip,
+                        network_rtt_ms: status.network_rtt_ms,
+                        network_rtt_generation: status.network_rtt_generation,
                     }
                 })
             })
